@@ -100,27 +100,15 @@ public class BasisLocalVirtualSpineDriver
     private const float TorsoYawRelockSpeedDeg = 6f;
 
     /// <summary>
-    /// Enables the virtual overrides on all torso controls and hooks simulation callback.
-    /// Safe to call multiple times.
+    /// Legacy lifecycle hook retained for serialized avatars. Virtual Spine now executes as a
+    /// pre-solve inside <see cref="BasisFullIKConstraintJob"/>, so this driver no longer mutates
+    /// BoneControl state or subscribes to the player simulation event.
     /// </summary>
     public void Initialize()
     {
         if (_initialized) return;
 
         Instance = this;
-        BasisLocalBoneDriver.HeadControl.HasVirtualOverride = true;
-        BasisLocalBoneDriver.NeckControl.HasVirtualOverride = true;
-        BasisLocalBoneDriver.ChestControl.HasVirtualOverride = true;
-        BasisLocalBoneDriver.SpineControl.HasVirtualOverride = true;
-        BasisLocalBoneDriver.HipsControl.HasVirtualOverride = true;
-
-        BasisLocalPlayer.Instance.OnVirtualData += OnSimulate;
-        BasisLocalPlayer.OnPlayersHeightChangedNextFrame += OnHeightChanged;
-
-        _solveState = new NativeArray<SpineSolveState>(1, Allocator.Persistent);
-        _solveState[0] = default;
-
-        _lengthsDirty = true;
         _initialized = true;
     }
 
@@ -133,17 +121,8 @@ public class BasisLocalVirtualSpineDriver
 
         if (Instance == this)
         {
-            BasisLocalBoneDriver.HeadControl.HasVirtualOverride = false;
-            BasisLocalBoneDriver.NeckControl.HasVirtualOverride = false;
-            BasisLocalBoneDriver.ChestControl.HasVirtualOverride = false;
-            BasisLocalBoneDriver.SpineControl.HasVirtualOverride = false;
-            BasisLocalBoneDriver.HipsControl.HasVirtualOverride = false;
             Instance = null;
         }
-        BasisLocalPlayer.Instance.OnVirtualData -= OnSimulate;
-        BasisLocalPlayer.OnPlayersHeightChangedNextFrame -= OnHeightChanged;
-
-        if (_solveState.IsCreated) _solveState.Dispose();
 
         _initialized = false;
     }
@@ -369,6 +348,72 @@ public class BasisLocalVirtualSpineDriver
         public float PrevHeadYawDeg;
         public byte TorsoYawBroken;
         public float TorsoFollow;
+
+        // The graph-integrated pre-solve has no BoneControl state buffer to borrow a
+        // previous hips rotation from, so it keeps the equivalent continuity here.
+        public quaternion HipsRotation;
+        public byte HipsRotationInitialized;
+    }
+
+    /// <summary>Filtered tracker inputs consumed by the FullBodyIK virtual-spine pre-solve.</summary>
+    public struct VirtualHipsInput
+    {
+        public float DeltaTime;
+        public float3 HeadPosition;
+        public float3 NeckPosition;
+        public quaternion HeadRotation;
+        public float3 PlayerUp;
+        public float3 LeftFootPosition;
+        public float3 RightFootPosition;
+        public bool LeftFootTracked;
+        public bool RightFootTracked;
+        public float Scale;
+        public float RestLength;
+        public float StandingHipsY;
+        public float HipsForwardBias;
+        public float YawDeadzoneDeg;
+        public float YawBlendSpeed;
+        public float HipsRotationSpeed;
+        public float CompressionStrength;
+        public float MaxDrop;
+        public bool FreezeHips;
+        public bool IsLocomoting;
+        public float3 TposeHips;
+    }
+
+    /// <summary>
+    /// Computes the only Virtual Spine output consumed by the current FullBody IK path: the hips target.
+    /// Kept here so the legacy driver and the graph pre-solve share the same yaw, counterbalance, and
+    /// compression math while the legacy driver is retired.
+    /// </summary>
+    public static void SolveHips(ref SpineSolveState state, in VirtualHipsInput input, out Vector3 position, out Quaternion rotation)
+    {
+        float dt = math.max(input.DeltaTime, 1e-6f);
+        NormalizeSafeWithFallback(in input.PlayerUp, new float3(0f, 1f, 0f), out float3 worldUp);
+        ExtractYawBurst(in input.HeadRotation, out quaternion headYaw);
+
+        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in headYaw,
+            input.YawDeadzoneDeg, input.YawBlendSpeed, input.IsLocomoting, dt);
+        float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition, dt,
+            input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
+
+        ComputeHipsPosition(in input.NeckPosition, in worldUp, input.RestLength, in torsoYaw,
+            input.HipsForwardBias * input.Scale, in desiredHipsXZ, input.FreezeHips, in input.TposeHips,
+            input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
+
+        quaternion hipsTarget = input.FreezeHips ? quaternion.identity : torsoYaw;
+        if (state.HipsRotationInitialized == 0)
+        {
+            state.HipsRotation = hipsTarget;
+            state.HipsRotationInitialized = 1;
+        }
+        else
+        {
+            SmoothSlerpBurst(in state.HipsRotation, in hipsTarget, input.HipsRotationSpeed, dt, out state.HipsRotation);
+        }
+        ExtractYawBurst(in state.HipsRotation, out quaternion hipsYaw);
+        position = hipsPosition;
+        rotation = hipsYaw;
     }
 
     /// <summary>

@@ -752,6 +752,41 @@ namespace Basis.Scripts.Drivers
                 + outR * spineBendNormalWeights.y
                 + up * spineBendNormalWeights.z).normalized;
 
+            // Virtual Spine now runs inside BasisFullIKConstraintJob, immediately before SolveSpine.
+            // Feed it the same calibrated tracker space used by the rest of the IK graph; do not read
+            // avatar Transforms here, otherwise the previous graph evaluation feeds back into this frame.
+            BasisLocalBoneControl neckControl = BasisLocalBoneDriver.NeckControl;
+            BasisLocalBoneControl hipsControl = BasisLocalBoneDriver.HipsControl;
+            Vector3 neckTpose = neckControl.TposeLocalScaled.position;
+            Vector3 chestTpose = BasisLocalBoneDriver.ChestControl.TposeLocalScaled.position;
+            Vector3 spineTpose = BasisLocalBoneDriver.SpineControl.TposeLocalScaled.position;
+            Vector3 hipsTpose = hipsControl.TposeLocalScaled.position;
+            float virtualSpineLength = Vector3.Distance(neckTpose, chestTpose)
+                + Vector3.Distance(chestTpose, spineTpose)
+                + Vector3.Distance(spineTpose, hipsTpose);
+            Matrix4x4 playerMatrix = BasisLocalPlayer.localToWorldMatrix;
+
+            int virtualSpineFlags = 1;
+            if (BasisLocalVirtualSpineDriver.HipsFreezeToTpose) virtualSpineFlags |= 2;
+            if (locomotionAnimActive) virtualSpineFlags |= 4;
+            if (leftHasTracker) virtualSpineFlags |= 8;
+            if (rightHasTracker) virtualSpineFlags |= 16;
+            data.VirtualSpineFlags = virtualSpineFlags;
+            data.VirtualSpineNeckPosition = neckControl.OutgoingWorldData.position;
+            data.VirtualSpineTposeHips = playerMatrix.MultiplyPoint3x4(hipsTpose);
+            data.VirtualSpineScale = BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
+            data.VirtualSpineLength = Mathf.Max(1e-4f, virtualSpineLength);
+            data.VirtualSpineStandingHipsY = playerMatrix.MultiplyPoint3x4(neckTpose).y - virtualSpineLength;
+            data.VirtualSpineHipsForwardBias = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue;
+            data.VirtualSpineYawDeadzone = (Basis.Scripts.Device_Management.BasisDeviceManagement.IsCurrentModeVR()
+                && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
+                ? 0f : Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
+            data.VirtualSpineYawBlendSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue;
+            data.VirtualSpineHipsRotationSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsRotationSpeed.RawValue;
+            data.VirtualSpineCompressionStrength = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue;
+            data.VirtualSpineMaxDrop = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue
+                * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
+
             // Pull the latest tunable settings into data every frame so slider changes flow into
             // the IK job. Without this the job runs on the boot-time snapshot from Spine().
             ApplyTuningSettings(ref data);

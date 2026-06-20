@@ -264,6 +264,23 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] bool m_SpineIKEnabled;
         [SyncSceneToStream, SerializeField] bool m_HasHipsTracker;
 
+        // Virtual-spine pre-solve inputs. These remain scene-to-stream properties so that
+        // the manual playable graph sees the current tracker/filter state every evaluation.
+        // Bitfield: 1=enabled, 2=freeze hips, 4=locomoting, 8=left foot tracked,
+        // 16=right foot tracked. Packed to keep the animation job under Unity's ABI size cap.
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineFlags;
+        [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpineNeckPosition;
+        [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpineTposeHips;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineScale;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineLength;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineStandingHipsY;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineHipsForwardBias;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineYawDeadzone;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineYawBlendSpeed;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineHipsRotationSpeed;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineCompressionStrength;
+        [SyncSceneToStream, SerializeField] float m_VirtualSpineMaxDrop;
+
         // IK Lock Mode: 0 = LockHips, 1 = LockHead, 2 = LockBoth (see BasisIKLockMode enum)
         [SyncSceneToStream, SerializeField] float m_IKLockMode;
 
@@ -429,6 +446,18 @@ namespace UnityEngine.Animations.Rigging
         public string EnabledPropertySpineIK => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineIKEnabled));
         public string HintWeightBoolPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HintHeadEnabled));
         public string HasHipsTrackerBoolProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HasHipsTracker));
+        public string VirtualSpineFlagsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineFlags));
+        public string VirtualSpineNeckPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineNeckPosition));
+        public string VirtualSpineTposeHipsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineTposeHips));
+        public string VirtualSpineScaleProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineScale));
+        public string VirtualSpineLengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineLength));
+        public string VirtualSpineStandingHipsYProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineStandingHipsY));
+        public string VirtualSpineHipsForwardBiasProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineHipsForwardBias));
+        public string VirtualSpineYawDeadzoneProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineYawDeadzone));
+        public string VirtualSpineYawBlendSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineYawBlendSpeed));
+        public string VirtualSpineHipsRotationSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineHipsRotationSpeed));
+        public string VirtualSpineCompressionStrengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineCompressionStrength));
+        public string VirtualSpineMaxDropProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineMaxDrop));
         public string TargetPositionPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionHead));
         public string TargetRotationPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RotationHead));
         public string PropertyChestPosition => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(ChestPosition));
@@ -503,6 +532,18 @@ namespace UnityEngine.Animations.Rigging
         public bool WeightChest { get => m_HintHeadEnabled; set => m_HintHeadEnabled = value; }
         public bool EnabledSpineIK { get => m_SpineIKEnabled; set => m_SpineIKEnabled = value; }
         public bool HasHipsTracker { get => m_HasHipsTracker; set => m_HasHipsTracker = value; }
+        public float VirtualSpineFlags { get => m_VirtualSpineFlags; set => m_VirtualSpineFlags = value; }
+        public Vector3 VirtualSpineNeckPosition { get => m_VirtualSpineNeckPosition; set => m_VirtualSpineNeckPosition = value; }
+        public Vector3 VirtualSpineTposeHips { get => m_VirtualSpineTposeHips; set => m_VirtualSpineTposeHips = value; }
+        public float VirtualSpineScale { get => m_VirtualSpineScale; set => m_VirtualSpineScale = value; }
+        public float VirtualSpineLength { get => m_VirtualSpineLength; set => m_VirtualSpineLength = value; }
+        public float VirtualSpineStandingHipsY { get => m_VirtualSpineStandingHipsY; set => m_VirtualSpineStandingHipsY = value; }
+        public float VirtualSpineHipsForwardBias { get => m_VirtualSpineHipsForwardBias; set => m_VirtualSpineHipsForwardBias = value; }
+        public float VirtualSpineYawDeadzone { get => m_VirtualSpineYawDeadzone; set => m_VirtualSpineYawDeadzone = value; }
+        public float VirtualSpineYawBlendSpeed { get => m_VirtualSpineYawBlendSpeed; set => m_VirtualSpineYawBlendSpeed = value; }
+        public float VirtualSpineHipsRotationSpeed { get => m_VirtualSpineHipsRotationSpeed; set => m_VirtualSpineHipsRotationSpeed = value; }
+        public float VirtualSpineCompressionStrength { get => m_VirtualSpineCompressionStrength; set => m_VirtualSpineCompressionStrength = value; }
+        public float VirtualSpineMaxDrop { get => m_VirtualSpineMaxDrop; set => m_VirtualSpineMaxDrop = value; }
         public float IKLockMode { get => m_IKLockMode; set => m_IKLockMode = value; }
         public string IKLockModeFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_IKLockMode));
         public float EnableLeftLowerLeg { get => m_HintLeftLowerLegEnabled; set => m_HintLeftLowerLegEnabled = value; }
@@ -671,6 +712,7 @@ namespace UnityEngine.Animations.Rigging
             m_HintLeftLowerLegEnabled = m_HintRightLowerLegEnabled = 1f;
             m_SpineIKEnabled = true;
             m_HasHipsTracker = false;
+            m_VirtualSpineFlags = 1f;
             m_LeftLowerLegEnabled = m_RightLowerLegEnabled = 1f;
             m_IKLockMode = (float)BasisIKLockMode.LockHips;
 
@@ -1100,6 +1142,14 @@ w20, w54;
         public NativeArray<Vector3> legSwivelRaw;
         public NativeArray<Vector3> legSwivelSmooth;
         public NativeArray<int> legSwivelInit;
+        // Stateful Virtual Spine pre-solve. This replaced the pre-BoneDriver
+        // VirtualSpineDriver write path; it is evaluated in the same graph as SolveSpine.
+        public NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState> virtualSpineState;
+        public Vector3Property virtualSpineNeckPosition, virtualSpineTposeHips;
+        public FloatProperty virtualSpineScale, virtualSpineLength, virtualSpineStandingHipsY,
+            virtualSpineHipsForwardBias, virtualSpineYawDeadzone, virtualSpineYawBlendSpeed,
+            virtualSpineHipsRotationSpeed, virtualSpineCompressionStrength, virtualSpineMaxDrop;
+        public FloatProperty virtualSpineFlags;
         public FloatProperty ikLockMode;
         public BoolProperty shoulderSolveEnabled;
         // T-pose baked reference data for shoulder solve
@@ -1129,6 +1179,8 @@ w20, w54;
             targetOffsetRightShoulder = V4ToQuat(offsetRotationRightShoulder.Get(stream));
             targetOffsetLeftHand = V4ToQuat(offsetRotationLeftHand.Get(stream));
             targetOffsetRightHand = V4ToQuat(offsetRotationRightHand.Get(stream));
+
+            SolveVirtualSpinePreSolve(stream);
 
             // 1) Spine: hips + chest/neck/head chain
             SolveSpine(stream);
@@ -1217,6 +1269,44 @@ w20, w54;
             Apply(stream, HandleLeftToe, p19, r19, o19, w19);
             Apply(stream, HandleRightToe, p20, r20, o20, w20);
             Apply(stream, HandleUpperChest, p54, r54, o54, w54);
+        }
+        void SolveVirtualSpinePreSolve(AnimationStream stream)
+        {
+            int flags = (int)virtualSpineFlags.Get(stream);
+            if ((flags & 1) == 0 || hasHipsTracker.Get(stream)
+                || !virtualSpineState.IsCreated)
+            {
+                return;
+            }
+
+            BasisLocalVirtualSpineDriver.SpineSolveState state = virtualSpineState[0];
+            BasisLocalVirtualSpineDriver.VirtualHipsInput input = default;
+            input.DeltaTime = stream.deltaTime;
+            input.HeadPosition = targetPositionHead.Get(stream);
+            input.NeckPosition = virtualSpineNeckPosition.Get(stream);
+            input.HeadRotation = V4ToQuat(targetRotationHead.Get(stream));
+            input.PlayerUp = playerUp.Get(stream);
+            input.LeftFootPosition = targetPositionLeftLowerLeg.Get(stream);
+            input.RightFootPosition = targetPositionRightLowerLeg.Get(stream);
+            input.LeftFootTracked = (flags & 8) != 0;
+            input.RightFootTracked = (flags & 16) != 0;
+            input.Scale = virtualSpineScale.Get(stream);
+            input.RestLength = virtualSpineLength.Get(stream);
+            input.StandingHipsY = virtualSpineStandingHipsY.Get(stream);
+            input.HipsForwardBias = virtualSpineHipsForwardBias.Get(stream);
+            input.YawDeadzoneDeg = virtualSpineYawDeadzone.Get(stream);
+            input.YawBlendSpeed = virtualSpineYawBlendSpeed.Get(stream);
+            input.HipsRotationSpeed = virtualSpineHipsRotationSpeed.Get(stream);
+            input.CompressionStrength = virtualSpineCompressionStrength.Get(stream);
+            input.MaxDrop = virtualSpineMaxDrop.Get(stream);
+            input.FreezeHips = (flags & 2) != 0;
+            input.IsLocomoting = (flags & 4) != 0;
+            input.TposeHips = virtualSpineTposeHips.Get(stream);
+
+            BasisLocalVirtualSpineDriver.SolveHips(ref state, in input, out Vector3 hipsPosition, out Quaternion hipsRotation);
+            virtualSpineState[0] = state;
+            targetPositionHips.Set(stream, hipsPosition);
+            targetRotationHips.Set(stream, new Vector4(hipsRotation.x, hipsRotation.y, hipsRotation.z, hipsRotation.w));
         }
         public void SolveSpine(AnimationStream stream)
         {
@@ -2704,6 +2794,18 @@ w20, w54;
                 enabledSpineIK = BoolProperty.Bind(animator, component, data.EnabledPropertySpineIK),
                 HasChestTracker = BoolProperty.Bind(animator, component, data.HintWeightBoolPropertyHead),
                 hasHipsTracker = BoolProperty.Bind(animator, component, data.HasHipsTrackerBoolProperty),
+                virtualSpineFlags = FloatProperty.Bind(animator, component, data.VirtualSpineFlagsProperty),
+                virtualSpineNeckPosition = Vector3Property.Bind(animator, component, data.VirtualSpineNeckPositionProperty),
+                virtualSpineTposeHips = Vector3Property.Bind(animator, component, data.VirtualSpineTposeHipsProperty),
+                virtualSpineScale = FloatProperty.Bind(animator, component, data.VirtualSpineScaleProperty),
+                virtualSpineLength = FloatProperty.Bind(animator, component, data.VirtualSpineLengthProperty),
+                virtualSpineStandingHipsY = FloatProperty.Bind(animator, component, data.VirtualSpineStandingHipsYProperty),
+                virtualSpineHipsForwardBias = FloatProperty.Bind(animator, component, data.VirtualSpineHipsForwardBiasProperty),
+                virtualSpineYawDeadzone = FloatProperty.Bind(animator, component, data.VirtualSpineYawDeadzoneProperty),
+                virtualSpineYawBlendSpeed = FloatProperty.Bind(animator, component, data.VirtualSpineYawBlendSpeedProperty),
+                virtualSpineHipsRotationSpeed = FloatProperty.Bind(animator, component, data.VirtualSpineHipsRotationSpeedProperty),
+                virtualSpineCompressionStrength = FloatProperty.Bind(animator, component, data.VirtualSpineCompressionStrengthProperty),
+                virtualSpineMaxDrop = FloatProperty.Bind(animator, component, data.VirtualSpineMaxDropProperty),
                 enabledLeftLowerLeg = FloatProperty.Bind(animator, component, data.EnabledPropertyLeftLowerLeg),
                 hintWeightLeftLowerLeg = FloatProperty.Bind(animator, component, data.HintWeightBoolPropertyLeftLowerLeg),
                 enabledRightLowerLeg = FloatProperty.Bind(animator, component, data.EnabledPropertyRightLowerLeg),
@@ -2942,6 +3044,7 @@ w20, w54;
             job.legSwivelRaw = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.legSwivelSmooth = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.legSwivelInit = new NativeArray<int>(2, Allocator.Persistent);
+            job.virtualSpineState = new NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState>(1, Allocator.Persistent);
 
 
 
@@ -2995,6 +3098,7 @@ w20, w54;
             if (job.legSwivelRaw.IsCreated) job.legSwivelRaw.Dispose();
             if (job.legSwivelSmooth.IsCreated) job.legSwivelSmooth.Dispose();
             if (job.legSwivelInit.IsCreated) job.legSwivelInit.Dispose();
+            if (job.virtualSpineState.IsCreated) job.virtualSpineState.Dispose();
 
             job.spineCache.Dispose();
         }
