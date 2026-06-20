@@ -766,15 +766,14 @@ namespace Basis.Scripts.Drivers
                 + Vector3.Distance(spineTpose, hipsTpose);
             Matrix4x4 playerMatrix = BasisLocalPlayer.localToWorldMatrix;
 
-            int virtualSpineFlags = 1;
-            if (BasisLocalVirtualSpineDriver.HipsFreezeToTpose) virtualSpineFlags |= 2;
-            if (locomotionAnimActive) virtualSpineFlags |= 4;
-            if (leftHasTracker) virtualSpineFlags |= 8;
-            if (rightHasTracker) virtualSpineFlags |= 16;
             if (VirtualSpinePreSolveConstraint != null)
             {
                 var preSolve = VirtualSpinePreSolveConstraint.data;
-                preSolve.Flags = virtualSpineFlags;
+                preSolve.Enabled = true;
+                preSolve.FreezeHips = BasisLocalVirtualSpineDriver.HipsFreezeToTpose;
+                preSolve.IsLocomoting = locomotionAnimActive;
+                preSolve.LeftFootTracked = leftHasTracker;
+                preSolve.RightFootTracked = rightHasTracker;
                 preSolve.NeckPosition = playerMatrix.inverse.MultiplyPoint3x4(neckControl.OutgoingWorldData.position);
                 preSolve.TposeHips = hipsTpose;
                 preSolve.PlayerPosition = new Vector3(playerMatrix.m03, playerMatrix.m13, playerMatrix.m23);
@@ -782,13 +781,14 @@ namespace Basis.Scripts.Drivers
                 float yawDeadzone = (Basis.Scripts.Device_Management.BasisDeviceManagement.IsCurrentModeVR()
                 && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
                 ? 0f : Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
-                preSolve.Config0 = new Vector4(Mathf.Max(1e-4f, virtualSpineLength), neckTpose.y - virtualSpineLength,
-                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale,
-                    yawDeadzone);
-                preSolve.Config1 = new Vector4(Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue,
-                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsRotationSpeed.RawValue,
-                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue,
-                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale);
+                preSolve.RestLength = Mathf.Max(1e-4f, virtualSpineLength);
+                preSolve.StandingHipsY = neckTpose.y - virtualSpineLength;
+                preSolve.HipsForwardBias = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
+                preSolve.YawDeadzoneDeg = yawDeadzone;
+                preSolve.YawBlendSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue;
+                preSolve.HipsRotationSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsRotationSpeed.RawValue;
+                preSolve.CompressionStrength = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue;
+                preSolve.MaxDrop = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
                 VirtualSpinePreSolveConstraint.data = preSolve;
             }
 

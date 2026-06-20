@@ -7,36 +7,66 @@ namespace UnityEngine.Animations.Rigging
     public struct BasisVirtualSpinePreSolveData : IAnimationJobData
     {
         [SerializeField] BasisFullBodyIK m_Source;
-        [SyncSceneToStream, SerializeField] float m_Flags;
+        [SyncSceneToStream, SerializeField] bool m_Enabled;
+        [SyncSceneToStream, SerializeField] bool m_FreezeHips;
+        [SyncSceneToStream, SerializeField] bool m_IsLocomoting;
+        [SyncSceneToStream, SerializeField] bool m_LeftFootTracked;
+        [SyncSceneToStream, SerializeField] bool m_RightFootTracked;
         [SyncSceneToStream, SerializeField] Vector3 m_NeckPosition;
         [SyncSceneToStream, SerializeField] Vector3 m_TposeHips;
         [SyncSceneToStream, SerializeField] Vector3 m_PlayerPosition;
         [SyncSceneToStream, SerializeField] Quaternion m_PlayerRotation;
-        [SyncSceneToStream, SerializeField] Vector4 m_Config0;
-        [SyncSceneToStream, SerializeField] Vector4 m_Config1;
+        [SyncSceneToStream, SerializeField] float m_RestLength;
+        [SyncSceneToStream, SerializeField] float m_StandingHipsY;
+        [SyncSceneToStream, SerializeField] float m_HipsForwardBias;
+        [SyncSceneToStream, SerializeField] float m_YawDeadzoneDeg;
+        [SyncSceneToStream, SerializeField] float m_YawBlendSpeed;
+        [SyncSceneToStream, SerializeField] float m_HipsRotationSpeed;
+        [SyncSceneToStream, SerializeField] float m_CompressionStrength;
+        [SyncSceneToStream, SerializeField] float m_MaxDrop;
 
         public BasisFullBodyIK Source { get => m_Source; set => m_Source = value; }
-        public float Flags { get => m_Flags; set => m_Flags = value; }
+        public bool Enabled { get => m_Enabled; set => m_Enabled = value; }
+        public bool FreezeHips { get => m_FreezeHips; set => m_FreezeHips = value; }
+        public bool IsLocomoting { get => m_IsLocomoting; set => m_IsLocomoting = value; }
+        public bool LeftFootTracked { get => m_LeftFootTracked; set => m_LeftFootTracked = value; }
+        public bool RightFootTracked { get => m_RightFootTracked; set => m_RightFootTracked = value; }
         public Vector3 NeckPosition { get => m_NeckPosition; set => m_NeckPosition = value; }
         public Vector3 TposeHips { get => m_TposeHips; set => m_TposeHips = value; }
         public Vector3 PlayerPosition { get => m_PlayerPosition; set => m_PlayerPosition = value; }
         public Quaternion PlayerRotation { get => m_PlayerRotation; set => m_PlayerRotation = value; }
-        public Vector4 Config0 { get => m_Config0; set => m_Config0 = value; }
-        public Vector4 Config1 { get => m_Config1; set => m_Config1 = value; }
+        public float RestLength { get => m_RestLength; set => m_RestLength = value; }
+        public float StandingHipsY { get => m_StandingHipsY; set => m_StandingHipsY = value; }
+        public float HipsForwardBias { get => m_HipsForwardBias; set => m_HipsForwardBias = value; }
+        public float YawDeadzoneDeg { get => m_YawDeadzoneDeg; set => m_YawDeadzoneDeg = value; }
+        public float YawBlendSpeed { get => m_YawBlendSpeed; set => m_YawBlendSpeed = value; }
+        public float HipsRotationSpeed { get => m_HipsRotationSpeed; set => m_HipsRotationSpeed = value; }
+        public float CompressionStrength { get => m_CompressionStrength; set => m_CompressionStrength = value; }
+        public float MaxDrop { get => m_MaxDrop; set => m_MaxDrop = value; }
 
-        public string FlagsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_Flags));
+        public string EnabledProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_Enabled));
+        public string FreezeHipsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_FreezeHips));
+        public string IsLocomotingProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_IsLocomoting));
+        public string LeftFootTrackedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_LeftFootTracked));
+        public string RightFootTrackedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RightFootTracked));
         public string NeckPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_NeckPosition));
         public string TposeHipsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_TposeHips));
         public string PlayerPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_PlayerPosition));
         public string PlayerRotationProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_PlayerRotation));
-        public string Config0Property => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_Config0));
-        public string Config1Property => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_Config1));
+        public string RestLengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RestLength));
+        public string StandingHipsYProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_StandingHipsY));
+        public string HipsForwardBiasProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HipsForwardBias));
+        public string YawDeadzoneDegProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_YawDeadzoneDeg));
+        public string YawBlendSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_YawBlendSpeed));
+        public string HipsRotationSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HipsRotationSpeed));
+        public string CompressionStrengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_CompressionStrength));
+        public string MaxDropProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MaxDrop));
 
         bool IAnimationJobData.IsValid() => m_Source != null;
         void IAnimationJobData.SetDefaultValues()
         {
             m_Source = null;
-            m_Flags = 1f;
+            m_Enabled = true;
             m_PlayerRotation = Quaternion.identity;
         }
     }
@@ -46,10 +76,12 @@ namespace UnityEngine.Animations.Rigging
 
     public struct BasisVirtualSpinePreSolveJob : IWeightedAnimationJob
     {
-        public FloatProperty flags;
+        public BoolProperty enabled, freezeHips, isLocomoting, leftFootTracked, rightFootTracked;
         public BoolProperty hasHipsTracker;
         public Vector3Property neckPosition, tposeHips, playerPosition;
-        public Vector4Property playerRotation, config0, config1;
+        public Vector4Property playerRotation;
+        public FloatProperty restLength, standingHipsY, hipsForwardBias, yawDeadzoneDeg;
+        public FloatProperty yawBlendSpeed, hipsRotationSpeed, compressionStrength, maxDrop;
         public Vector3Property headPosition, leftFootPosition, rightFootPosition, hipsPosition;
         public Vector4Property headRotation, hipsRotation;
         public NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState> state;
@@ -61,15 +93,12 @@ namespace UnityEngine.Animations.Rigging
             if (jobWeight.Get(stream) <= 0f || hasHipsTracker.Get(stream) || !state.IsCreated)
                 return;
 
-            int inputFlags = (int)flags.Get(stream);
-            if ((inputFlags & 1) == 0)
+            if (!enabled.Get(stream))
                 return;
 
             Vector3 origin = playerPosition.Get(stream);
             Quaternion playerRot = ToQuaternion(playerRotation.Get(stream));
             Quaternion invPlayerRot = Quaternion.Inverse(playerRot);
-            Vector4 c0 = config0.Get(stream);
-            Vector4 c1 = config1.Get(stream);
             BasisLocalVirtualSpineDriver.VirtualHipsInput input = default;
             input.DeltaTime = stream.deltaTime;
             input.HeadPosition = invPlayerRot * (headPosition.Get(stream) - origin);
@@ -78,19 +107,19 @@ namespace UnityEngine.Animations.Rigging
             input.PlayerUp = Vector3.up;
             input.LeftFootPosition = invPlayerRot * (leftFootPosition.Get(stream) - origin);
             input.RightFootPosition = invPlayerRot * (rightFootPosition.Get(stream) - origin);
-            input.LeftFootTracked = (inputFlags & 8) != 0;
-            input.RightFootTracked = (inputFlags & 16) != 0;
+            input.LeftFootTracked = leftFootTracked.Get(stream);
+            input.RightFootTracked = rightFootTracked.Get(stream);
             input.Scale = 1f;
-            input.RestLength = c0.x;
-            input.StandingHipsY = c0.y;
-            input.HipsForwardBias = c0.z;
-            input.YawDeadzoneDeg = c0.w;
-            input.YawBlendSpeed = c1.x;
-            input.HipsRotationSpeed = c1.y;
-            input.CompressionStrength = c1.z;
-            input.MaxDrop = c1.w;
-            input.FreezeHips = (inputFlags & 2) != 0;
-            input.IsLocomoting = (inputFlags & 4) != 0;
+            input.RestLength = restLength.Get(stream);
+            input.StandingHipsY = standingHipsY.Get(stream);
+            input.HipsForwardBias = hipsForwardBias.Get(stream);
+            input.YawDeadzoneDeg = yawDeadzoneDeg.Get(stream);
+            input.YawBlendSpeed = yawBlendSpeed.Get(stream);
+            input.HipsRotationSpeed = hipsRotationSpeed.Get(stream);
+            input.CompressionStrength = compressionStrength.Get(stream);
+            input.MaxDrop = maxDrop.Get(stream);
+            input.FreezeHips = freezeHips.Get(stream);
+            input.IsLocomoting = isLocomoting.Get(stream);
             input.TposeHips = tposeHips.Get(stream);
 
             BasisLocalVirtualSpineDriver.SpineSolveState solveState = state[0];
@@ -114,13 +143,23 @@ namespace UnityEngine.Animations.Rigging
             BasisFullBodyData sourceData = source.data;
             var job = new BasisVirtualSpinePreSolveJob
             {
-                flags = FloatProperty.Bind(animator, component, data.FlagsProperty),
+                enabled = BoolProperty.Bind(animator, component, data.EnabledProperty),
+                freezeHips = BoolProperty.Bind(animator, component, data.FreezeHipsProperty),
+                isLocomoting = BoolProperty.Bind(animator, component, data.IsLocomotingProperty),
+                leftFootTracked = BoolProperty.Bind(animator, component, data.LeftFootTrackedProperty),
+                rightFootTracked = BoolProperty.Bind(animator, component, data.RightFootTrackedProperty),
                 neckPosition = Vector3Property.Bind(animator, component, data.NeckPositionProperty),
                 tposeHips = Vector3Property.Bind(animator, component, data.TposeHipsProperty),
                 playerPosition = Vector3Property.Bind(animator, component, data.PlayerPositionProperty),
                 playerRotation = Vector4Property.Bind(animator, component, data.PlayerRotationProperty),
-                config0 = Vector4Property.Bind(animator, component, data.Config0Property),
-                config1 = Vector4Property.Bind(animator, component, data.Config1Property),
+                restLength = FloatProperty.Bind(animator, component, data.RestLengthProperty),
+                standingHipsY = FloatProperty.Bind(animator, component, data.StandingHipsYProperty),
+                hipsForwardBias = FloatProperty.Bind(animator, component, data.HipsForwardBiasProperty),
+                yawDeadzoneDeg = FloatProperty.Bind(animator, component, data.YawDeadzoneDegProperty),
+                yawBlendSpeed = FloatProperty.Bind(animator, component, data.YawBlendSpeedProperty),
+                hipsRotationSpeed = FloatProperty.Bind(animator, component, data.HipsRotationSpeedProperty),
+                compressionStrength = FloatProperty.Bind(animator, component, data.CompressionStrengthProperty),
+                maxDrop = FloatProperty.Bind(animator, component, data.MaxDropProperty),
                 hasHipsTracker = BoolProperty.Bind(animator, source, sourceData.HasHipsTrackerBoolProperty),
                 headPosition = Vector3Property.Bind(animator, source, sourceData.TargetPositionPropertyHead),
                 headRotation = Vector4Property.Bind(animator, source, sourceData.TargetRotationPropertyHead),

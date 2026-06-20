@@ -264,24 +264,6 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] bool m_SpineIKEnabled;
         [SyncSceneToStream, SerializeField] bool m_HasHipsTracker;
 
-        // Virtual-spine pre-solve inputs. These remain scene-to-stream properties so that
-        // the manual playable graph sees the current tracker/filter state every evaluation.
-        // Bitfield: 1=enabled, 2=freeze hips, 4=locomoting, 8=left foot tracked,
-        // 16=right foot tracked. Packed to keep the animation job under Unity's ABI size cap.
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineFlags;
-        [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpineNeckPosition;
-        [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpineTposeHips;
-        [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpinePlayerPosition;
-        [SyncSceneToStream, SerializeField] Quaternion m_VirtualSpinePlayerRotation;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineLength;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineStandingHipsY;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineHipsForwardBias;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineYawDeadzone;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineYawBlendSpeed;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineHipsRotationSpeed;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineCompressionStrength;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineMaxDrop;
-
         // IK Lock Mode: 0 = LockHips, 1 = LockHead, 2 = LockBoth (see BasisIKLockMode enum)
         [SyncSceneToStream, SerializeField] float m_IKLockMode;
 
@@ -447,19 +429,6 @@ namespace UnityEngine.Animations.Rigging
         public string EnabledPropertySpineIK => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineIKEnabled));
         public string HintWeightBoolPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HintHeadEnabled));
         public string HasHipsTrackerBoolProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HasHipsTracker));
-        public string VirtualSpineFlagsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineFlags));
-        public string VirtualSpineNeckPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineNeckPosition));
-        public string VirtualSpineTposeHipsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineTposeHips));
-        public string VirtualSpinePlayerPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpinePlayerPosition));
-        public string VirtualSpinePlayerRotationProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpinePlayerRotation));
-        public string VirtualSpineLengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineLength));
-        public string VirtualSpineStandingHipsYProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineStandingHipsY));
-        public string VirtualSpineHipsForwardBiasProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineHipsForwardBias));
-        public string VirtualSpineYawDeadzoneProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineYawDeadzone));
-        public string VirtualSpineYawBlendSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineYawBlendSpeed));
-        public string VirtualSpineHipsRotationSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineHipsRotationSpeed));
-        public string VirtualSpineCompressionStrengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineCompressionStrength));
-        public string VirtualSpineMaxDropProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineMaxDrop));
         public string TargetPositionPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionHead));
         public string TargetRotationPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RotationHead));
         public string PropertyChestPosition => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(ChestPosition));
@@ -534,19 +503,6 @@ namespace UnityEngine.Animations.Rigging
         public bool WeightChest { get => m_HintHeadEnabled; set => m_HintHeadEnabled = value; }
         public bool EnabledSpineIK { get => m_SpineIKEnabled; set => m_SpineIKEnabled = value; }
         public bool HasHipsTracker { get => m_HasHipsTracker; set => m_HasHipsTracker = value; }
-        public float VirtualSpineFlags { get => m_VirtualSpineFlags; set => m_VirtualSpineFlags = value; }
-        public Vector3 VirtualSpineNeckPosition { get => m_VirtualSpineNeckPosition; set => m_VirtualSpineNeckPosition = value; }
-        public Vector3 VirtualSpineTposeHips { get => m_VirtualSpineTposeHips; set => m_VirtualSpineTposeHips = value; }
-        public Vector3 VirtualSpinePlayerPosition { get => m_VirtualSpinePlayerPosition; set => m_VirtualSpinePlayerPosition = value; }
-        public Quaternion VirtualSpinePlayerRotation { get => m_VirtualSpinePlayerRotation; set => m_VirtualSpinePlayerRotation = value; }
-        public float VirtualSpineLength { get => m_VirtualSpineLength; set => m_VirtualSpineLength = value; }
-        public float VirtualSpineStandingHipsY { get => m_VirtualSpineStandingHipsY; set => m_VirtualSpineStandingHipsY = value; }
-        public float VirtualSpineHipsForwardBias { get => m_VirtualSpineHipsForwardBias; set => m_VirtualSpineHipsForwardBias = value; }
-        public float VirtualSpineYawDeadzone { get => m_VirtualSpineYawDeadzone; set => m_VirtualSpineYawDeadzone = value; }
-        public float VirtualSpineYawBlendSpeed { get => m_VirtualSpineYawBlendSpeed; set => m_VirtualSpineYawBlendSpeed = value; }
-        public float VirtualSpineHipsRotationSpeed { get => m_VirtualSpineHipsRotationSpeed; set => m_VirtualSpineHipsRotationSpeed = value; }
-        public float VirtualSpineCompressionStrength { get => m_VirtualSpineCompressionStrength; set => m_VirtualSpineCompressionStrength = value; }
-        public float VirtualSpineMaxDrop { get => m_VirtualSpineMaxDrop; set => m_VirtualSpineMaxDrop = value; }
         public float IKLockMode { get => m_IKLockMode; set => m_IKLockMode = value; }
         public string IKLockModeFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_IKLockMode));
         public float EnableLeftLowerLeg { get => m_HintLeftLowerLegEnabled; set => m_HintLeftLowerLegEnabled = value; }
@@ -715,7 +671,6 @@ namespace UnityEngine.Animations.Rigging
             m_HintLeftLowerLegEnabled = m_HintRightLowerLegEnabled = 1f;
             m_SpineIKEnabled = true;
             m_HasHipsTracker = false;
-            m_VirtualSpineFlags = 1f;
             m_LeftLowerLegEnabled = m_RightLowerLegEnabled = 1f;
             m_IKLockMode = (float)BasisIKLockMode.LockHips;
 
