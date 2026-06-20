@@ -1,0 +1,483 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &2038202103424474920
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2479763663946485251}
+  - component: {fileID: 2981337531969877036}
+  m_Layer: 0
+  m_Name: Hair (1)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2479763663946485251
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2038202103424474920}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2981337531969877036
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2038202103424474920}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c222ab56bf694d74096e6d709752b25f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: com.gator-dragon-games.jigglephysics::GatorDragonGames.JigglePhysics.JiggleRig
+  jiggleRigData:
+    hasSerializedData: 1
+    serializedVersion: v0.0.2
+    rootBone: {fileID: 0}
+    excludeRoot: 1
+    jiggleTreeInputParameters:
+      advancedToggle: 1
+      collisionToggle: 0
+      angleLimitToggle: 1
+      stiffness:
+        value: 0.925
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      soften: 0.7
+      angleLimit:
+        value: 0.3
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      angleLimitSoften: 0.5
+      rootStretch: 0
+      ignoreRootMotion: 0
+      stretch:
+        value: 0
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      drag:
+        value: 0.3
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      airDrag:
+        value: 0.7
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      gravity:
+        value: 0.4
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      collisionRadius:
+        value: 0.1
+        curveEnabled: 0
+        curve:
+          serializedVersion: 2
+          m_Curve:
+          - serializedVersion: 3
+            time: 0
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          - serializedVersion: 3
+            time: 1
+            value: 1
+            inSlope: 0
+            outSlope: 0
+            tangentMode: 0
+            weightedMode: 0
+            inWeight: 0
+            outWeight: 0
+          m_PreInfinity: 2
+          m_PostInfinity: 2
+          m_RotationOrder: 4
+      blend: 1
+    excludedTransforms: []
+    transformCachedData:
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0
+      lossyScale: 0.9999999
+      restLocalPosition: {x: 0.00000002484174, y: -0.05394319, z: -0.14775178}
+      restLocalRotation: {x: 0.00000003399873, y: -0.1804983, z: 0.9835753, w: -0.00000007051945}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.08615184
+      lossyScale: 1.0000002
+      restLocalPosition: {x: -2.1316282e-14, y: 0.061050735, z: -0.000000029802319}
+      restLocalRotation: {x: -0.0000000041774313, y: 0.9984431, z: -0.055779487, w: -0.00000019477741}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.2973368
+      lossyScale: 0.99999994
+      restLocalPosition: {x: -0.11593953, y: 0.092691995, z: -0.019043388}
+      restLocalRotation: {x: 0.19581221, y: -0.51219064, z: 0.12121172, w: 0.8274213}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.49290913
+      lossyScale: 0.9999998
+      restLocalPosition: {x: 0.000000052154064, y: 0.1385907, z: 0.000000040978193}
+      restLocalRotation: {x: 0.096486226, y: -0.7951769, z: 0.13136306, w: 0.5840615}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.6631821
+      lossyScale: 0.9999998
+      restLocalPosition: {x: 0.000000014901161, y: 0.120662525, z: -0.00000008940697}
+      restLocalRotation: {x: 0.37597695, y: -0.25927308, z: 0.110429995, w: 0.8827367}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.8006602
+      lossyScale: 0.9999993
+      restLocalPosition: {x: -0.000000014901161, y: 0.09742263, z: 0}
+      restLocalRotation: {x: 0.39198205, y: -0.05745695, z: 0.02453751, w: 0.91784894}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.9381385
+      lossyScale: 0.9999993
+      restLocalPosition: {x: -0, y: 0.0974227, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.71407795
+      lossyScale: 1.0000004
+      restLocalPosition: {x: 0.044386923, y: 0.120241165, z: 0.09019943}
+      restLocalRotation: {x: 0.30411273, y: -0.48949203, z: 0.18711631, w: 0.7955504}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.8363762
+      lossyScale: 0.99999976
+      restLocalPosition: {x: -0, y: 0.08666561, z: 0.000000007450581}
+      restLocalRotation: {x: 0.5594386, y: -0.024195926, z: 0.01633989, w: 0.82835746}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.95867413
+      lossyScale: 0.99999976
+      restLocalPosition: {x: -0, y: 0.0866655, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.77536625
+      lossyScale: 0.99999994
+      restLocalPosition: {x: 0.089795895, y: 0.108397365, z: 0.14230603}
+      restLocalRotation: {x: 0.30323195, y: -0.5827128, z: 0.2481801, w: 0.71197104}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.99999934
+      lossyScale: 0.99999994
+      restLocalPosition: {x: -0, y: 0.1591842, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.29733673
+      lossyScale: 1
+      restLocalPosition: {x: 0.11593958, y: 0.09269198, z: -0.01904337}
+      restLocalRotation: {x: 0.19581199, y: 0.51219046, z: -0.12121165, w: 0.8274215}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.4929093
+      lossyScale: 0.99999994
+      restLocalPosition: {x: 0.000000007450581, y: 0.13859084, z: -0.000000040978193}
+      restLocalRotation: {x: 0.096486114, y: 0.79517674, z: -0.13136268, w: 0.58406186}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.6631823
+      lossyScale: 0.99999994
+      restLocalPosition: {x: -0.00000009313226, y: 0.120662585, z: -0.0000000018626451}
+      restLocalRotation: {x: 0.37597728, y: 0.25927365, z: -0.110430285, w: 0.8827363}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.80065995
+      lossyScale: 1
+      restLocalPosition: {x: -0, y: 0.09742224, z: 0.000000014901161}
+      restLocalRotation: {x: 0.39198226, y: 0.05745685, z: -0.024537386, w: 0.9178489}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.9381382
+      lossyScale: 1
+      restLocalPosition: {x: -0, y: 0.097422585, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.714078
+      lossyScale: 1.0000002
+      restLocalPosition: {x: -0.04438682, y: 0.12024112, z: 0.09019945}
+      restLocalRotation: {x: 0.304113, y: 0.48949224, z: -0.18711679, w: 0.7955501}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.83637583
+      lossyScale: 1.0000001
+      restLocalPosition: {x: 0.000000007450581, y: 0.08666533, z: 0.000000029802322}
+      restLocalRotation: {x: 0.5594389, y: 0.024195185, z: -0.016341155, w: 0.8283572}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.95867383
+      lossyScale: 1.0000001
+      restLocalPosition: {x: -0, y: 0.0866654, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.77536666
+      lossyScale: 1.0000001
+      restLocalPosition: {x: -0.08979574, y: 0.1083975, z: 0.14230627}
+      restLocalRotation: {x: 0.3032321, y: 0.58271325, z: -0.24818027, w: 0.71197057}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 1
+      lossyScale: 1.0000001
+      restLocalPosition: {x: -0, y: 0.15918425, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.36765274
+      lossyScale: 0.9999999
+      restLocalPosition: {x: -0.1591155, y: -0.034266636, z: -0.11533251}
+      restLocalRotation: {x: 0.2385364, y: -0.6895698, z: 0.26009524, w: 0.63241166}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.52705514
+      lossyScale: 1.0000002
+      restLocalPosition: {x: 0.000000018626451, y: 0.11295914, z: -0.00000009313226}
+      restLocalRotation: {x: 0.023371145, y: -0.80488265, z: 0.031769298, w: 0.59212196}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.70655537
+      lossyScale: 1.0000002
+      restLocalPosition: {x: 0.000000059604645, y: 0.12720144, z: 0}
+      restLocalRotation: {x: 0.17849568, y: -0.33400366, z: 0.064571224, w: 0.92326134}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.80854
+      lossyScale: 1.0000002
+      restLocalPosition: {x: 0.000000011175871, y: 0.07227044, z: -0.00000010058284}
+      restLocalRotation: {x: 0.35757542, y: -0.06013844, z: 0.02308327, w: 0.93166}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.91052437
+      lossyScale: 1.0000002
+      restLocalPosition: {x: -0, y: 0.0722704, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.36765283
+      lossyScale: 0.99999994
+      restLocalPosition: {x: 0.1591156, y: -0.034266632, z: -0.11533243}
+      restLocalRotation: {x: 0.23853667, y: 0.68956923, z: -0.2600956, w: 0.6324119}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.5270555
+      lossyScale: 0.9999997
+      restLocalPosition: {x: -0.000000009313226, y: 0.112959325, z: -0.000000022351742}
+      restLocalRotation: {x: 0.023370534, y: 0.8048819, z: -0.031769745, w: 0.59212303}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.70655555
+      lossyScale: 1.0000001
+      restLocalPosition: {x: 0.000000014901161, y: 0.12720121, z: 0.000000067055225}
+      restLocalRotation: {x: 0.17849664, y: 0.33400345, z: -0.06457203, w: 0.9232611}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.8085397
+      lossyScale: 1.0000005
+      restLocalPosition: {x: 0.0000000037252903, y: 0.07227018, z: -0.000000018626451}
+      restLocalRotation: {x: 0.35757282, y: 0.06014115, z: -0.023083724, w: 0.93166083}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.9105239
+      lossyScale: 1.0000005
+      restLocalPosition: {x: -0, y: 0.072270215, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.25072062
+      lossyScale: 1.0000002
+      restLocalPosition: {x: -0.049183723, y: 0.10572235, z: 0.0020084244}
+      restLocalRotation: {x: 0.19357648, y: -0.3619111, z: 0.07710257, w: 0.9086274}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.4607055
+      lossyScale: 1.0000002
+      restLocalPosition: {x: -0.00000024586916, y: 0.14880392, z: -0.0000002644956}
+      restLocalRotation: {x: -0.078465685, y: 0.9026403, z: -0.18643181, w: -0.37990373}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.6026347
+      lossyScale: 0.9999999
+      restLocalPosition: {x: -0.000000007450581, y: 0.10057697, z: -0.00000007264316}
+      restLocalRotation: {x: 0.3701908, y: -0.06156708, z: 0.024597384, w: 0.92658687}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.7197465
+      lossyScale: 1.0000006
+      restLocalPosition: {x: 0.000000014901161, y: 0.08299017, z: 0.000000014901161}
+      restLocalRotation: {x: 0.29230297, y: -0.30562285, z: 0.0991792, w: 0.9007315}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.83685845
+      lossyScale: 1.0000006
+      restLocalPosition: {x: -0, y: 0.08299037, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.4662141
+      lossyScale: 1.0000007
+      restLocalPosition: {x: 0.03836094, y: 0.14697382, z: -0.015707754}
+      restLocalRotation: {x: -0.06299004, y: 0.9136872, z: -0.15547153, w: -0.37018448}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.67895323
+      lossyScale: 1.0000007
+      restLocalPosition: {x: -0, y: 0.15075573, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.25072092
+      lossyScale: 1.0000002
+      restLocalPosition: {x: 0.049183734, y: 0.105722465, z: 0.0020083773}
+      restLocalRotation: {x: 0.19357651, y: 0.3619108, z: -0.07710246, w: 0.9086275}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.4607054
+      lossyScale: 1.0000002
+      restLocalPosition: {x: 0.00000008195639, y: 0.14880379, z: -0.000000048428774}
+      restLocalRotation: {x: 0.078465745, y: 0.9026403, z: -0.186432, w: 0.3799036}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.6026348
+      lossyScale: 1.0000001
+      restLocalPosition: {x: -0.000000026077032, y: 0.100576974, z: -0.000000060070306}
+      restLocalRotation: {x: 0.37019116, y: 0.061567303, z: -0.024596425, w: 0.92658675}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.7197467
+      lossyScale: 1
+      restLocalPosition: {x: -0.000000014901161, y: 0.08299034, z: 0.000000029802322}
+      restLocalRotation: {x: 0.29230306, y: 0.30562124, z: -0.09918059, w: 0.9007318}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.83685875
+      lossyScale: 1
+      restLocalPosition: {x: -0, y: 0.08299035, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.46621418
+      lossyScale: 1.0000006
+      restLocalPosition: {x: -0.038361084, y: 0.14697367, z: -0.015707668}
+      restLocalRotation: {x: 0.06299006, y: 0.91368717, z: -0.15547162, w: 0.3701846}
+    - bone: {fileID: 0}
+      normalizedDistanceFromRoot: 0.678953
+      lossyScale: 1.0000006
+      restLocalPosition: {x: -0, y: 0.15075551, z: 0}
+      restLocalRotation: {x: 0, y: -0, z: -0, w: 1}
+    jiggleColliders: []
+  animatedParameters: 0
