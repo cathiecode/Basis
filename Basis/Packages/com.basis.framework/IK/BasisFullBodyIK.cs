@@ -271,7 +271,8 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] float m_VirtualSpineFlags;
         [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpineNeckPosition;
         [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpineTposeHips;
-        [SyncSceneToStream, SerializeField] float m_VirtualSpineScale;
+        [SyncSceneToStream, SerializeField] Vector3 m_VirtualSpinePlayerPosition;
+        [SyncSceneToStream, SerializeField] Quaternion m_VirtualSpinePlayerRotation;
         [SyncSceneToStream, SerializeField] float m_VirtualSpineLength;
         [SyncSceneToStream, SerializeField] float m_VirtualSpineStandingHipsY;
         [SyncSceneToStream, SerializeField] float m_VirtualSpineHipsForwardBias;
@@ -449,7 +450,8 @@ namespace UnityEngine.Animations.Rigging
         public string VirtualSpineFlagsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineFlags));
         public string VirtualSpineNeckPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineNeckPosition));
         public string VirtualSpineTposeHipsProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineTposeHips));
-        public string VirtualSpineScaleProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineScale));
+        public string VirtualSpinePlayerPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpinePlayerPosition));
+        public string VirtualSpinePlayerRotationProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpinePlayerRotation));
         public string VirtualSpineLengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineLength));
         public string VirtualSpineStandingHipsYProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineStandingHipsY));
         public string VirtualSpineHipsForwardBiasProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineHipsForwardBias));
@@ -535,7 +537,8 @@ namespace UnityEngine.Animations.Rigging
         public float VirtualSpineFlags { get => m_VirtualSpineFlags; set => m_VirtualSpineFlags = value; }
         public Vector3 VirtualSpineNeckPosition { get => m_VirtualSpineNeckPosition; set => m_VirtualSpineNeckPosition = value; }
         public Vector3 VirtualSpineTposeHips { get => m_VirtualSpineTposeHips; set => m_VirtualSpineTposeHips = value; }
-        public float VirtualSpineScale { get => m_VirtualSpineScale; set => m_VirtualSpineScale = value; }
+        public Vector3 VirtualSpinePlayerPosition { get => m_VirtualSpinePlayerPosition; set => m_VirtualSpinePlayerPosition = value; }
+        public Quaternion VirtualSpinePlayerRotation { get => m_VirtualSpinePlayerRotation; set => m_VirtualSpinePlayerRotation = value; }
         public float VirtualSpineLength { get => m_VirtualSpineLength; set => m_VirtualSpineLength = value; }
         public float VirtualSpineStandingHipsY { get => m_VirtualSpineStandingHipsY; set => m_VirtualSpineStandingHipsY = value; }
         public float VirtualSpineHipsForwardBias { get => m_VirtualSpineHipsForwardBias; set => m_VirtualSpineHipsForwardBias = value; }
@@ -1145,8 +1148,9 @@ w20, w54;
         // Stateful Virtual Spine pre-solve. This replaced the pre-BoneDriver
         // VirtualSpineDriver write path; it is evaluated in the same graph as SolveSpine.
         public NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState> virtualSpineState;
-        public Vector3Property virtualSpineNeckPosition, virtualSpineTposeHips;
-        public FloatProperty virtualSpineScale, virtualSpineLength, virtualSpineStandingHipsY,
+        public Vector3Property virtualSpineNeckPosition, virtualSpineTposeHips, virtualSpinePlayerPosition;
+        public Vector4Property virtualSpinePlayerRotation;
+        public FloatProperty virtualSpineLength, virtualSpineStandingHipsY,
             virtualSpineHipsForwardBias, virtualSpineYawDeadzone, virtualSpineYawBlendSpeed,
             virtualSpineHipsRotationSpeed, virtualSpineCompressionStrength, virtualSpineMaxDrop;
         public FloatProperty virtualSpineFlags;
@@ -1281,16 +1285,19 @@ w20, w54;
 
             BasisLocalVirtualSpineDriver.SpineSolveState state = virtualSpineState[0];
             BasisLocalVirtualSpineDriver.VirtualHipsInput input = default;
+            Vector3 playerPosition = virtualSpinePlayerPosition.Get(stream);
+            Quaternion playerRotation = V4ToQuat(virtualSpinePlayerRotation.Get(stream));
+            Quaternion inversePlayerRotation = Quaternion.Inverse(playerRotation);
             input.DeltaTime = stream.deltaTime;
-            input.HeadPosition = targetPositionHead.Get(stream);
+            input.HeadPosition = inversePlayerRotation * (targetPositionHead.Get(stream) - playerPosition);
             input.NeckPosition = virtualSpineNeckPosition.Get(stream);
-            input.HeadRotation = V4ToQuat(targetRotationHead.Get(stream));
-            input.PlayerUp = playerUp.Get(stream);
-            input.LeftFootPosition = targetPositionLeftLowerLeg.Get(stream);
-            input.RightFootPosition = targetPositionRightLowerLeg.Get(stream);
+            input.HeadRotation = inversePlayerRotation * V4ToQuat(targetRotationHead.Get(stream));
+            input.PlayerUp = Vector3.up;
+            input.LeftFootPosition = inversePlayerRotation * (targetPositionLeftLowerLeg.Get(stream) - playerPosition);
+            input.RightFootPosition = inversePlayerRotation * (targetPositionRightLowerLeg.Get(stream) - playerPosition);
             input.LeftFootTracked = (flags & 8) != 0;
             input.RightFootTracked = (flags & 16) != 0;
-            input.Scale = virtualSpineScale.Get(stream);
+            input.Scale = 1f;
             input.RestLength = virtualSpineLength.Get(stream);
             input.StandingHipsY = virtualSpineStandingHipsY.Get(stream);
             input.HipsForwardBias = virtualSpineHipsForwardBias.Get(stream);
@@ -1305,8 +1312,10 @@ w20, w54;
 
             BasisLocalVirtualSpineDriver.SolveHips(ref state, in input, out Vector3 hipsPosition, out Quaternion hipsRotation);
             virtualSpineState[0] = state;
-            targetPositionHips.Set(stream, hipsPosition);
-            targetRotationHips.Set(stream, new Vector4(hipsRotation.x, hipsRotation.y, hipsRotation.z, hipsRotation.w));
+            Vector3 hipsWorldPosition = playerPosition + playerRotation * hipsPosition;
+            Quaternion hipsWorldRotation = playerRotation * hipsRotation;
+            targetPositionHips.Set(stream, hipsWorldPosition);
+            targetRotationHips.Set(stream, new Vector4(hipsWorldRotation.x, hipsWorldRotation.y, hipsWorldRotation.z, hipsWorldRotation.w));
         }
         public void SolveSpine(AnimationStream stream)
         {
@@ -2797,7 +2806,8 @@ w20, w54;
                 virtualSpineFlags = FloatProperty.Bind(animator, component, data.VirtualSpineFlagsProperty),
                 virtualSpineNeckPosition = Vector3Property.Bind(animator, component, data.VirtualSpineNeckPositionProperty),
                 virtualSpineTposeHips = Vector3Property.Bind(animator, component, data.VirtualSpineTposeHipsProperty),
-                virtualSpineScale = FloatProperty.Bind(animator, component, data.VirtualSpineScaleProperty),
+                virtualSpinePlayerPosition = Vector3Property.Bind(animator, component, data.VirtualSpinePlayerPositionProperty),
+                virtualSpinePlayerRotation = Vector4Property.Bind(animator, component, data.VirtualSpinePlayerRotationProperty),
                 virtualSpineLength = FloatProperty.Bind(animator, component, data.VirtualSpineLengthProperty),
                 virtualSpineStandingHipsY = FloatProperty.Bind(animator, component, data.VirtualSpineStandingHipsYProperty),
                 virtualSpineHipsForwardBias = FloatProperty.Bind(animator, component, data.VirtualSpineHipsForwardBiasProperty),

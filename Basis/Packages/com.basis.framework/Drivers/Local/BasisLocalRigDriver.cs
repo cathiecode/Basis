@@ -772,12 +772,14 @@ namespace Basis.Scripts.Drivers
             if (leftHasTracker) virtualSpineFlags |= 8;
             if (rightHasTracker) virtualSpineFlags |= 16;
             data.VirtualSpineFlags = virtualSpineFlags;
-            data.VirtualSpineNeckPosition = neckControl.OutgoingWorldData.position;
-            data.VirtualSpineTposeHips = playerMatrix.MultiplyPoint3x4(hipsTpose);
-            data.VirtualSpineScale = BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
+            data.VirtualSpineNeckPosition = playerMatrix.inverse.MultiplyPoint3x4(neckControl.OutgoingWorldData.position);
+            data.VirtualSpineTposeHips = hipsTpose;
+            data.VirtualSpinePlayerPosition = new Vector3(playerMatrix.m03, playerMatrix.m13, playerMatrix.m23);
+            data.VirtualSpinePlayerRotation = playerMatrix.rotation;
             data.VirtualSpineLength = Mathf.Max(1e-4f, virtualSpineLength);
-            data.VirtualSpineStandingHipsY = playerMatrix.MultiplyPoint3x4(neckTpose).y - virtualSpineLength;
-            data.VirtualSpineHipsForwardBias = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue;
+            data.VirtualSpineStandingHipsY = neckTpose.y - virtualSpineLength;
+            data.VirtualSpineHipsForwardBias = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue
+                * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
             data.VirtualSpineYawDeadzone = (Basis.Scripts.Device_Management.BasisDeviceManagement.IsCurrentModeVR()
                 && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
                 ? 0f : Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
