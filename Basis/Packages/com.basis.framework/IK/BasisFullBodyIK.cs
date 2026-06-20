@@ -1145,15 +1145,6 @@ w20, w54;
         public NativeArray<Vector3> legSwivelRaw;
         public NativeArray<Vector3> legSwivelSmooth;
         public NativeArray<int> legSwivelInit;
-        // Stateful Virtual Spine pre-solve. This replaced the pre-BoneDriver
-        // VirtualSpineDriver write path; it is evaluated in the same graph as SolveSpine.
-        public NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState> virtualSpineState;
-        public Vector3Property virtualSpineNeckPosition, virtualSpineTposeHips, virtualSpinePlayerPosition;
-        public Vector4Property virtualSpinePlayerRotation;
-        public FloatProperty virtualSpineLength, virtualSpineStandingHipsY,
-            virtualSpineHipsForwardBias, virtualSpineYawDeadzone, virtualSpineYawBlendSpeed,
-            virtualSpineHipsRotationSpeed, virtualSpineCompressionStrength, virtualSpineMaxDrop;
-        public FloatProperty virtualSpineFlags;
         public FloatProperty ikLockMode;
         public BoolProperty shoulderSolveEnabled;
         // T-pose baked reference data for shoulder solve
@@ -1183,8 +1174,6 @@ w20, w54;
             targetOffsetRightShoulder = V4ToQuat(offsetRotationRightShoulder.Get(stream));
             targetOffsetLeftHand = V4ToQuat(offsetRotationLeftHand.Get(stream));
             targetOffsetRightHand = V4ToQuat(offsetRotationRightHand.Get(stream));
-
-            SolveVirtualSpinePreSolve(stream);
 
             // 1) Spine: hips + chest/neck/head chain
             SolveSpine(stream);
@@ -1273,49 +1262,6 @@ w20, w54;
             Apply(stream, HandleLeftToe, p19, r19, o19, w19);
             Apply(stream, HandleRightToe, p20, r20, o20, w20);
             Apply(stream, HandleUpperChest, p54, r54, o54, w54);
-        }
-        void SolveVirtualSpinePreSolve(AnimationStream stream)
-        {
-            int flags = (int)virtualSpineFlags.Get(stream);
-            if ((flags & 1) == 0 || hasHipsTracker.Get(stream)
-                || !virtualSpineState.IsCreated)
-            {
-                return;
-            }
-
-            BasisLocalVirtualSpineDriver.SpineSolveState state = virtualSpineState[0];
-            BasisLocalVirtualSpineDriver.VirtualHipsInput input = default;
-            Vector3 playerPosition = virtualSpinePlayerPosition.Get(stream);
-            Quaternion playerRotation = V4ToQuat(virtualSpinePlayerRotation.Get(stream));
-            Quaternion inversePlayerRotation = Quaternion.Inverse(playerRotation);
-            input.DeltaTime = stream.deltaTime;
-            input.HeadPosition = inversePlayerRotation * (targetPositionHead.Get(stream) - playerPosition);
-            input.NeckPosition = virtualSpineNeckPosition.Get(stream);
-            input.HeadRotation = inversePlayerRotation * V4ToQuat(targetRotationHead.Get(stream));
-            input.PlayerUp = Vector3.up;
-            input.LeftFootPosition = inversePlayerRotation * (targetPositionLeftLowerLeg.Get(stream) - playerPosition);
-            input.RightFootPosition = inversePlayerRotation * (targetPositionRightLowerLeg.Get(stream) - playerPosition);
-            input.LeftFootTracked = (flags & 8) != 0;
-            input.RightFootTracked = (flags & 16) != 0;
-            input.Scale = 1f;
-            input.RestLength = virtualSpineLength.Get(stream);
-            input.StandingHipsY = virtualSpineStandingHipsY.Get(stream);
-            input.HipsForwardBias = virtualSpineHipsForwardBias.Get(stream);
-            input.YawDeadzoneDeg = virtualSpineYawDeadzone.Get(stream);
-            input.YawBlendSpeed = virtualSpineYawBlendSpeed.Get(stream);
-            input.HipsRotationSpeed = virtualSpineHipsRotationSpeed.Get(stream);
-            input.CompressionStrength = virtualSpineCompressionStrength.Get(stream);
-            input.MaxDrop = virtualSpineMaxDrop.Get(stream);
-            input.FreezeHips = (flags & 2) != 0;
-            input.IsLocomoting = (flags & 4) != 0;
-            input.TposeHips = virtualSpineTposeHips.Get(stream);
-
-            BasisLocalVirtualSpineDriver.SolveHips(ref state, in input, out Vector3 hipsPosition, out Quaternion hipsRotation);
-            virtualSpineState[0] = state;
-            Vector3 hipsWorldPosition = playerPosition + playerRotation * hipsPosition;
-            Quaternion hipsWorldRotation = playerRotation * hipsRotation;
-            targetPositionHips.Set(stream, hipsWorldPosition);
-            targetRotationHips.Set(stream, new Vector4(hipsWorldRotation.x, hipsWorldRotation.y, hipsWorldRotation.z, hipsWorldRotation.w));
         }
         public void SolveSpine(AnimationStream stream)
         {
@@ -2803,19 +2749,6 @@ w20, w54;
                 enabledSpineIK = BoolProperty.Bind(animator, component, data.EnabledPropertySpineIK),
                 HasChestTracker = BoolProperty.Bind(animator, component, data.HintWeightBoolPropertyHead),
                 hasHipsTracker = BoolProperty.Bind(animator, component, data.HasHipsTrackerBoolProperty),
-                virtualSpineFlags = FloatProperty.Bind(animator, component, data.VirtualSpineFlagsProperty),
-                virtualSpineNeckPosition = Vector3Property.Bind(animator, component, data.VirtualSpineNeckPositionProperty),
-                virtualSpineTposeHips = Vector3Property.Bind(animator, component, data.VirtualSpineTposeHipsProperty),
-                virtualSpinePlayerPosition = Vector3Property.Bind(animator, component, data.VirtualSpinePlayerPositionProperty),
-                virtualSpinePlayerRotation = Vector4Property.Bind(animator, component, data.VirtualSpinePlayerRotationProperty),
-                virtualSpineLength = FloatProperty.Bind(animator, component, data.VirtualSpineLengthProperty),
-                virtualSpineStandingHipsY = FloatProperty.Bind(animator, component, data.VirtualSpineStandingHipsYProperty),
-                virtualSpineHipsForwardBias = FloatProperty.Bind(animator, component, data.VirtualSpineHipsForwardBiasProperty),
-                virtualSpineYawDeadzone = FloatProperty.Bind(animator, component, data.VirtualSpineYawDeadzoneProperty),
-                virtualSpineYawBlendSpeed = FloatProperty.Bind(animator, component, data.VirtualSpineYawBlendSpeedProperty),
-                virtualSpineHipsRotationSpeed = FloatProperty.Bind(animator, component, data.VirtualSpineHipsRotationSpeedProperty),
-                virtualSpineCompressionStrength = FloatProperty.Bind(animator, component, data.VirtualSpineCompressionStrengthProperty),
-                virtualSpineMaxDrop = FloatProperty.Bind(animator, component, data.VirtualSpineMaxDropProperty),
                 enabledLeftLowerLeg = FloatProperty.Bind(animator, component, data.EnabledPropertyLeftLowerLeg),
                 hintWeightLeftLowerLeg = FloatProperty.Bind(animator, component, data.HintWeightBoolPropertyLeftLowerLeg),
                 enabledRightLowerLeg = FloatProperty.Bind(animator, component, data.EnabledPropertyRightLowerLeg),
@@ -3054,7 +2987,6 @@ w20, w54;
             job.legSwivelRaw = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.legSwivelSmooth = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.legSwivelInit = new NativeArray<int>(2, Allocator.Persistent);
-            job.virtualSpineState = new NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState>(1, Allocator.Persistent);
 
 
 
@@ -3108,7 +3040,6 @@ w20, w54;
             if (job.legSwivelRaw.IsCreated) job.legSwivelRaw.Dispose();
             if (job.legSwivelSmooth.IsCreated) job.legSwivelSmooth.Dispose();
             if (job.legSwivelInit.IsCreated) job.legSwivelInit.Dispose();
-            if (job.virtualSpineState.IsCreated) job.virtualSpineState.Dispose();
 
             job.spineCache.Dispose();
         }

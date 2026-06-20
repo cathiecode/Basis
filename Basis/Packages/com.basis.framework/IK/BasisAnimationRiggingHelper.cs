@@ -28,7 +28,8 @@ public static class BasisAnimationRiggingHelper
     /// root/mid/tip must be length >= 3: [Head, LeftLowerLeg, RightLowerLeg]
     /// TargetRole/BendRole/UseBoneRole correspond index-by-index to those same chains.
     /// </summary>
-    public static void CreateBasisFullBodyRIG(BasisLocalPlayer player, GameObject parent, BasisTransformMapping Mapping, out BasisFullBodyIK BasisFullIKConstraint)
+    public static void CreateBasisFullBodyRIG(BasisLocalPlayer player, GameObject parent, BasisTransformMapping Mapping,
+        out BasisFullBodyIK BasisFullIKConstraint, out BasisVirtualSpinePreSolve VirtualSpinePreSolve)
     {
         // Holder + component
         var go = CreateAndSetParent(parent.transform, $"Full IK ({parent.name})");
@@ -219,6 +220,16 @@ public static class BasisAnimationRiggingHelper
         data.ShoulderProtractionFactor = 0.3f;
 
         BasisFullIKConstraint.data = data;
+
+        // A separate constraint keeps Virtual Spine's state and property bindings out of the already
+        // near-limit FullBody job. Put it immediately before Full IK in hierarchy order so its stream
+        // writes to PositionHips/RotationHips are consumed by SolveSpine in the same evaluation.
+        var preSolveGo = CreateAndSetParent(parent.transform, $"Virtual Spine Pre-Solve ({parent.name})");
+        preSolveGo.transform.SetSiblingIndex(go.transform.GetSiblingIndex());
+        VirtualSpinePreSolve = BasisHelpers.GetOrAddComponent<BasisVirtualSpinePreSolve>(preSolveGo);
+        var preSolveData = VirtualSpinePreSolve.data;
+        preSolveData.Source = BasisFullIKConstraint;
+        VirtualSpinePreSolve.data = preSolveData;
 
         GeneratedRequiredTransforms(player, Mapping.head);
 

@@ -52,6 +52,7 @@ namespace Basis.Scripts.Drivers
         public Rig MainRig;
         public RigLayer RigLayer;
         public BasisFullBodyIK BasisFullIKConstraint;
+        public BasisVirtualSpinePreSolve VirtualSpinePreSolveConstraint;
 
         private BasisLocalPlayer localPlayer;
         private BasisTransformMapping basisTransformMapping;
@@ -752,9 +753,8 @@ namespace Basis.Scripts.Drivers
                 + outR * spineBendNormalWeights.y
                 + up * spineBendNormalWeights.z).normalized;
 
-            // Virtual Spine now runs inside BasisFullIKConstraintJob, immediately before SolveSpine.
-            // Feed it the same calibrated tracker space used by the rest of the IK graph; do not read
-            // avatar Transforms here, otherwise the previous graph evaluation feeds back into this frame.
+            // Virtual Spine is its own constraint immediately before Full IK. Feed it player-local
+            // tracker space; sampling avatar Transforms here would feed the prior graph result back.
             BasisLocalBoneControl neckControl = BasisLocalBoneDriver.NeckControl;
             BasisLocalBoneControl hipsControl = BasisLocalBoneDriver.HipsControl;
             Vector3 neckTpose = neckControl.TposeLocalScaled.position;
@@ -771,23 +771,26 @@ namespace Basis.Scripts.Drivers
             if (locomotionAnimActive) virtualSpineFlags |= 4;
             if (leftHasTracker) virtualSpineFlags |= 8;
             if (rightHasTracker) virtualSpineFlags |= 16;
-            data.VirtualSpineFlags = virtualSpineFlags;
-            data.VirtualSpineNeckPosition = playerMatrix.inverse.MultiplyPoint3x4(neckControl.OutgoingWorldData.position);
-            data.VirtualSpineTposeHips = hipsTpose;
-            data.VirtualSpinePlayerPosition = new Vector3(playerMatrix.m03, playerMatrix.m13, playerMatrix.m23);
-            data.VirtualSpinePlayerRotation = playerMatrix.rotation;
-            data.VirtualSpineLength = Mathf.Max(1e-4f, virtualSpineLength);
-            data.VirtualSpineStandingHipsY = neckTpose.y - virtualSpineLength;
-            data.VirtualSpineHipsForwardBias = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue
-                * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
-            data.VirtualSpineYawDeadzone = (Basis.Scripts.Device_Management.BasisDeviceManagement.IsCurrentModeVR()
+            if (VirtualSpinePreSolveConstraint != null)
+            {
+                var preSolve = VirtualSpinePreSolveConstraint.data;
+                preSolve.Flags = virtualSpineFlags;
+                preSolve.NeckPosition = playerMatrix.inverse.MultiplyPoint3x4(neckControl.OutgoingWorldData.position);
+                preSolve.TposeHips = hipsTpose;
+                preSolve.PlayerPosition = new Vector3(playerMatrix.m03, playerMatrix.m13, playerMatrix.m23);
+                preSolve.PlayerRotation = playerMatrix.rotation;
+                float yawDeadzone = (Basis.Scripts.Device_Management.BasisDeviceManagement.IsCurrentModeVR()
                 && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
                 ? 0f : Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
-            data.VirtualSpineYawBlendSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue;
-            data.VirtualSpineHipsRotationSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsRotationSpeed.RawValue;
-            data.VirtualSpineCompressionStrength = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue;
-            data.VirtualSpineMaxDrop = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue
-                * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
+                preSolve.Config0 = new Vector4(Mathf.Max(1e-4f, virtualSpineLength), neckTpose.y - virtualSpineLength,
+                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale,
+                    yawDeadzone);
+                preSolve.Config1 = new Vector4(Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue,
+                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsRotationSpeed.RawValue,
+                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue,
+                    Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale);
+                VirtualSpinePreSolveConstraint.data = preSolve;
+            }
 
             // Pull the latest tunable settings into data every frame so slider changes flow into
             // the IK job. Without this the job runs on the boot-time snapshot from Spine().
@@ -915,7 +918,8 @@ namespace Basis.Scripts.Drivers
                 return;
             }
 
-            BasisAnimationRiggingHelper.CreateBasisFullBodyRIG(localPlayer,  mainRig, basisTransformMapping, out BasisFullIKConstraint);
+            BasisAnimationRiggingHelper.CreateBasisFullBodyRIG(localPlayer, mainRig, basisTransformMapping,
+                out BasisFullIKConstraint, out VirtualSpinePreSolveConstraint);
 
             BasisLocalPlayer.OnPlayersHeightChangedNextFrame += OnPlayersHeightChangedNextFrame;
             OnPlayersHeightChangedNextFrame( HeightModeChange.OnTpose);
