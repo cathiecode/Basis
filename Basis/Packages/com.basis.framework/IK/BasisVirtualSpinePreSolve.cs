@@ -86,6 +86,7 @@ namespace UnityEngine.Animations.Rigging
         public Vector4Property headRotation, hipsRotation;
         public NativeArray<BasisLocalVirtualSpineDriver.SpineSolveState> state;
         public FloatProperty jobWeight { get; set; }
+        public ReadOnlyTransformHandle animatedHips, animatedHead;
 
         public void ProcessRootMotion(AnimationStream stream) { }
         public void ProcessAnimation(AnimationStream stream)
@@ -104,6 +105,9 @@ namespace UnityEngine.Animations.Rigging
             input.HeadPosition = invPlayerRot * (headPosition.Get(stream) - origin);
             input.NeckPosition = neckPosition.Get(stream);
             input.HeadRotation = invPlayerRot * ToQuaternion(headRotation.Get(stream));
+            input.AnimatedHeadPosition = invPlayerRot * (animatedHead.GetPosition(stream) - origin);
+            input.AnimatedHeadRotation = invPlayerRot * animatedHead.GetRotation(stream);
+            input.AnimatedHipsPosition = invPlayerRot * (animatedHips.GetPosition(stream) - origin);
             input.PlayerUp = Vector3.up;
             input.LeftFootPosition = invPlayerRot * (leftFootPosition.Get(stream) - origin);
             input.RightFootPosition = invPlayerRot * (rightFootPosition.Get(stream) - origin);
@@ -163,6 +167,8 @@ namespace UnityEngine.Animations.Rigging
                 hasHipsTracker = BoolProperty.Bind(animator, source, sourceData.HasHipsTrackerBoolProperty),
                 headPosition = Vector3Property.Bind(animator, source, sourceData.TargetPositionPropertyHead),
                 headRotation = Vector4Property.Bind(animator, source, sourceData.TargetRotationPropertyHead),
+                animatedHips = BindHandle(animator, sourceData.hips),
+                animatedHead = BindHandle(animator, sourceData.head),
                 leftFootPosition = Vector3Property.Bind(animator, source, sourceData.TargetPositionPropertyLeftLowerLeg),
                 rightFootPosition = Vector3Property.Bind(animator, source, sourceData.TargetPositionPropertyRightLowerLeg),
                 hipsPosition = Vector3Property.Bind(animator, source, sourceData.TargetPositionPropertyHips),
@@ -176,5 +182,7 @@ namespace UnityEngine.Animations.Rigging
         {
             if (job.state.IsCreated) job.state.Dispose();
         }
+
+        static ReadOnlyTransformHandle BindHandle(Animator animator, Transform t) => (t != null) ? ReadOnlyTransformHandle.Bind(animator, t) : default;
     }
 }

@@ -1268,7 +1268,7 @@ w20, w54;
                     break;
             }
 
-            hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up);
+            // hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up);
             targetPositionHips.Set(stream, hipsTargetPos);
 
             hipDesired = ApplyHipHinge(stream, headTargetPos, hipsTargetPos, hipDesired, up);

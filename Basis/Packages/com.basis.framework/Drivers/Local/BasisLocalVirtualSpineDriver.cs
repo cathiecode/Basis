@@ -359,8 +359,12 @@ public class BasisLocalVirtualSpineDriver
     public struct VirtualHipsInput
     {
         public float DeltaTime;
+        public float3 PlayerRotation;
         public float3 HeadPosition;
         public float3 NeckPosition;
+        public float3 AnimatedHeadPosition;
+        public quaternion AnimatedHeadRotation;
+        public float3 AnimatedHipsPosition;
         public quaternion HeadRotation;
         public float3 PlayerUp;
         public float3 LeftFootPosition;
@@ -392,16 +396,31 @@ public class BasisLocalVirtualSpineDriver
         NormalizeSafeWithFallback(in input.PlayerUp, new float3(0f, 1f, 0f), out float3 worldUp);
         ExtractYawBurst(in input.HeadRotation, out quaternion headYaw);
 
-        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in headYaw,
+        EstimateBodyYawFromHead(input.AnimatedHeadRotation, worldUp, math.mul(headYaw, new float3(0f, 0f, 1f)), out quaternion animatedHeadYaw);
+
+        EstimateBodyYawFromHead(input.HeadRotation, worldUp, math.mul(headYaw, new float3(0f, 0f, 1f)), out quaternion desiredTorsoYaw);
+
+        var animatedHeadYawToHeadYaw = math.mul(math.inverse(animatedHeadYaw), headYaw);
+
+        YawDegrees(animatedHeadYaw, out float animatedHeadYawDegree);
+        YawDegrees(headYaw, out float headYawDegree);
+
+        var animatedHeadToHipsRaw = math.mul(animatedHeadYawToHeadYaw, input.AnimatedHipsPosition - input.AnimatedHeadPosition);
+        NormalizeSafeWithFallback(in animatedHeadToHipsRaw, worldUp, out float3 animatedHeadToHipsNormalized);
+
+        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in desiredTorsoYaw,
             input.YawDeadzoneDeg, input.YawBlendSpeed, input.IsLocomoting, dt);
-        float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition, dt,
+
+        float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition + animatedHeadToHipsRaw, dt,
             input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
 
-        ComputeHipsPosition(in input.NeckPosition, in worldUp, input.RestLength, in torsoYaw,
+        /*ComputeHipsPosition(in input.NeckPosition, in worldUp, input.RestLength, in torsoYaw,
             input.HipsForwardBias * input.Scale, in desiredHipsXZ, input.FreezeHips, in input.TposeHips,
-            input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
+            input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);*/
 
-        quaternion hipsTarget = input.FreezeHips ? quaternion.identity : torsoYaw;
+        float3 hipsPosition = input.HeadPosition + animatedHeadToHipsRaw;
+
+        quaternion hipsTarget = input.FreezeHips ? quaternion.identity : math.mul(animatedHeadYawToHeadYaw, input.AnimatedHeadRotation);
         if (state.HipsRotationInitialized == 0)
         {
             state.HipsRotation = hipsTarget;
@@ -411,9 +430,9 @@ public class BasisLocalVirtualSpineDriver
         {
             SmoothSlerpBurst(in state.HipsRotation, in hipsTarget, input.HipsRotationSpeed, dt, out state.HipsRotation);
         }
-        ExtractYawBurst(in state.HipsRotation, out quaternion hipsYaw);
+        // ExtractYawBurst(in state.HipsRotation, out quaternion hipsYaw);
         position = hipsPosition;
-        rotation = hipsYaw;
+        rotation = state.HipsRotation;
     }
 
     /// <summary>
@@ -700,6 +719,84 @@ public class BasisLocalVirtualSpineDriver
         return math.mul(yawBase, swing);
     }
 
+    [BurstCompile]
+    internal static void EstimateBodyYawFromHead(
+        in quaternion headRot,
+        in float3 upRaw,
+        in float3 fallbackForward,
+        out quaternion bodyYaw
+    )
+    {
+        const float EPS = 1e-8f;
+        NormalizeSafeWithFallback(upRaw, new float3(0f, 1f, 0f), out var up);
+
+        float3 headRight = math.mul(headRot, new float3(1f, 0f, 0f));
+        float3 headForward = math.mul(headRot, new float3(0f, 0f, 1f));
+
+        ProjectOnPlane(headRight, up, out float3 rightProjected);
+        ProjectOnPlane(headForward, up, out float3 forwardProjected);
+
+        float rightLenSq = math.lengthsq(rightProjected);
+        float forwardLenSq = math.lengthsq(forwardProjected);
+
+        bool hasRight = rightLenSq > EPS;
+        bool hasForward = forwardLenSq > EPS;
+
+        float3 fallback;
+
+        if (!hasRight && !hasForward)
+        {
+            ProjectOnPlane(fallbackForward, up, out fallback);
+
+            if (math.lengthsq(fallback) < EPS)
+                AnyPerpendicular(up, out fallback);
+
+            fallback = math.normalize(fallback);
+            bodyYaw = quaternion.LookRotationSafe(fallback, up);
+            return;
+        }
+
+        float3 mixedForward = 0f;
+
+        if (hasRight)
+        {
+            float3 bodyRight = math.normalize(rightProjected);
+
+            // Unity basis: right × up = forward
+            float3 rightBasedForward = math.normalize(math.cross(bodyRight, up));
+
+            // confidence は射影長。二乗のまま使うと、弱い候補をより強く抑えられる。
+            float rightWeight = rightLenSq;
+
+            mixedForward += rightBasedForward * rightWeight;
+        }
+
+        if (hasForward)
+        {
+            float3 forwardBasedForward = math.normalize(forwardProjected);
+
+            float forwardWeight = forwardLenSq;
+
+            mixedForward += forwardBasedForward * forwardWeight;
+        }
+
+        ProjectOnPlane(mixedForward, up, out mixedForward);
+
+        if (math.lengthsq(mixedForward) < EPS)
+        {
+            ProjectOnPlane(fallbackForward, up, out fallback);
+
+            if (math.lengthsq(fallback) < EPS)
+                AnyPerpendicular(up, out fallback);
+
+            mixedForward = fallback;
+        }
+
+        mixedForward = math.normalize(mixedForward);
+
+        bodyYaw = quaternion.LookRotationSafe(mixedForward, up);
+    }
+
     private static float DeltaAngleDeg(float current, float target)
     {
         float delta = target - current;
@@ -808,5 +905,19 @@ public class BasisLocalVirtualSpineDriver
     {
         float3 f = math.mul(yawOnly, new float3(0f, 0f, 1f));
         result = math.degrees(math.atan2(f.x, f.z));
+    }
+
+    static void ProjectOnPlane(in float3 v, in float3 normal, out float3 projected)
+    {
+        projected = v - normal * math.dot(v, normal);
+    }
+
+    static void AnyPerpendicular(in float3 n, out float3 perpendicular)
+    {
+        float3 a = math.abs(n.y) < 0.99f
+            ? new float3(0f, 1f, 0f)
+            : new float3(1f, 0f, 0f);
+
+        perpendicular = math.normalize(math.cross(a, n));
     }
 }
