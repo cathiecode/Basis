@@ -407,14 +407,16 @@ public class BasisLocalVirtualSpineDriver
         var animatedHipsToHeadRaw = math.mul(animatedHeadYawToHeadYaw, input.AnimatedHeadPosition - input.AnimatedHipsPosition);
         NormalizeSafeWithFallback(in animatedHipsToHeadRaw, worldUp, out float3 animatedHipsToHeadNormalized);
 
-        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in desiredTorsoYaw,
-            input.YawDeadzoneDeg, input.YawBlendSpeed, input.IsLocomoting, dt);
+        float noSmoothingBlendAlpha = 1 - math.abs(math.dot(worldUp, animatedHipsToHeadNormalized));
 
-        float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadRaw, dt,
+        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in desiredTorsoYaw,
+            input.YawDeadzoneDeg * (1 - noSmoothingBlendAlpha), input.YawBlendSpeed, input.IsLocomoting, dt);
+
+        float3 realisticHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadRaw, noSmoothingBlendAlpha, dt,
             input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
 
         ComputeHipsPosition(in input.NeckPosition, in animatedHipsToHeadNormalized, input.RestLength, in torsoYaw,
-            input.HipsForwardBias * input.Scale, in desiredHipsXZ, input.FreezeHips, in input.TposeHips,
+            input.HipsForwardBias * input.Scale, in realisticHipsXZ, input.FreezeHips, in input.TposeHips,
             input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
 
         // float3 hipsPosition = desiredHipsXZ;
@@ -426,7 +428,7 @@ public class BasisLocalVirtualSpineDriver
         }
         else
         {
-            SmoothSlerpBurst(in state.HipsRotation, in hipsTarget, input.HipsRotationSpeed, dt, out state.HipsRotation);
+            SmoothSlerpBurst(in state.HipsRotation, in hipsTarget, input.HipsRotationSpeed, noSmoothingBlendAlpha, dt, out state.HipsRotation);
         }
         // ExtractYawBurst(in state.HipsRotation, out quaternion hipsYaw);
         position = hipsPosition;
@@ -468,7 +470,7 @@ public class BasisLocalVirtualSpineDriver
             head.OutgoingRotation = eyeRot;
 
             quaternion neckCurrent = neck.OutgoingRotation;
-            SmoothSlerpBurst(in neckCurrent, in eyeRot, P.NeckRotationSpeed, dt, out quaternion neckRot);
+            SmoothSlerpBurst(in neckCurrent, in eyeRot, P.NeckRotationSpeed, 1f, dt, out quaternion neckRot);
             neck.OutgoingRotation = neckRot;
 
             ComposePosition(in P.HeadTargetPos, in P.HeadTargetRot, in P.HeadScaledOffset, out float3 headPos);
@@ -494,7 +496,7 @@ public class BasisLocalVirtualSpineDriver
             float biasScale = P.HipsForwardBias * P.Scale;
 
             float3 headPosWorld = head.OutgoingPosition;
-            float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref s, headPosWorld, dt, P.LeftFootPos, P.RightFootPos, P.LeftFootTracked != 0, P.RightFootTracked != 0);
+            float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref s, headPosWorld, 1.0f, dt, P.LeftFootPos, P.RightFootPos, P.LeftFootTracked != 0, P.RightFootTracked != 0);
 
             ComputeHipsPosition(
                 in neckPosWorld,
@@ -512,7 +514,7 @@ public class BasisLocalVirtualSpineDriver
 
             quaternion hipsRotTarget = freeze ? quaternion.identity : torsoYawTarget;
             quaternion hipsCurrent = hips.OutgoingRotation;
-            SmoothSlerpBurst(in hipsCurrent, in hipsRotTarget, P.HipsRotationSpeed, dt, out quaternion hipsSmoothed);
+            SmoothSlerpBurst(in hipsCurrent, in hipsRotTarget, P.HipsRotationSpeed, 1f, dt, out quaternion hipsSmoothed);
             ExtractYawBurst(in hipsSmoothed, out quaternion hipsYaw);
 
             hips.OutgoingRotation = hipsYaw;
@@ -547,8 +549,8 @@ public class BasisLocalVirtualSpineDriver
                 quaternion chestCurrent = chest.OutgoingRotation;
                 quaternion spineCurrent = spine.OutgoingRotation;
 
-                SmoothSlerpBurst(in chestCurrent, in chestTarget, P.ChestRotationSpeed, dt, out quaternion chestSmoothed);
-                SmoothSlerpBurst(in spineCurrent, in spineTarget, P.SpineRotationSpeed, dt, out quaternion spineSmoothed);
+                SmoothSlerpBurst(in chestCurrent, in chestTarget, P.ChestRotationSpeed, 1f, dt, out quaternion chestSmoothed);
+                SmoothSlerpBurst(in spineCurrent, in spineTarget, P.SpineRotationSpeed, 1f, dt, out quaternion spineSmoothed);
 
                 chest.OutgoingRotation = chestSmoothed;
                 spine.OutgoingRotation = spineSmoothed;
@@ -661,7 +663,7 @@ public class BasisLocalVirtualSpineDriver
     ///   (2) Foot pendulum: if both feet are tracked, override with feet-midpoint + a small lean
     ///       toward the head — closer to a real inverted-pendulum stance.
     /// </summary>
-    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 animatedHipsPosWorld, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
+    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 animatedHipsPosWorld, float noSmoothingBlendAlpha, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
     {
         float3 animatedHipsPosXZ = new float3(animatedHipsPosWorld.x, 0f, animatedHipsPosWorld.z);
 
@@ -676,6 +678,7 @@ public class BasisLocalVirtualSpineDriver
             float safeDt = math.max(dt, 1e-6f);
             float alpha = 1f - math.exp(-2f * math.PI * HeadBaselineHz * safeDt);
             s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, alpha);
+            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, noSmoothingBlendAlpha);
         }
 
         if (leftFootTracked && rightFootTracked)
@@ -808,10 +811,11 @@ public class BasisLocalVirtualSpineDriver
     // -----------------------------
 
     [BurstCompile]
-    private static void SmoothSlerpBurst(in quaternion current, in quaternion target, float speed, float dt, out quaternion result)
+    private static void SmoothSlerpBurst(in quaternion current, in quaternion target, float speed, float noSmoothingAlpha, float dt, out quaternion result)
     {
         float t = math.saturate(dt * math.max(0f, speed));
         result = math.slerp(current, target, t);
+        result = math.slerp(result, target, noSmoothingAlpha);
     }
 
     [BurstCompile]
