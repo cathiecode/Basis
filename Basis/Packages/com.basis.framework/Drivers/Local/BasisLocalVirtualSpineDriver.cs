@@ -778,7 +778,12 @@ public class BasisLocalVirtualSpineDriver
 
             float forwardWeight = forwardLenSq;
 
-            mixedForward += forwardBasedForward * forwardWeight;
+            float3 aboutToAdd = forwardBasedForward * forwardWeight;
+
+            if (math.lengthsq(mixedForward + aboutToAdd) > EPS)
+            {
+                mixedForward += aboutToAdd;
+            }
         }
 
         ProjectOnPlane(mixedForward, up, out mixedForward);
