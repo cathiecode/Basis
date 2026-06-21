@@ -108,6 +108,7 @@ namespace UnityEngine.Animations.Rigging
             input.AnimatedHeadPosition = invPlayerRot * (animatedHead.GetPosition(stream) - origin);
             input.AnimatedHeadRotation = invPlayerRot * animatedHead.GetRotation(stream);
             input.AnimatedHipsPosition = invPlayerRot * (animatedHips.GetPosition(stream) - origin);
+            input.AnimatedHipsRotation = invPlayerRot * animatedHips.GetRotation(stream);
             input.PlayerUp = Vector3.up;
             input.LeftFootPosition = invPlayerRot * (leftFootPosition.Get(stream) - origin);
             input.RightFootPosition = invPlayerRot * (rightFootPosition.Get(stream) - origin);

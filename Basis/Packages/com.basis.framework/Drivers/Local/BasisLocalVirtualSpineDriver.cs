@@ -135,7 +135,7 @@ public class BasisLocalVirtualSpineDriver
         if (_solveState.IsCreated)
         {
             SpineSolveState s = _solveState[0];
-            s.HeadBaselineInitialized = 0;
+            s.HipsBaselineInitialized = 0;
             _solveState[0] = s;
         }
     }
@@ -340,8 +340,8 @@ public class BasisLocalVirtualSpineDriver
     /// <summary>Persistent spine solver state carried across frames (low-pass + yaw deadzone).</summary>
     public struct SpineSolveState
     {
-        public float3 HeadBaselineXZ;
-        public byte HeadBaselineInitialized;
+        public float3 HipsBaselineXZ;
+        public byte HipsBaselineInitialized;
 
         public byte TorsoYawInitialized;
         public float TorsoYawAnchorDeg;
@@ -365,6 +365,7 @@ public class BasisLocalVirtualSpineDriver
         public float3 AnimatedHeadPosition;
         public quaternion AnimatedHeadRotation;
         public float3 AnimatedHipsPosition;
+        public quaternion AnimatedHipsRotation;
         public quaternion HeadRotation;
         public float3 PlayerUp;
         public float3 LeftFootPosition;
@@ -401,26 +402,22 @@ public class BasisLocalVirtualSpineDriver
         EstimateBodyYawFromHead(input.HeadRotation, worldUp, math.mul(headYaw, new float3(0f, 0f, 1f)), out quaternion desiredTorsoYaw);
 
         var animatedHeadYawToHeadYaw = math.mul(math.inverse(animatedHeadYaw), headYaw);
+        var animatedHeadYawToAnimatedHipsRotation = math.mul(math.inverse(animatedHeadYaw), input.AnimatedHipsRotation);
 
-        YawDegrees(animatedHeadYaw, out float animatedHeadYawDegree);
-        YawDegrees(headYaw, out float headYawDegree);
-
-        var animatedHeadToHipsRaw = math.mul(animatedHeadYawToHeadYaw, input.AnimatedHipsPosition - input.AnimatedHeadPosition);
-        NormalizeSafeWithFallback(in animatedHeadToHipsRaw, worldUp, out float3 animatedHeadToHipsNormalized);
+        var animatedHipsToHeadRaw = math.mul(animatedHeadYawToHeadYaw, input.AnimatedHeadPosition - input.AnimatedHipsPosition);
+        NormalizeSafeWithFallback(in animatedHipsToHeadRaw, worldUp, out float3 animatedHeadToHipsNormalized);
 
         quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in desiredTorsoYaw,
             input.YawDeadzoneDeg, input.YawBlendSpeed, input.IsLocomoting, dt);
 
-        float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition + animatedHeadToHipsRaw, dt,
+        float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadRaw, dt,
             input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
 
-        /*ComputeHipsPosition(in input.NeckPosition, in worldUp, input.RestLength, in torsoYaw,
+        ComputeHipsPosition(in input.NeckPosition, in animatedHipsToHeadRaw, input.RestLength, in torsoYaw,
             input.HipsForwardBias * input.Scale, in desiredHipsXZ, input.FreezeHips, in input.TposeHips,
-            input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);*/
+            input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
 
-        float3 hipsPosition = input.HeadPosition + animatedHeadToHipsRaw;
-
-        quaternion hipsTarget = input.FreezeHips ? quaternion.identity : math.mul(animatedHeadYawToHeadYaw, input.AnimatedHeadRotation);
+        quaternion hipsTarget = input.FreezeHips ? quaternion.identity : math.mul(torsoYaw, animatedHeadYawToAnimatedHipsRotation);
         if (state.HipsRotationInitialized == 0)
         {
             state.HipsRotation = hipsTarget;
@@ -663,21 +660,21 @@ public class BasisLocalVirtualSpineDriver
     ///   (2) Foot pendulum: if both feet are tracked, override with feet-midpoint + a small lean
     ///       toward the head — closer to a real inverted-pendulum stance.
     /// </summary>
-    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 headPosWorld, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
+    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 animatedHipsPosWorld, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
     {
-        float3 headXZ = new float3(headPosWorld.x, 0f, headPosWorld.z);
+        float3 animatedHipsPosXZ = new float3(animatedHipsPosWorld.x, 0f, animatedHipsPosWorld.z);
 
-        if (s.HeadBaselineInitialized == 0)
+        if (s.HipsBaselineInitialized == 0)
         {
-            s.HeadBaselineXZ = headXZ;
-            s.HeadBaselineInitialized = 1;
+            s.HipsBaselineXZ = animatedHipsPosXZ;
+            s.HipsBaselineInitialized = 1;
         }
         else
         {
             // Frame-rate-coherent low-pass: alpha = 1 - exp(-2π·hz·dt).
             float safeDt = math.max(dt, 1e-6f);
             float alpha = 1f - math.exp(-2f * math.PI * HeadBaselineHz * safeDt);
-            s.HeadBaselineXZ = math.lerp(s.HeadBaselineXZ, headXZ, alpha);
+            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, alpha);
         }
 
         if (leftFootTracked && rightFootTracked)
@@ -686,10 +683,10 @@ public class BasisLocalVirtualSpineDriver
                 (leftFootPos.x + rightFootPos.x) * 0.5f,
                 0f,
                 (leftFootPos.z + rightFootPos.z) * 0.5f);
-            return math.lerp(feetMidXZ, headXZ, FootPendulumLeanFrac);
+            return math.lerp(feetMidXZ, animatedHipsPosXZ, FootPendulumLeanFrac);
         }
 
-        return math.lerp(s.HeadBaselineXZ, headXZ, CounterbalanceFollowFrac);
+        return math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, CounterbalanceFollowFrac);
     }
 
     // Adds a configurable fraction of head pitch and roll on top of a yaw-only base rotation.
@@ -841,9 +838,9 @@ public class BasisLocalVirtualSpineDriver
     [BurstCompile]
     internal static void ComputeHipsPosition(
         in float3 neckPos,
-        in float3 worldUp,
+        in float3 spineUp,
         float lenTotal,
-        in quaternion headYaw,
+        in quaternion torsoYaw,
         float biasScale,
         in float3 desiredHipsXZ,
         bool freezeToTpose,
@@ -855,8 +852,8 @@ public class BasisLocalVirtualSpineDriver
     {
         // Match original semantics: when frozen, bias direction is world-aligned (identity yaw),
         // not head yaw. Position base swaps to TPose but forward bias is still applied.
-        float3 hipsBase = freezeToTpose ? tposeHips : neckPos - worldUp * lenTotal;
-        quaternion biasYaw = freezeToTpose ? quaternion.identity : headYaw;
+        float3 hipsBase = freezeToTpose ? tposeHips : neckPos - spineUp * lenTotal;
+        quaternion biasYaw = freezeToTpose ? quaternion.identity : torsoYaw;
         float3 forwardBias = math.mul(biasYaw, new float3(0f, 0f, 1f)) * biasScale;
 
         if (freezeToTpose)
