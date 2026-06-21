@@ -405,7 +405,7 @@ public class BasisLocalVirtualSpineDriver
         var animatedHeadYawToAnimatedHipsRotation = math.mul(math.inverse(animatedHeadYaw), input.AnimatedHipsRotation);
 
         var animatedHipsToHeadRaw = math.mul(animatedHeadYawToHeadYaw, input.AnimatedHeadPosition - input.AnimatedHipsPosition);
-        NormalizeSafeWithFallback(in animatedHipsToHeadRaw, worldUp, out float3 animatedHeadToHipsNormalized);
+        NormalizeSafeWithFallback(in animatedHipsToHeadRaw, worldUp, out float3 animatedHipsToHeadNormalized);
 
         quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in desiredTorsoYaw,
             input.YawDeadzoneDeg, input.YawBlendSpeed, input.IsLocomoting, dt);
@@ -413,10 +413,11 @@ public class BasisLocalVirtualSpineDriver
         float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadRaw, dt,
             input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
 
-        ComputeHipsPosition(in input.NeckPosition, in animatedHipsToHeadRaw, input.RestLength, in torsoYaw,
+        ComputeHipsPosition(in input.NeckPosition, in animatedHipsToHeadNormalized, input.RestLength, in torsoYaw,
             input.HipsForwardBias * input.Scale, in desiredHipsXZ, input.FreezeHips, in input.TposeHips,
             input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
 
+        // float3 hipsPosition = desiredHipsXZ;
         quaternion hipsTarget = input.FreezeHips ? quaternion.identity : math.mul(torsoYaw, animatedHeadYawToAnimatedHipsRotation);
         if (state.HipsRotationInitialized == 0)
         {
