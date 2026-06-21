@@ -782,7 +782,6 @@ namespace Basis.Scripts.Drivers
                 && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
                 ? 0f : Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
                 preSolve.RestLength = Mathf.Max(1e-4f, virtualSpineLength);
-                preSolve.StandingHipsY = neckTpose.y - virtualSpineLength;
                 preSolve.HipsForwardBias = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsForwardBias.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
                 preSolve.YawDeadzoneDeg = yawDeadzone;
                 preSolve.YawBlendSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue;

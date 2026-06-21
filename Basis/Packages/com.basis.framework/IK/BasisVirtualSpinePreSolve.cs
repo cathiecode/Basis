@@ -17,7 +17,6 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] Vector3 m_PlayerPosition;
         [SyncSceneToStream, SerializeField] Quaternion m_PlayerRotation;
         [SyncSceneToStream, SerializeField] float m_RestLength;
-        [SyncSceneToStream, SerializeField] float m_StandingHipsY;
         [SyncSceneToStream, SerializeField] float m_HipsForwardBias;
         [SyncSceneToStream, SerializeField] float m_YawDeadzoneDeg;
         [SyncSceneToStream, SerializeField] float m_YawBlendSpeed;
@@ -36,7 +35,6 @@ namespace UnityEngine.Animations.Rigging
         public Vector3 PlayerPosition { get => m_PlayerPosition; set => m_PlayerPosition = value; }
         public Quaternion PlayerRotation { get => m_PlayerRotation; set => m_PlayerRotation = value; }
         public float RestLength { get => m_RestLength; set => m_RestLength = value; }
-        public float StandingHipsY { get => m_StandingHipsY; set => m_StandingHipsY = value; }
         public float HipsForwardBias { get => m_HipsForwardBias; set => m_HipsForwardBias = value; }
         public float YawDeadzoneDeg { get => m_YawDeadzoneDeg; set => m_YawDeadzoneDeg = value; }
         public float YawBlendSpeed { get => m_YawBlendSpeed; set => m_YawBlendSpeed = value; }
@@ -54,7 +52,6 @@ namespace UnityEngine.Animations.Rigging
         public string PlayerPositionProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_PlayerPosition));
         public string PlayerRotationProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_PlayerRotation));
         public string RestLengthProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RestLength));
-        public string StandingHipsYProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_StandingHipsY));
         public string HipsForwardBiasProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HipsForwardBias));
         public string YawDeadzoneDegProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_YawDeadzoneDeg));
         public string YawBlendSpeedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_YawBlendSpeed));
@@ -80,7 +77,7 @@ namespace UnityEngine.Animations.Rigging
         public BoolProperty hasHipsTracker;
         public Vector3Property neckPosition, tposeHips, playerPosition;
         public Vector4Property playerRotation;
-        public FloatProperty restLength, standingHipsY, hipsForwardBias, yawDeadzoneDeg;
+        public FloatProperty restLength, hipsForwardBias, yawDeadzoneDeg;
         public FloatProperty yawBlendSpeed, hipsRotationSpeed, compressionStrength, maxDrop;
         public Vector3Property headPosition, leftFootPosition, rightFootPosition, hipsPosition;
         public Vector4Property headRotation, hipsRotation;
@@ -116,7 +113,6 @@ namespace UnityEngine.Animations.Rigging
             input.RightFootTracked = rightFootTracked.Get(stream);
             input.Scale = 1f;
             input.RestLength = restLength.Get(stream);
-            input.StandingHipsY = standingHipsY.Get(stream);
             input.HipsForwardBias = hipsForwardBias.Get(stream);
             input.YawDeadzoneDeg = yawDeadzoneDeg.Get(stream);
             input.YawBlendSpeed = yawBlendSpeed.Get(stream);
@@ -158,7 +154,6 @@ namespace UnityEngine.Animations.Rigging
                 playerPosition = Vector3Property.Bind(animator, component, data.PlayerPositionProperty),
                 playerRotation = Vector4Property.Bind(animator, component, data.PlayerRotationProperty),
                 restLength = FloatProperty.Bind(animator, component, data.RestLengthProperty),
-                standingHipsY = FloatProperty.Bind(animator, component, data.StandingHipsYProperty),
                 hipsForwardBias = FloatProperty.Bind(animator, component, data.HipsForwardBiasProperty),
                 yawDeadzoneDeg = FloatProperty.Bind(animator, component, data.YawDeadzoneDegProperty),
                 yawBlendSpeed = FloatProperty.Bind(animator, component, data.YawBlendSpeedProperty),

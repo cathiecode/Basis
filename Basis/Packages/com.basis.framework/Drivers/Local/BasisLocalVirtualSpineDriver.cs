@@ -374,7 +374,6 @@ public class BasisLocalVirtualSpineDriver
         public bool RightFootTracked;
         public float Scale;
         public float RestLength;
-        public float StandingHipsY;
         public float HipsForwardBias;
         public float YawDeadzoneDeg;
         public float YawBlendSpeed;
@@ -415,9 +414,9 @@ public class BasisLocalVirtualSpineDriver
         float3 realisticHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadRaw, noSmoothingBlendAlpha, dt,
             input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
 
-        ComputeHipsPosition(in input.NeckPosition, in animatedHipsToHeadNormalized, input.RestLength, in torsoYaw,
+        ComputeHipsPositionBodyFrame(in input.NeckPosition, in animatedHipsToHeadNormalized, input.RestLength, in torsoYaw,
             input.HipsForwardBias * input.Scale, in realisticHipsXZ, input.FreezeHips, in input.TposeHips,
-            input.StandingHipsY, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
+            in input.AnimatedHipsPosition, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
 
         // float3 hipsPosition = desiredHipsXZ;
         quaternion hipsTarget = input.FreezeHips ? quaternion.identity : math.mul(torsoYaw, animatedHeadYawToAnimatedHipsRotation);
@@ -886,6 +885,58 @@ public class BasisLocalVirtualSpineDriver
 
         // Y from neck-minus-spine-length (now compressed), XZ from the realistic model, plus pelvic bias.
         result = new float3(desiredHipsXZ.x, hipsBase.y, desiredHipsXZ.z) + forwardBias;
+    }
+
+    /// <summary>
+    /// Animation-aware version of the hips placement used by the graph pre-solve. Compression is
+    /// measured along the animated hips-to-head axis, relative to the animation hips pose, rather
+    /// than against a standing world-Y floor. This preserves the legacy result for an upright pose
+    /// while allowing a prone/supine body to translate vertically without lifting its pelvis.
+    /// </summary>
+    [BurstCompile]
+    internal static void ComputeHipsPositionBodyFrame(
+        in float3 neckPos,
+        in float3 bodyUp,
+        float lenTotal,
+        in quaternion torsoYaw,
+        float biasScale,
+        in float3 desiredHipsXZ,
+        bool freezeToTpose,
+        in float3 tposeHips,
+        in float3 animatedHipsPosition,
+        float compressionStrength,
+        float maxDrop,
+        out float3 result)
+    {
+        float3 rigidHips = freezeToTpose ? tposeHips : neckPos - bodyUp * lenTotal;
+        quaternion biasYaw = freezeToTpose ? quaternion.identity : torsoYaw;
+        float3 forwardBias = math.mul(biasYaw, new float3(0f, 0f, 1f)) * biasScale;
+
+        if (freezeToTpose)
+        {
+            result = rigidHips + forwardBias;
+            return;
+        }
+
+        // The rest plane follows the animation pose. In an upright animation bodyUp is world up,
+        // reproducing the legacy downwards-pelvis limiter. In a supine animation bodyUp is
+        // horizontal, so lowering the HMD toward the floor has no compression component.
+        float restAlongBody = math.dot(animatedHipsPosition, bodyUp);
+        float rigidAlongBody = math.dot(rigidHips, bodyUp);
+        float drop = restAlongBody - rigidAlongBody;
+        float compressionOffset = 0f;
+        if (drop > 0f && compressionStrength > 0f && maxDrop > 1e-4f)
+        {
+            float softDrop = maxDrop * (1f - math.exp(-drop / maxDrop));
+            float compressedDrop = math.lerp(drop, softDrop, math.saturate(compressionStrength));
+            compressionOffset = drop - compressedDrop;
+        }
+
+        // Counterbalance supplies the horizontal anchor. Apply compression as a vector in the
+        // body frame so tilted poses retain the corresponding horizontal correction too.
+        result = new float3(desiredHipsXZ.x, rigidHips.y, desiredHipsXZ.z)
+            + bodyUp * compressionOffset
+            + forwardBias;
     }
 
     [BurstCompile]
