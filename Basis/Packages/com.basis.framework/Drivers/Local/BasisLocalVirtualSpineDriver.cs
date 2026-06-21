@@ -395,11 +395,11 @@ public class BasisLocalVirtualSpineDriver
     {
         float dt = math.max(input.DeltaTime, 1e-6f);
         NormalizeSafeWithFallback(in input.PlayerUp, new float3(0f, 1f, 0f), out float3 worldUp);
-        ExtractYawBurst(in input.HeadRotation, out quaternion headYaw);
+        ExtractYawBurst(in input.HeadRotation, out quaternion headYawRaw);
 
-        EstimateBodyYawFromHead(input.AnimatedHeadRotation, worldUp, math.mul(headYaw, new float3(0f, 0f, 1f)), out quaternion animatedHeadYaw);
+        EstimateBodyYawFromHead(input.AnimatedHeadRotation, worldUp, math.mul(headYawRaw, new float3(0f, 0f, 1f)), out quaternion animatedHeadYaw);
 
-        EstimateBodyYawFromHead(input.HeadRotation, worldUp, math.mul(headYaw, new float3(0f, 0f, 1f)), out quaternion desiredTorsoYaw);
+        EstimateBodyYawFromHead(input.HeadRotation, worldUp, math.mul(headYawRaw, new float3(0f, 0f, 1f)), out quaternion headYaw);
 
         var animatedHeadYawToHeadYaw = math.mul(math.inverse(animatedHeadYaw), headYaw);
         var animatedHeadYawToAnimatedHipsRotation = math.mul(math.inverse(animatedHeadYaw), input.AnimatedHipsRotation);
@@ -409,7 +409,7 @@ public class BasisLocalVirtualSpineDriver
 
         float noSmoothingBlendAlpha = 1 - math.abs(math.dot(worldUp, animatedHipsToHeadNormalized));
 
-        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in desiredTorsoYaw,
+        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in headYaw,
             input.YawDeadzoneDeg * (1 - noSmoothingBlendAlpha), input.YawBlendSpeed, input.IsLocomoting, dt);
 
         float3 realisticHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadRaw, noSmoothingBlendAlpha, dt,
