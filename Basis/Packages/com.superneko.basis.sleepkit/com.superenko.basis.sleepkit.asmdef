@@ -1,0 +1,16 @@
+{
+    "name": "com.superenko.basis.sleepkit",
+    "rootNamespace": "",
+    "references": [
+        "GUID:8c9aa0e006f5b5347af5c5470971dfae"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

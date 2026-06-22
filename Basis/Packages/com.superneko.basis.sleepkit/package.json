@@ -1,0 +1,15 @@
+{
+    "name": "com.superneko.basis.sleepkit",
+    "displayName": "SupeNekoya's SleepKit for Basis",
+    "version": "0.0.1",
+    "description": "Useful functionalities for sleeping experience in Basis",
+    "author": {
+        "name": "cathiecode",
+        "url": "https://github.com/cathiecode"
+    },
+    "license": "MIT",
+    "dependencies": {},
+    "vpmDependencies": {
+        "com.basis.sdk": "0.0.1"
+    }
+}
