@@ -918,10 +918,16 @@ public class BasisLocalVirtualSpineDriver
             return;
         }
 
-        // The rest plane follows the animation pose. In an upright animation bodyUp is world up,
-        // reproducing the legacy downwards-pelvis limiter. In a supine animation bodyUp is
-        // horizontal, so lowering the HMD toward the floor has no compression component.
-        float restAlongBody = math.dot(animatedHipsPosition, bodyUp);
+        // The rest plane takes its horizontal origin from counterbalance, so moving the whole
+        // tracked pose around the avatar does not turn into a body-axis compression. Its height
+        // still comes from the animation hips pose. For an upright animation this is the legacy
+        // standing-height reference; for a supine animation horizontal tracker movement follows
+        // the counterbalance reference instead of pulling the hips toward the avatar origin.
+        float3 compressionRest = new float3(
+            desiredHipsXZ.x,
+            animatedHipsPosition.y,
+            desiredHipsXZ.z);
+        float restAlongBody = math.dot(compressionRest, bodyUp);
         float rigidAlongBody = math.dot(rigidHips, bodyUp);
         float drop = restAlongBody - rigidAlongBody;
         float compressionOffset = 0f;
