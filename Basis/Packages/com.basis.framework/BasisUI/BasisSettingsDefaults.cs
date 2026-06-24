@@ -148,6 +148,8 @@ namespace Basis.BasisUI
 
         public static BasisSettingsBinding<float> SmoothTurnSpeed = new("smoothturnspeed", new BasisPlatformDefault<float>(200f));
 
+        public static BasisSettingsBinding<float> ScrollSpeed = new("scrollspeed", new BasisPlatformDefault<float>(90f));
+
         // ---------------- PLAYSPACE MOVER ----------------
         // VR-only grab-and-drag of the play space. Off by default; opt-in under Body Tracking.
         public static BasisSettingsBinding<bool> EnablePlayspaceMover = new("enableplayspacemover", new BasisPlatformDefault<bool>(false));
@@ -217,6 +219,13 @@ namespace Basis.BasisUI
 
         public const float FOG_DENSITY_MIN = 0f;
         public const float FOG_DENSITY_MAX = 1f;
+
+        /// <summary>
+        /// When enabled, volumetric fog samples APV lighting from a fast runtime-baked static volume
+        /// instead of evaluating the adaptive probe volumes live every raymarch step. The bake is
+        /// produced on demand from the world's APV and used immediately.
+        /// </summary>
+        public static BasisSettingsBinding<bool> VolumetricFogBakedAPV = new("volumetricfogbakedapv", new BasisPlatformDefault<bool>(true));
 
         /// <summary>
         /// When enabled, ReflectionProbe components in the scene whose mode is Realtime are
@@ -681,7 +690,7 @@ namespace Basis.BasisUI
         // ---------------- RAYCAST / INTERACTION VISUALS ----------------
         public static BasisSettingsBinding<float> RaycastLineWidth = new("raycastlinewidth", new BasisPlatformDefault<float>(1f));
         public static BasisSettingsBinding<string> RaycastLineColor = new("raycastlinecolor", new BasisPlatformDefault<string>(""));
-        public static BasisSettingsBinding<string> PickupHighlightColor = new("pickuphighlightcolor", new BasisPlatformDefault<string>(""));
+        public static BasisSettingsBinding<string> HighlightColor = new("highlightcolor", new BasisPlatformDefault<string>(""));
         public static BasisSettingsBinding<string> PickupLineColor = new("pickuplinecolor", new BasisPlatformDefault<string>(""));
 
         // ---------------- GLOBAL ONE EURO PARAMS ----------------
@@ -1409,6 +1418,7 @@ namespace Basis.BasisUI
             DominantHand.LoadBindingValue();
             usesnapturn.LoadBindingValue();
             SmoothTurnSpeed.LoadBindingValue();
+            ScrollSpeed.LoadBindingValue();
 
             // Avatar / IK / Body
             SelectedHeight.LoadBindingValue();
@@ -1462,6 +1472,7 @@ namespace Basis.BasisUI
             BloomIntensity.LoadBindingValue();
             UseVolumetricFogOverride.LoadBindingValue();
             VolumetricFogDensity.LoadBindingValue();
+            VolumetricFogBakedAPV.LoadBindingValue();
             UseRealtimeReflectionProbes.LoadBindingValue();
             RealtimeReflectionProbeRate.LoadBindingValue();
             ShowGizmos.LoadBindingValue();
@@ -1923,7 +1934,7 @@ namespace Basis.BasisUI
 
             RaycastLineWidth.LoadBindingValue();
             RaycastLineColor.LoadBindingValue();
-            PickupHighlightColor.LoadBindingValue();
+            HighlightColor.LoadBindingValue();
             PickupLineColor.LoadBindingValue();
 
             // Subscribers that read RawValue (Apply* in OnSettingsFinishedChanges)

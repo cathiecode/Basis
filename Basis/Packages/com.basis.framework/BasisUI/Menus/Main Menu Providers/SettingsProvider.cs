@@ -1498,6 +1498,11 @@ namespace Basis.BasisUI
                 descriptor.ForceRebuild();
             };
 
+            PanelToggle toggleFogBakedAPV = PanelToggle.CreateNewEntry(fogGroup.ContentParent);
+            toggleFogBakedAPV.AssignBinding(BasisSettingsDefaults.VolumetricFogBakedAPV);
+            toggleFogBakedAPV.Descriptor.SetTitle(BasisLocalization.Get("settings.graphics.fog.bakedapv"));
+            toggleFogBakedAPV.Descriptor.SetTooltip(BasisLocalization.Get("settings.graphics.fog.bakedapv.tooltip"));
+
             // --- Camera Near/Far Override ---
             PanelElementDescriptor cameraClipGroup =
                 PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, container);
@@ -1668,6 +1673,7 @@ namespace Basis.BasisUI
             BasisSettingsDefaults.BloomIntensity.ResetToDefault();
             BasisSettingsDefaults.UseVolumetricFogOverride.ResetToDefault();
             BasisSettingsDefaults.VolumetricFogDensity.ResetToDefault();
+            BasisSettingsDefaults.VolumetricFogBakedAPV.ResetToDefault();
 
             // Note: Resolution & ScreenMode are not shown as BasisSettingsDefaults bindings in your snippet.
             // If you later add bindings for them, add them here.
@@ -1878,12 +1884,12 @@ namespace Basis.BasisUI
                 BasisSettingsDefaults.RaycastLineColor, raycastColorInit,
                 c => Basis.Scripts.UI.BasisRaycastLineCustomization.PreviewUiLineColor(c));
 
-            Color highlightColorInit = Basis.Scripts.BasisSdk.Interactions.BasisPickupHighlightColor.ParseColor(BasisSettingsDefaults.PickupHighlightColor.RawValue)
-                ?? new Color(0.050980344f, 0.737255f, 0.92156863f, 0.4745098f);
+            Color highlightColorInit = Basis.Scripts.BasisSdk.Highlight.BasisHighlightConfigOverride.ParseColor(BasisSettingsDefaults.HighlightColor.RawValue)
+                ?? new Color(0.48365337f, 0.33490568f, 1f, 1f);
             SettingsProviderUIStyle.AddBindingColorPicker(container,
                 BasisLocalization.Get("settings.chat.pickup.highlightColor"),
-                BasisSettingsDefaults.PickupHighlightColor, highlightColorInit,
-                c => Basis.Scripts.BasisSdk.Interactions.BasisPickupHighlightColor.PreviewColor(c));
+                BasisSettingsDefaults.HighlightColor, highlightColorInit,
+                c => Basis.Scripts.BasisSdk.Highlight.BasisHighlightConfigOverride.PreviewColor(c));
 
             Color pickupLineColorInit = Basis.Scripts.UI.BasisRaycastLineCustomization.ParseColor(BasisSettingsDefaults.PickupLineColor.RawValue)
                 ?? new Color(0.48365337f, 0.33490568f, 1f, 1f);
@@ -1917,7 +1923,7 @@ namespace Basis.BasisUI
             BasisSettingsDefaults.PhotoEmbedWorld.ResetToDefault();
             BasisSettingsDefaults.RaycastLineWidth.ResetToDefault();
             BasisSettingsDefaults.RaycastLineColor.ResetToDefault();
-            BasisSettingsDefaults.PickupHighlightColor.ResetToDefault();
+            BasisSettingsDefaults.HighlightColor.ResetToDefault();
             BasisSettingsDefaults.PickupLineColor.ResetToDefault();
             SettingsProviderUIStyle.ResetUIStyleDefaults();
             SettingsProviderNamePlate.ResetNamePlateDefaults();

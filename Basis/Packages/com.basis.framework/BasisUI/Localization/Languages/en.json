@@ -1351,6 +1351,10 @@
       "value": "How fast the view rotates when using smooth turning."
     },
     {
+      "key": "settings.controls.scrollSpeed.tooltip",
+      "value": "How fast menus scroll when you hold the thumbstick up or down."
+    },
+    {
       "key": "settings.controls.radialDeadZone.tooltip",
       "value": "Ignore tiny thumbstick movement near the center to prevent drift."
     },
@@ -4071,6 +4075,14 @@
       "value": "Fog Density"
     },
     {
+      "key": "settings.graphics.fog.bakedapv",
+      "value": "Baked APV Lighting"
+    },
+    {
+      "key": "settings.graphics.fog.bakedapv.tooltip",
+      "value": "Light the fog from a fast static bake of the scene's adaptive probe volumes instead of sampling them live every frame. Baked on demand and used immediately."
+    },
+    {
       "key": "settings.graphics.cameraClip.title",
       "value": "Camera Clip Distances"
     },
@@ -4244,7 +4256,7 @@
     },
     {
       "key": "settings.chat.pickup.highlightColor",
-      "value": "Pickup Highlight Colour"
+      "value": "Highlight Colour"
     },
     {
       "key": "settings.chat.pickup.lineColor",
@@ -4353,6 +4365,10 @@
     {
       "key": "settings.controls.smoothTurnSpeed",
       "value": "Smooth Turn Speed"
+    },
+    {
+      "key": "settings.controls.scrollSpeed",
+      "value": "UI Scroll Speed"
     },
     {
       "key": "settings.controls.generalDeadzone.title",
