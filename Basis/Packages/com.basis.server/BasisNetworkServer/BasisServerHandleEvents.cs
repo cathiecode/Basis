@@ -87,6 +87,7 @@ namespace BasisServerHandle
             BasisNetworkServer.Security.BasisUserOpusBitrateStateManager.ClearForPeer(id);
             BasisServerP2PBroker.RemovePeer(id);
             BasisNetworkMessageProcessor.ClearPeerErrors(id);
+            BasisServerMessageRegistry.ClearSubscription(id);
 
             return NetworkServer.AuthenticatedPeers.TryRemove(id, out _);
         }
@@ -209,9 +210,9 @@ namespace BasisServerHandle
                     return;
                 }
 
-                if (ClientVersion < BasisNetworkVersion.ServerVersion)
+                if (ClientVersion != BasisNetworkVersion.ServerVersion)
                 {
-                    RejectWithReason(ConReq, "Outdated client version.");
+                    RejectWithReason(ConReq, "Client version does not match server.");
                     return;
                 }
                 if (NetworkServer.Configuration.UseAuth)
@@ -271,16 +272,25 @@ namespace BasisServerHandle
         {
             ushort PeerId = (ushort)newPeer.Id;
 
-            // Whitelist gate. Both auth paths (DID challenge + plain ReadyMessage) funnel
+            // AllowList gate. Both auth paths (DID challenge + plain ReadyMessage) funnel
             // through here with a verified UUID, so this is the single point that enforces
-            // BasisUserRestrictionMode.WhiteList on entry. Banlist is enforced separately
+            // BasisUserRestrictionMode.AllowList on entry. Banlist is enforced separately
             // at HandleConnectionRequest / BasisDIDAuthIdentity.ProcessConnection.
-            if (NetworkServer.Configuration.BasisUserRestrictionMode == BasisUserRestrictionMode.WhiteList
-                && NetworkServer.Whitelist != null
-                && !NetworkServer.Whitelist.IsWhitelisted(UUID))
+            if (NetworkServer.Configuration.BasisUserRestrictionMode == BasisUserRestrictionMode.AllowList
+                && NetworkServer.AllowList != null
+                && !NetworkServer.AllowList.IsAllowed(UUID))
             {
-                BNL.Log($"Rejecting peer {PeerId} (UUID {UUID}) — not on whitelist.");
-                RejectWithReason(newPeer, "You are not on the whitelist.");
+                BNL.Log($"Rejecting peer {PeerId} (UUID {UUID}) — not on allowlist.");
+                RejectWithReason(newPeer, "You are not on the allowlist.");
+                return;
+            }
+
+            if (NetworkServer.Configuration.BasisUserRestrictionMode == BasisUserRestrictionMode.BanList
+                && NetworkServer.BanList != null
+                && NetworkServer.BanList.IsBanned(UUID))
+            {
+                BNL.Log($"Rejecting peer {PeerId} (UUID {UUID}) — on banlist.");
+                RejectWithReason(newPeer, "You are not permitted on this server.");
                 return;
             }
 
@@ -294,6 +304,15 @@ namespace BasisServerHandle
                 RejectWithReason(newPeer, "The server is locked — only players already here may rejoin.");
                 return;
             }
+
+            string sanitizedDisplayName = BasisDisplayNameSanitizer.Sanitize(ReadyMessage.playerMetaDataMessage.playerDisplayName);
+            if (string.IsNullOrEmpty(sanitizedDisplayName))
+            {
+                BNL.Log($"Rejecting peer {PeerId} (UUID {UUID}) — empty or invisible display name.");
+                RejectWithReason(newPeer, "Choose a non-empty username.");
+                return;
+            }
+            ReadyMessage.playerMetaDataMessage.playerDisplayName = sanitizedDisplayName;
 
             bool added = NetworkServer.AuthenticatedPeers.TryAdd(PeerId, newPeer);
             if (!added)
@@ -342,6 +361,8 @@ namespace BasisServerHandle
                 ServerMetaDataMessage.Serialize(Writer);
                 NetworkServer.TrySend(newPeer, Writer, BasisNetworkCommons.metaDataChannel, DeliveryMethod.ReliableOrdered);
 
+                BasisServerMessageRegistry.SendSupplyTo(newPeer);
+
                 if (BasisNetworkIDDatabase.GetAllNetworkID(out List<ServerNetIDMessage> ServerNetIDMessages))
                 {
                     ServerUniqueIDMessages ServerUniqueIDMessageArray = new ServerUniqueIDMessages
@@ -373,6 +394,7 @@ namespace BasisServerHandle
                 BasisNetworkServer.Security.BasisCrashReportStateManager.SendStateToPeer(newPeer);
                 BasisNetworkServer.Security.BasisAudioRangeLimitManager.SendStateToPeer(newPeer);
                 BasisNetworkServer.Security.BasisAvatarScaleLimitManager.SendStateToPeer(newPeer);
+                BasisNetworkServer.Security.BasisResourceLimitManager.SendStateToPeer(newPeer);
                 SendShoutStateToPeer(newPeer);
             }
             else
@@ -879,8 +901,15 @@ namespace BasisServerHandle
                 return;
             }
             LocalLoadResource.Deserialize(Reader);
-            LocalLoadResource.IsAdminLocked = PermissionIntegration.HasValidRequirement(Peer, PermNodes.protection);
+            bool isPrivileged = PermissionIntegration.HasValidRequirement(Peer, PermNodes.protection);
+            LocalLoadResource.IsAdminLocked = isPrivileged;
             LocalLoadResource.UUIDOfCreator = UUID;
+            if (!isPrivileged)
+            {
+                LocalLoadResource.Persist = false;
+                LocalLoadResource.Static = false;
+                LocalLoadResource.StaticAdminLocked = false;
+            }
             Reader.Recycle();
 
             switch (LocalLoadResource.Mode)
@@ -925,6 +954,9 @@ namespace BasisServerHandle
                     break;
                 case 2: // Synchronized
                     BasisNetworkPreloadResourceManagement.StartSynchronizedLoad(LocalLoadResource);
+                    break;
+                case 3: // Predownload only - tell everyone to cache it; do not register or spawn
+                    BasisNetworkResourceManagement.PredownloadResource(LocalLoadResource);
                     break;
                 default:
                     BNL.LogError("Falling Back to Resource Load, Unsupported Load Strategy");
@@ -1009,7 +1041,6 @@ namespace BasisServerHandle
             if (!BasisPersistentDatabase.GetByName(dataRequest.DatabaseID, out var db))
             {
                 db = new BasisData(dataRequest.DatabaseID, new System.Collections.Concurrent.ConcurrentDictionary<string, object>());
-                BasisPersistentDatabase.AddOrUpdate(db);
             }
 
             var msg = new DatabasePrimativeMessage

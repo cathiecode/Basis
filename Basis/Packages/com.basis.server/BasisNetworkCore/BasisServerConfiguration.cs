@@ -106,6 +106,10 @@ public class Configuration
     public float MaxHearingRangeMeters = 25f;
     public float MinAvatarEyeHeightMeters = 0.1f;
     public float MaxAvatarEyeHeightMeters = 100f;
+    public int MaxDatabaseEntries = 10000;
+    public int MaxDatabaseNameLength = 256;
+    public int MaxDatabasePayloadEntries = 1000;
+    public int MaxContentSpheresPerPlayer = 32;
     public bool PlayspaceMoverLocked = false;
     public bool DirectConnectLocked = false;
 
@@ -156,7 +160,7 @@ public class Configuration
 
     /// <summary>
     /// Persist this configuration back to <paramref name="filePath"/>. Used by the
-    /// admin panel to make in-game changes (server name, MOTD, whitelist mode)
+    /// admin panel to make in-game changes (server name, MOTD, allowlist mode)
     /// survive a restart. Writes via a sibling temp file + atomic move so a crash
     /// mid-write doesn't corrupt the live config.
     /// </summary>
@@ -240,7 +244,7 @@ public class Configuration
             }
             else if (field.FieldType == typeof(float))
             {
-                if (float.TryParse(value, out float number)) field.SetValue(target, number);
+                if (float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float number)) field.SetValue(target, number);
                 else BNL.LogWarning("Could not cast to float. Failed Override.");
             }
             else if (field.FieldType == typeof(string))

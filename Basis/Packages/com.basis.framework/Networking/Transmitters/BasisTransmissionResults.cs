@@ -19,19 +19,19 @@ using static SerializableBasis;
 public partial class BasisTransmissionResults
 {
     // Jobs
-    public BasisDistanceJobParallel distanceJob;
-    public BasisDistanceReduceJob reduceJob;
-    public BasisAvatarCapJob avatarCapJob;
-    public BasisAudioCapJob audioCapJob;
-    public BasisDirectionalDampenJob dampenJob;
-    public BasisViewConeAvatarJob viewConeJob;
+    [System.NonSerialized] public BasisDistanceJobParallel distanceJob;
+    [System.NonSerialized] public BasisDistanceReduceJob reduceJob;
+    [System.NonSerialized] public BasisAvatarCapJob avatarCapJob;
+    [System.NonSerialized] public BasisAudioCapJob audioCapJob;
+    [System.NonSerialized] public BasisDirectionalDampenJob dampenJob;
+    [System.NonSerialized] public BasisViewConeAvatarJob viewConeJob;
 
-    public JobHandle distanceJobHandle;
-    public JobHandle reduceJobHandle;
-    public JobHandle avatarCapJobHandle;
-    public JobHandle audioCapJobHandle;
-    public JobHandle dampenJobHandle;
-    public JobHandle viewConeJobHandle;
+    [System.NonSerialized] public JobHandle distanceJobHandle;
+    [System.NonSerialized] public JobHandle reduceJobHandle;
+    [System.NonSerialized] public JobHandle avatarCapJobHandle;
+    [System.NonSerialized] public JobHandle audioCapJobHandle;
+    [System.NonSerialized] public JobHandle dampenJobHandle;
+    [System.NonSerialized] public JobHandle viewConeJobHandle;
 
     // Timing / interval control
     public float intervalSeconds = 0.05f;
@@ -53,7 +53,7 @@ public partial class BasisTransmissionResults
 
     // Network
     [SerializeReference] public BasisNetworkTransmitter BasisNetworkTransmitter;
-    public NetDataWriter VRMWriter = new NetDataWriter(true, 0);
+    [System.NonSerialized] public NetDataWriter VRMWriter = new NetDataWriter(true, 0);
 
     // Recipients / excluded
     public List<ushort> TalkingPoints = new List<ushort>(128);
@@ -101,17 +101,17 @@ public partial class BasisTransmissionResults
     private NativeArray<float> distanceSq;
     private NativeArray<float3> targetPositions;
 
-    public NativeArray<bool> MicrophoneRange;
+    [System.NonSerialized] public NativeArray<bool> MicrophoneRange;
     private NativeArray<bool> hearingRange;
-    public NativeArray<bool> AvatarRange;
+    [System.NonSerialized] public NativeArray<bool> AvatarRange;
 
-    public NativeArray<bool> PrevInMicrophoneRange;
-    public NativeArray<bool> PrevInHearingRange;
-    public NativeArray<bool> PrevInAvatarRange;
+    [System.NonSerialized] public NativeArray<bool> PrevInMicrophoneRange;
+    [System.NonSerialized] public NativeArray<bool> PrevInHearingRange;
+    [System.NonSerialized] public NativeArray<bool> PrevInAvatarRange;
 
-    public NativeArray<short> MeshLodLevel;
-    public NativeArray<short> prevMeshLodLevel;
-    public NativeArray<bool> MeshLodRange;
+    [System.NonSerialized] public NativeArray<short> MeshLodLevel;
+    [System.NonSerialized] public NativeArray<short> prevMeshLodLevel;
+    [System.NonSerialized] public NativeArray<bool> MeshLodRange;
 
     // Scratch + reduced outputs
     private NativeArray<float> perIndexMinD2;
@@ -121,6 +121,15 @@ public partial class BasisTransmissionResults
     private NativeArray<int> changeMask;   // length 1
 
     public static float HysteresisPercent = 1.10f * 1.10f; // 10% hysteresis
+
+    /// <summary>
+    /// Max avatar (re)loads admitted per transmit tick when players cross the avatar-range boundary.
+    /// A bulk range change (e.g. the View Range slider 0->100 at 1k players) expires every player's
+    /// debounce on the same tick; without this cap they all call ReloadAvatar in one frame, dumping
+    /// ~1000 bundle loads + main-thread calibrations at once. Over-budget transitions stay pending and
+    /// commit on later ticks, ramping the crowd in over a few seconds instead of freezing.
+    /// </summary>
+    public static int MaxAvatarReloadsPerTick = 8;
 
     /// <summary>Half-angle (degrees) of the eye-gaze cone used to boost MeshLod detail for players the user is looking at.</summary>
     public static float GazeFoveationConeDegrees = 20f;
@@ -415,6 +424,8 @@ public partial class BasisTransmissionResults
         // managed snapshot[] objects (up to 6 separate passes before).
         // Uses unsafe pointers to bypass NativeArray safety checks.
         float visemeRangeSq = SMModuleDistanceBasedReductions.HearingRange * 0.25f;
+        // Per-tick budget of avatar (re)loads admitted below; reset each tick. See MaxAvatarReloadsPerTick.
+        int avatarReloadsAdmitted = 0;
         unsafe
         {
             bool* pHearingRange = (bool*)hearingRange.GetUnsafeReadOnlyPtr();
@@ -484,13 +495,28 @@ public partial class BasisTransmissionResults
                         }
                         else if (now >= remote.PendingRangeCommitTime)
                         {
-                            // Target has remained stable for the debounce window — commit.
-                            remote.InAvatarRange = inRange;
-                            remote.PendingRangeActive = false;
+                            // Target has remained stable for the debounce window — ready to commit.
+                            bool willReload = !remote.IsLoadingAnAvatar && (inRange || !remote.IsConsideredFallBackAvatar);
 
-                            if (!remote.IsLoadingAnAvatar && (inRange || !remote.IsConsideredFallBackAvatar))
+                            // Stagger: cap the avatar (re)loads started per tick. A bulk range change makes
+                            // every player's debounce expire on the same tick; admitting them all at once
+                            // fires ~1000 ReloadAvatar calls in one frame. Over-budget transitions stay
+                            // pending (their commit time has already passed) and retry next tick. Commits
+                            // that don't start a load (e.g. already mid-load) are never gated — they're free.
+                            if (willReload && avatarReloadsAdmitted >= MaxAvatarReloadsPerTick)
                             {
-                                remote.ReloadAvatar();
+                                // Budget spent this tick — leave pending; revisited next tick.
+                            }
+                            else
+                            {
+                                remote.InAvatarRange = inRange;
+                                remote.PendingRangeActive = false;
+
+                                if (willReload)
+                                {
+                                    avatarReloadsAdmitted++;
+                                    remote.ReloadAvatar();
+                                }
                             }
                         }
                     }

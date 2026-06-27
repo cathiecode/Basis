@@ -72,12 +72,12 @@ namespace BasisNetworkCore.Serializable
             SetGlobalOpusFrameDuration,   // admin: set the Opus frame duration in milliseconds (20 or 40)
             GlobalGetOpusFrameDurationState, // server→client: current Opus frame duration in milliseconds
 
-            // ── Server config / whitelist (persisted to disk) ─────────────────
+            // ── Server config / allowlist (persisted to disk) ─────────────────
             SetServerName,    // admin: set Configuration.ServerName + persist to config.xml. Payload: [string name]
             SetServerMotd,    // admin: set Configuration.ServerMotd + persist to config.xml. Payload: [string motd]
-            SetWhitelistMode, // admin: set Configuration.BasisUserRestrictionMode + persist. Payload: [byte BasisUserRestrictionMode]
-            AddWhitelist,     // admin: add UUID to BasisWhiteList.txt. Payload: [string uuid]
-            RemoveWhitelist,  // admin: remove UUID from BasisWhiteList.txt. Payload: [string uuid]
+            SetAllowlistMode, // admin: set Configuration.BasisUserRestrictionMode + persist. Payload: [byte BasisUserRestrictionMode]
+            AddAllowlist,     // admin: add UUID to BasisAllowList.txt. Payload: [string uuid]
+            RemoveAllowlist,  // admin: remove UUID from BasisAllowList.txt. Payload: [string uuid]
 
             GlobalToggleServers, // admin: toggle global server-share lock (BasisGlobalLockManager.ServersLocked).
 
@@ -131,6 +131,9 @@ namespace BasisNetworkCore.Serializable
 
             GlobalGetAvatarScaleLimits, // server→client: min/max avatar eye height in metres. Payload: [float minMeters][float maxMeters]
             SetGlobalAvatarScaleLimits, // admin: set min/max avatar eye height in metres (persisted). Non-admins are clamped to this range; admins bypass it. Payload: [float minMeters][float maxMeters]
+
+            GlobalGetResourceLimits, // server→client: persisted DoS caps. Payload: [int maxDatabaseEntries][int maxDatabaseNameLength][int maxDatabasePayloadEntries][int maxContentSpheresPerPlayer]
+            SetGlobalResourceLimits, // admin: set the persisted DoS caps. Payload: [int maxDatabaseEntries][int maxDatabaseNameLength][int maxDatabasePayloadEntries][int maxContentSpheresPerPlayer]
         }
     }
 }

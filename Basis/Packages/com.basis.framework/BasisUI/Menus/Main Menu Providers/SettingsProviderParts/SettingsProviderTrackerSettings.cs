@@ -101,27 +101,22 @@ namespace Basis.BasisUI
 
             RectTransform tabRoot = tabDesc.ContentParent;
 
-            // Static intro — explains what this tab is for and survives device-list rebuilds.
-            PanelElementDescriptor headerGroup = PanelElementDescriptor.CreateNew(
-                PanelElementDescriptor.ElementStyles.Group, tabRoot);
-            headerGroup.SetTitle(BasisLocalization.Get("trackerLinking.header.title"));
-
             // Connector trackers toggle — hides the per-tracker list (linking +
             // role override dropdowns) so a configured player doesn't have to
             // scroll past every device on every visit. Same opt-in pattern as
             // the advanced toggle below; user touches it once to set things up.
-            PanelToggle connectorToggle = PanelToggle.CreateNewEntry(tabRoot);
-            connectorToggle.Descriptor.SetTitle(BasisLocalization.Get("trackerLinking.connectorTrackers"));
+            PanelSectionToggle connectorToggle = PanelSectionToggle.CreateNewEntry(tabRoot);
+            connectorToggle.SetTitle(BasisLocalization.Get("trackerLinking.connectorTrackers"));
             connectorToggle.Descriptor.SetTooltip(BasisLocalization.Get("trackerLinking.connectorTrackers.tooltip"));
-            connectorToggle.AssignBinding(BasisSettingsDefaults.TrackerLinkingConnectorVisible);
+            connectorToggle.BindToToggle(BasisSettingsDefaults.TrackerLinkingConnectorVisible);
 
             // Advanced toggle — hides the tuning sliders behind an opt-in so
             // the page stays approachable for users who only want to link
             // trackers. Same pattern as SettingsProviderIK's advancedToggle.
-            PanelToggle advancedToggle = PanelToggle.CreateNewEntry(tabRoot);
-            advancedToggle.Descriptor.SetTitle(BasisLocalization.Get("trackerLinking.advanced"));
+            PanelSectionToggle advancedToggle = PanelSectionToggle.CreateNewEntry(tabRoot);
+            advancedToggle.SetTitle(BasisLocalization.Get("trackerLinking.advanced"));
             advancedToggle.Descriptor.SetTooltip(BasisLocalization.Get("trackerLinking.advanced.tooltip"));
-            advancedToggle.AssignBinding(BasisSettingsDefaults.TrackerLinkingAdvancedVisible);
+            advancedToggle.BindToToggle(BasisSettingsDefaults.TrackerLinkingAdvancedVisible);
 
             // Static tuning group — bound to BasisSettingsDefaults bindings, so values
             // persist across menu reopens and across sessions. Built once.
@@ -180,6 +175,10 @@ namespace Basis.BasisUI
                 state.Entries.Clear();
             };
 
+            // Webcam / external tracking sections injected by feature packages
+            // (e.g. MediaPipe). Built above the page reset so the reset stays last.
+            SettingsProvider.TrackerSettingsExtraBuilder?.Invoke(tabRoot);
+
             // Page-level reset stays on tabRoot (not inside tuningGroup) so it
             // remains reachable when the advanced toggle hides the sliders.
             SettingsProvider.AddResetPageButton(tabRoot, TabKey, ResetTrackerSettingsDefaults);
@@ -187,24 +186,27 @@ namespace Basis.BasisUI
             // Initial visibility + OnValueChanged gating. Two-step rebuild
             // (inner group, then tab descriptor) matches the existing pattern
             // in HandleChange so nested LayoutGroups settle correctly.
-            tuningGroup.gameObject.SetActive(BasisSettingsDefaults.TrackerLinkingAdvancedVisible.RawValue);
-            advancedToggle.OnValueChanged += visible =>
+            PanelSectionToggleHelpers.FinalizeCollapsibleContents(
+                advancedToggle,
+                BasisSettingsDefaults.TrackerLinkingAdvancedVisible.RawValue,
+                _ =>
             {
-                tuningGroup.gameObject.SetActive(visible);
                 tuningGroup.ForceRebuild();
                 tabDesc.ForceRebuild();
-            };
+            },
+                tuningGroup);
 
-            trackersGroup.gameObject.SetActive(BasisSettingsDefaults.TrackerLinkingConnectorVisible.RawValue);
-            connectorToggle.OnValueChanged += visible =>
+            PanelSectionToggleHelpers.FinalizeCollapsibleContents(
+                connectorToggle,
+                BasisSettingsDefaults.TrackerLinkingConnectorVisible.RawValue,
+                _ =>
             {
-                trackersGroup.gameObject.SetActive(visible);
                 trackersGroup.ForceRebuild();
                 tabDesc.ForceRebuild();
-            };
+            },
+                trackersGroup);
 
             handleChange();
-            SettingsProvider.TrackerSettingsExtraBuilder?.Invoke(tabRoot);
             tabDesc.ForceRebuild();
             return tabPage;
         }

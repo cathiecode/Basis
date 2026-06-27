@@ -190,6 +190,7 @@ public static class ContentPoliceControl
                 {
                     BasisShaderPrewarm.Warm(renderersForPrewarm, SearchAndDestroy.name);
                 }
+                BasisGraphicsStatePrewarm.WarmResident(SearchAndDestroy.name);
 
                 // Persistent UnityEvent listeners are the second attack surface:
                 // a Button.onClick wired in the editor to Application.OpenURL /
@@ -243,6 +244,7 @@ public static class ContentPoliceControl
             {
                 BasisShaderPrewarm.Warm(rawRenderers, SearchAndDestroy.name);
             }
+            BasisGraphicsStatePrewarm.WarmResident(SearchAndDestroy.name);
         }
         if (harvest != null && SearchAndDestroy != null && SearchAndDestroy.TryGetComponent(out BasisContentBase contentBase))
         {
@@ -365,6 +367,7 @@ public static class ContentPoliceControl
         {
             BasisShaderPrewarm.Warm(renderersForPrewarm, targetScene.name);
         }
+        BasisGraphicsStatePrewarm.WarmResident(targetScene.name);
     }
 
     // ------------------------------------------------------------------

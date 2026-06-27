@@ -49,13 +49,10 @@ public static class SettingsProviderIK
         tabDesc.SetTitle(BasisLocalization.Get("settings.tab.bodytracking"));
         tabDesc.SetIcon(AddressableAssets.Sprites.Settings);
 
-        // --- Group: "Body Tracking" (replaces tab.Group(...)) ---
-        var ikGroup = PanelElementDescriptor.CreateNew(
-            PanelElementDescriptor.ElementStyles.Group,
-            tabDesc.ContentParent);
-
-        ikGroup.SetTitle(BasisLocalization.Get("settings.tab.bodytracking"));
-        ikGroup.SetIcon(AddressableAssets.Sprites.Settings);
+        // --- Collapsible section: "Body Tracking" (default closed) ---
+        var ikSectionToggle = PanelSectionToggle.CreateNewEntry(tabDesc.ContentParent);
+        var ikGroup = PanelSectionToggleHelpers.CreateCollapsibleContentGroup(
+            ikSectionToggle, tabDesc.ContentParent, BasisLocalization.Get("settings.tab.bodytracking"), false);
 
         var ikParent = ikGroup.ContentParent;
 
@@ -174,10 +171,10 @@ public static class SettingsProviderIK
         // ------------------
         // Advanced IK toggle
         // ------------------
-        var advancedToggle = PanelToggle.CreateNewEntry(tabDesc.ContentParent);
-        advancedToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.advanced"));
+        var advancedToggle = PanelSectionToggle.CreateNewEntry(tabDesc.ContentParent);
+        advancedToggle.SetTitle(BasisLocalization.Get("settings.bodyTracking.advanced"));
         advancedToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.advanced.tooltip"));
-        advancedToggle.AssignBinding(BasisSettingsDefaults.FBIKAdvancedVisible);
+        advancedToggle.BindToToggle(BasisSettingsDefaults.FBIKAdvancedVisible);
 
         var colliderGroup = PanelElementDescriptor.CreateNew(
             PanelElementDescriptor.ElementStyles.Group,
@@ -185,6 +182,7 @@ public static class SettingsProviderIK
 
         colliderGroup.SetTitle(BasisLocalization.Get("settings.bodyTracking.colliders.title"));
         colliderGroup.SetIcon(AddressableAssets.Sprites.Settings);
+        advancedToggle.RegisterContentContainer(colliderGroup);
 
         var colliderParent = colliderGroup.ContentParent;
 
@@ -940,22 +938,27 @@ public static class SettingsProviderIK
             }
         });
 
-        // ONE RESET BUTTON FOR THIS PAGE
-        SettingsProvider.AddResetPageButton(tabDesc.ContentParent, "Body Tracking", ResetIkDefaults);
-
-
         colliderGroup.gameObject.SetActive(BasisSettingsDefaults.FBIKAdvancedVisible.RawValue);
-        advancedToggle.OnValueChanged += visible =>
+        advancedToggle.OnExpandedChanged += visible =>
         {
             colliderGroup.gameObject.SetActive(visible);
             tabDesc.ForceRebuild();
             colliderGroup.GetComponentInParent<PanelElementDescriptor>()?.ForceRebuild();
         };
 
+        PanelSectionToggleHelpers.FinalizeCollapsibleGroup(ikSectionToggle, ikGroup, false, _ =>
+        {
+            ikGroup.ForceRebuild();
+            tabDesc.ForceRebuild();
+        });
+
         // ------------------
         // Debug Section
         // ------------------
         BuildDebugSection(tabDesc);
+
+        // ONE RESET BUTTON FOR THIS PAGE — kept last so debug info sits above it.
+        SettingsProvider.AddResetPageButton(tabDesc.ContentParent, "Body Tracking", ResetIkDefaults);
 
         tabDesc.ForceRebuild();
         return tabPage;
@@ -980,8 +983,8 @@ public static class SettingsProviderIK
 
     private static void BuildDebugSection(PanelElementDescriptor tabDesc)
     {
-        var debugToggle = PanelToggle.CreateNewEntry(tabDesc.ContentParent);
-        debugToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.debugInfo"));
+        var debugToggle = PanelSectionToggle.CreateNewEntry(tabDesc.ContentParent);
+        debugToggle.SetTitle(BasisLocalization.Get("settings.bodyTracking.debugInfo"));
         debugToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.debugInfo.tooltip"));
 
         var debugGroup = PanelElementDescriptor.CreateNew(
@@ -990,6 +993,7 @@ public static class SettingsProviderIK
 
         debugGroup.SetTitle(BasisLocalization.Get("settings.bodyTracking.heightDebug.title"));
         debugGroup.SetIcon(AddressableAssets.Sprites.Settings);
+        debugToggle.RegisterContentContainer(debugGroup);
 
         var debugParent = debugGroup.ContentParent;
 
@@ -1021,8 +1025,8 @@ public static class SettingsProviderIK
         RefreshDebugData();
 
         debugGroup.gameObject.SetActive(false);
-        debugToggle.SetValueWithoutNotify(false);
-        debugToggle.OnValueChanged += visible =>
+        debugToggle.SetExpandedWithoutNotify(false);
+        debugToggle.OnExpandedChanged += visible =>
         {
             debugGroup.gameObject.SetActive(visible);
             if (visible)
@@ -1372,30 +1376,22 @@ public static class SettingsProviderIK
     {
         var parent = parentGroup.ContentParent;
 
-        var sectionToggle = PanelToggle.CreateNewEntry(parent);
-        sectionToggle.Descriptor.SetTitle(title);
+        var sectionToggle = PanelSectionToggle.CreateNewEntry(parent);
         // Section blurb on hover (tooltip) instead of inline, to keep the page compact.
         sectionToggle.Descriptor.SetTooltip(description);
 
-        var sectionGroup = PanelElementDescriptor.CreateNew(
-            PanelElementDescriptor.ElementStyles.Group,
-            parent);
-        sectionGroup.SetTitle(title);
+        var sectionGroup = PanelSectionToggleHelpers.CreateCollapsibleContentGroup(sectionToggle, parent, title);
         sectionGroup.SetIcon(AddressableAssets.Sprites.Settings);
 
         // Add content while the group is still active so child component Awake/Start runs and
         // their text initializes. SetActive(false) before attach would orphan their lifecycle.
         addContent(sectionGroup.ContentParent);
 
-        sectionGroup.gameObject.SetActive(defaultOpen);
-        sectionToggle.SetValueWithoutNotify(defaultOpen);
-
-        sectionToggle.OnValueChanged += visible =>
+        PanelSectionToggleHelpers.FinalizeCollapsibleGroup(sectionToggle, sectionGroup, defaultOpen, _ =>
         {
-            sectionGroup.gameObject.SetActive(visible);
             tabDesc.ForceRebuild();
             parentGroup.ForceRebuild();
-        };
+        });
     }
 
 }

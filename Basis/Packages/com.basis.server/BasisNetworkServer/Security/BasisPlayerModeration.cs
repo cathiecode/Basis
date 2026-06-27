@@ -384,6 +384,11 @@ namespace BasisNetworkServer.Security
                         HandleAvatarScaleLimitsSet(peer, reader));
                     break;
 
+                case AdminRequestMode.SetGlobalResourceLimits:
+                    Require(peer, PermNodes.ModerationGlobalLock, () =>
+                        HandleResourceLimitsSet(peer, reader));
+                    break;
+
                 case AdminRequestMode.RequestAllLogs:
                     Require(peer, PermNodes.AdminLogs, () =>
                         BasisServerLogBundleService.SendAllLogsToPeer(peer));
@@ -436,19 +441,19 @@ namespace BasisNetworkServer.Security
                         SendBackMessage(peer, ApplyServerMotd(reader.GetString())));
                     break;
 
-                case AdminRequestMode.SetWhitelistMode:
+                case AdminRequestMode.SetAllowlistMode:
                     Require(peer, PermNodes.ConfigurationEditor, () =>
-                        SendBackMessage(peer, ApplyWhitelistMode(reader.GetByte())));
+                        SendBackMessage(peer, ApplyAllowlistMode(reader.GetByte())));
                     break;
 
-                case AdminRequestMode.AddWhitelist:
-                    Require(peer, PermNodes.ModerationWhitelist, () =>
-                        SendBackMessage(peer, ApplyWhitelistAdd(reader.GetString())));
+                case AdminRequestMode.AddAllowlist:
+                    Require(peer, PermNodes.ModerationAllowlist, () =>
+                        SendBackMessage(peer, ApplyAllowlistAdd(reader.GetString())));
                     break;
 
-                case AdminRequestMode.RemoveWhitelist:
-                    Require(peer, PermNodes.ModerationWhitelist, () =>
-                        SendBackMessage(peer, ApplyWhitelistRemove(reader.GetString())));
+                case AdminRequestMode.RemoveAllowlist:
+                    Require(peer, PermNodes.ModerationAllowlist, () =>
+                        SendBackMessage(peer, ApplyAllowlistRemove(reader.GetString())));
                     break;
 
                 case AdminRequestMode.AddDefaultLibraryItem:
@@ -502,11 +507,11 @@ namespace BasisNetworkServer.Security
             return "Server MOTD updated.";
         }
 
-        private static string ApplyWhitelistMode(byte mode)
+        private static string ApplyAllowlistMode(byte mode)
         {
-            if (!Enum.IsDefined(typeof(BasisUserRestrictionMode), mode))
-                return $"Unknown restriction mode value {mode}.";
             BasisUserRestrictionMode parsed = (BasisUserRestrictionMode)mode;
+            if (!Enum.IsDefined(typeof(BasisUserRestrictionMode), parsed))
+                return $"Unknown restriction mode value {mode}.";
             NetworkServer.Configuration.BasisUserRestrictionMode = parsed;
 
             if (parsed == BasisUserRestrictionMode.RejoinOnly)
@@ -520,22 +525,22 @@ namespace BasisNetworkServer.Security
             return $"Restriction mode set to {parsed}.";
         }
 
-        private static string ApplyWhitelistAdd(string uuid)
+        private static string ApplyAllowlistAdd(string uuid)
         {
             if (string.IsNullOrWhiteSpace(uuid)) return "UUID was empty.";
-            if (NetworkServer.Whitelist == null) return "Whitelist not initialized.";
-            // Fire-and-forget: BasisWhiteList.AddToWhitelistAsync appends one line and
+            if (NetworkServer.AllowList == null) return "AllowList not initialized.";
+            // Fire-and-forget: BasisAllowList.AddToAllowlistAsync appends one line and
             // is safe to leave running while we report the operation back to the admin.
-            _ = NetworkServer.Whitelist.AddToWhitelistAsync(uuid);
-            return $"Added {uuid} to whitelist.";
+            _ = NetworkServer.AllowList.AddToAllowlistAsync(uuid);
+            return $"Added {uuid} to allowlist.";
         }
 
-        private static string ApplyWhitelistRemove(string uuid)
+        private static string ApplyAllowlistRemove(string uuid)
         {
             if (string.IsNullOrWhiteSpace(uuid)) return "UUID was empty.";
-            if (NetworkServer.Whitelist == null) return "Whitelist not initialized.";
-            _ = NetworkServer.Whitelist.RemoveFromWhitelistAsync(uuid);
-            return $"Removed {uuid} from whitelist.";
+            if (NetworkServer.AllowList == null) return "AllowList not initialized.";
+            _ = NetworkServer.AllowList.RemoveFromAllowlistAsync(uuid);
+            return $"Removed {uuid} from allowlist.";
         }
 
         private static string ApplyAddDefaultLibraryItem(byte mode, string url, string password)
@@ -762,6 +767,22 @@ namespace BasisNetworkServer.Security
             SaveConfig();
             BasisAvatarScaleLimitManager.BroadcastState();
             SendBackMessage(peer, $"Avatar scale limits set: {NetworkServer.Configuration.MinAvatarEyeHeightMeters} m .. {NetworkServer.Configuration.MaxAvatarEyeHeightMeters} m.");
+        }
+
+        private static void HandleResourceLimitsSet(NetPeer peer, NetPacketReader reader)
+        {
+            int maxDatabaseEntries = reader.GetInt();
+            int maxDatabaseNameLength = reader.GetInt();
+            int maxDatabasePayloadEntries = reader.GetInt();
+            int maxContentSpheresPerPlayer = reader.GetInt();
+            BasisResourceLimitManager.SetLimits(maxDatabaseEntries, maxDatabaseNameLength, maxDatabasePayloadEntries, maxContentSpheresPerPlayer);
+            NetworkServer.Configuration.MaxDatabaseEntries = BasisResourceLimitManager.MaxDatabaseEntries;
+            NetworkServer.Configuration.MaxDatabaseNameLength = BasisResourceLimitManager.MaxDatabaseNameLength;
+            NetworkServer.Configuration.MaxDatabasePayloadEntries = BasisResourceLimitManager.MaxDatabasePayloadEntries;
+            NetworkServer.Configuration.MaxContentSpheresPerPlayer = BasisResourceLimitManager.MaxContentSpheresPerPlayer;
+            SaveConfig();
+            BasisResourceLimitManager.BroadcastState();
+            SendBackMessage(peer, $"Resource limits set: db entries {BasisResourceLimitManager.MaxDatabaseEntries}, name length {BasisResourceLimitManager.MaxDatabaseNameLength}, payload entries {BasisResourceLimitManager.MaxDatabasePayloadEntries}, spheres/player {BasisResourceLimitManager.MaxContentSpheresPerPlayer}.");
         }
 
         /// <summary>

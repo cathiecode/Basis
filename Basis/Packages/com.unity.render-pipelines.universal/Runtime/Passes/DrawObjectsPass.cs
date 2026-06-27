@@ -197,16 +197,8 @@ namespace UnityEngine.Rendering.Universal.Internal
 #endif
             DrawingSettings drawSettings = RenderingUtils.CreateDrawingSettings(m_ShaderTagIdList, renderingData, cameraData, lightData, sortFlags);
 
-            if (zWriteOff)
-            {
-                m_RenderStateBlock.depthState = new DepthState(false, CompareFunction.Equal);
-                m_RenderStateBlock.mask |= RenderStateMask.Depth;
-            }
-            else 
-            {
-                m_RenderStateBlock.depthState = DepthState.defaultValue;
-                m_RenderStateBlock.mask &= ~RenderStateMask.Depth;
-            }
+            m_RenderStateBlock.depthState = DepthState.defaultValue;
+            m_RenderStateBlock.mask &= ~RenderStateMask.Depth;
 
             var activeDebugHandler = GetActiveDebugHandler(cameraData);
             if (activeDebugHandler != null)
@@ -248,7 +240,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 if (depthTarget.IsValid())
                 {
-                    var depthAccessFlags = (disableZWrite) ? AccessFlags.Read : AccessFlags.ReadWrite;
+                    var depthAccessFlags = AccessFlags.ReadWrite;
                     passData.depthHdl = depthTarget;
                     builder.SetRenderAttachmentDepth(depthTarget, depthAccessFlags);
                 }
@@ -301,6 +293,21 @@ namespace UnityEngine.Rendering.Universal.Internal
                     }
 #endif
                 }
+
+#if !UNITY_ANDROID
+                // Basis VRS injection: bind a custom shading rate image when one was produced this frame.
+                // Desktop only; skipped on XR hardware foveation so we never override native foveated rendering.
+                if (frameData.Contains<UniversalShadingRateData>())
+                {
+                    var basisVrs = frameData.Get<UniversalShadingRateData>();
+                    bool xrFoveated = cameraData.xr.enabled && cameraData.xr.supportsFoveatedRendering;
+                    if (basisVrs.isValid && basisVrs.shadingRateImage.IsValid() && !xrFoveated)
+                    {
+                        builder.SetShadingRateImageAttachment(basisVrs.shadingRateImage);
+                        builder.SetShadingRateCombiner(ShadingRateCombinerStage.Fragment, ShadingRateCombiner.Override);
+                    }
+                }
+#endif
 
                 builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                 {
@@ -375,7 +382,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 builder.SetRenderAttachment(renderingLayersTexture, 1, AccessFlags.Write);
 
                 bool disableZWrite = CanDisableZWrite(cameraData, passData.basePassData.isOpaque);
-                var depthAccessFlags = (disableZWrite) ? AccessFlags.Read : AccessFlags.ReadWrite;
+                var depthAccessFlags = AccessFlags.ReadWrite;
                 passData.basePassData.depthHdl = depthTarget;
                 builder.SetRenderAttachmentDepth(depthTarget, depthAccessFlags);
 
@@ -420,6 +427,21 @@ namespace UnityEngine.Rendering.Universal.Internal
                         builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
                     }
                 }
+
+#if !UNITY_ANDROID
+                // Basis VRS injection: same shading rate as the prepass/opaque paths so depth
+                // priming stays consistent. Desktop only; skipped on XR hardware foveation.
+                if (frameData.Contains<UniversalShadingRateData>())
+                {
+                    var basisVrs = frameData.Get<UniversalShadingRateData>();
+                    bool xrFoveated = cameraData.xr.enabled && cameraData.xr.supportsFoveatedRendering;
+                    if (basisVrs.isValid && basisVrs.shadingRateImage.IsValid() && !xrFoveated)
+                    {
+                        builder.SetShadingRateImageAttachment(basisVrs.shadingRateImage);
+                        builder.SetShadingRateCombiner(ShadingRateCombinerStage.Fragment, ShadingRateCombiner.Override);
+                    }
+                }
+#endif
 
                 builder.SetRenderFunc(static (RenderingLayersPassData data, RasterGraphContext context) =>
                 {

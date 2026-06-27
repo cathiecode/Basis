@@ -220,6 +220,73 @@ namespace Basis.Network.Core
         public const byte P2PSub_ServerArmed = 5;
         public const byte P2PSub_LinkUp = 6;
 
+        // ── Direct-connect custom data (P2P-first, server fallback) ──────────
+        /// <summary>P2P world/prop direct custom data. Frame: [messageIndex:2][payload].</summary>
+        public const byte DirectSceneChannel = 56;
+        /// <summary>Server relay of a direct-origin scene message (recipients with no direct link).</summary>
+        public const byte DirectSceneServerChannel = 57;
+        /// <summary>P2P avatar direct custom data. Frame: [messageIndex:1][avatarLinkIndex:1][payload].</summary>
+        public const byte DirectAvatarChannel = 58;
+        /// <summary>Server relay of a direct-origin avatar message (recipients with no direct link).</summary>
+        public const byte DirectAvatarServerChannel = 59;
+
+        // ── Dynamic message registry (subscribe & supply) ────────────────────
+        // Channels 60-63 carry the dynamic message layer negotiated at connect.
+        // 60 negotiates the registry; 61-63 multiplex plugin payloads keyed by a
+        // ushort message id, one channel per delivery semantic. Core channels
+        // 0-59 keep their own dedicated channels and ordering streams.
+        /// <summary>Registry handshake. First payload byte is a RegistrySub_* sub-type.</summary>
+        public const byte RegistryControlChannel = 60;
+        /// <summary>Reliable-ordered plugin payloads. Frame: [messageId:2][payload].</summary>
+        public const byte PluginReliableChannel = 61;
+        /// <summary>Sequenced plugin payloads. Frame: [messageId:2][payload].</summary>
+        public const byte PluginSequencedChannel = 62;
+        /// <summary>Unreliable plugin payloads. Frame: [messageId:2][payload].</summary>
+        public const byte PluginUnreliableChannel = 63;
+
+        /// <summary>RegistryControlChannel sub-type: server to client full descriptor manifest.</summary>
+        public const byte RegistrySub_Supply = 0;
+        /// <summary>RegistryControlChannel sub-type: client to server list of message ids it can handle.</summary>
+        public const byte RegistrySub_Subscribe = 1;
+
+        /// <summary>Maps a plugin DeliveryMethod to its multiplexed channel (61-63). Returns RegistryControlChannel for unmapped values.</summary>
+        public static byte GetPluginChannelForDelivery(DeliveryMethod delivery)
+        {
+            switch (delivery)
+            {
+                case DeliveryMethod.ReliableOrdered:
+                case DeliveryMethod.ReliableUnordered:
+                case DeliveryMethod.ReliableSequenced:
+                    return PluginReliableChannel;
+                case DeliveryMethod.Sequenced:
+                    return PluginSequencedChannel;
+                case DeliveryMethod.Unreliable:
+                    return PluginUnreliableChannel;
+                default:
+                    return RegistryControlChannel;
+            }
+        }
+
+        /// <summary>Canonical DeliveryMethod for a multiplexed plugin channel (reverse of GetPluginChannelForDelivery).</summary>
+        public static DeliveryMethod GetDeliveryForPluginChannel(byte channel)
+        {
+            switch (channel)
+            {
+                case PluginSequencedChannel:
+                    return DeliveryMethod.Sequenced;
+                case PluginUnreliableChannel:
+                    return DeliveryMethod.Unreliable;
+                default:
+                    return DeliveryMethod.ReliableOrdered;
+            }
+        }
+
+        /// <summary>True if the channel is one of the multiplexed plugin channels (61-63) carrying a [messageId:2] prefix.</summary>
+        public static bool IsPluginChannel(byte channel)
+        {
+            return channel >= PluginReliableChannel && channel <= PluginUnreliableChannel;
+        }
+
         // ── Server info unconnected query ────────────────────────────────────
         // Out-of-band UDP probe: a client can hit the server's port without
         // authenticating and get back a name/online/max/MOTD payload — same

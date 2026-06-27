@@ -38,11 +38,11 @@ namespace Basis.Scripts.Networking.Receivers
 
         [SerializeReference]
         public BasisAudioReceiver AudioReceiverModule = new BasisAudioReceiver();
-        [SerializeField]
+        [System.NonSerialized]
         public ConcurrentQueue<BasisAvatarBuffer> PayloadQueue = new ConcurrentQueue<BasisAvatarBuffer>();
         // Volatile counter avoids ConcurrentQueue.TryDequeue on empty queues (1k volatile reads vs 1k TryDequeue).
         private volatile int _pendingCount;
-        public BasisRemotePlayer RemotePlayer;
+        [System.NonSerialized] public BasisRemotePlayer RemotePlayer;
 
         public bool hasEvents = false;
         /// <summary>
@@ -88,7 +88,7 @@ namespace Basis.Scripts.Networking.Receivers
         /// T-pose local rotations for this receiver's avatar bones.
         /// Set during calibration and passed to RemoteBoneJobSystem for the skeleton apply job.
         /// </summary>
-        public NativeArray<quaternion> TposeLocalRotations;
+        [System.NonSerialized] public NativeArray<quaternion> TposeLocalRotations;
 
         /// <summary>
         /// Bone transforms for this receiver's avatar.
@@ -577,11 +577,22 @@ namespace Basis.Scripts.Networking.Receivers
                 bool isSameAvatar = Remote.AvatarLinkIndex == LastLinkedAvatarIndex;
                 if (isSameAvatar)
                 {
-                    NetworkBehaviours[message.Key].OnNetworkMessageReceived(
-                        playerIdMessage.playerID,
-                        Remote.payload,
-                        message.Value.Method
-                    );
+                    if (message.Value.Direct)
+                    {
+                        NetworkBehaviours[message.Key].OnDirectNetworkMessageReceived(
+                            playerIdMessage.playerID,
+                            Remote.payload,
+                            message.Value.Method
+                        );
+                    }
+                    else
+                    {
+                        NetworkBehaviours[message.Key].OnNetworkMessageReceived(
+                            playerIdMessage.playerID,
+                            Remote.payload,
+                            message.Value.Method
+                        );
+                    }
                     keysToRemove.Add(message.Key);
                 }
                 else

@@ -146,9 +146,9 @@ public static class BasisNetworkModeration
             w => w.Put(uuid));
     }
 
-    // ── Server config / whitelist (admin) ────────────────────────────────────
+    // ── Server config / allowlist (admin) ────────────────────────────────────
     // Each of these triggers a server-side write to config/config.xml or
-    // BasisWhiteList.txt so the change is durable across restarts.
+    // BasisAllowList.txt so the change is durable across restarts.
 
     public static void SetServerName(string name)
     {
@@ -160,21 +160,21 @@ public static class BasisNetworkModeration
         SendAdminRequest(AdminRequestMode.SetServerMotd, w => w.Put(motd ?? string.Empty));
     }
 
-    public static void SetWhitelistMode(BasisUserRestrictionMode mode)
+    public static void SetAllowlistMode(BasisUserRestrictionMode mode)
     {
-        SendAdminRequest(AdminRequestMode.SetWhitelistMode, w => w.Put((byte)mode));
+        SendAdminRequest(AdminRequestMode.SetAllowlistMode, w => w.Put((byte)mode));
     }
 
-    public static void AddWhitelist(string uuid)
+    public static void AddAllowlist(string uuid)
     {
         if (!ValidateString(uuid, nameof(uuid))) return;
-        SendAdminRequest(AdminRequestMode.AddWhitelist, w => w.Put(uuid));
+        SendAdminRequest(AdminRequestMode.AddAllowlist, w => w.Put(uuid));
     }
 
-    public static void RemoveWhitelist(string uuid)
+    public static void RemoveAllowlist(string uuid)
     {
         if (!ValidateString(uuid, nameof(uuid))) return;
-        SendAdminRequest(AdminRequestMode.RemoveWhitelist, w => w.Put(uuid));
+        SendAdminRequest(AdminRequestMode.RemoveAllowlist, w => w.Put(uuid));
     }
 
     /// <summary>
@@ -346,6 +346,10 @@ public static class BasisNetworkModeration
 
             case AdminRequestMode.GlobalGetAvatarScaleLimits:
                 HandleAvatarScaleLimits(reader);
+                break;
+
+            case AdminRequestMode.GlobalGetResourceLimits:
+                HandleResourceLimits(reader);
                 break;
 
             case AdminRequestMode.LogBundleBegin:
@@ -684,7 +688,7 @@ public static class BasisNetworkModeration
     public static event Action<byte> OnGlobalCameraPolicyChanged;
 
     /// <summary>
-    /// Server-pushed player join restriction mode (Normal / WhiteList / RejoinOnly). Cached from the
+    /// Server-pushed player join restriction mode (Normal / AllowList / RejoinOnly). Cached from the
     /// lock-state payload — sent on connect and whenever an admin changes it — so the admin panel
     /// toggles can reflect the live server state instead of always reading off.
     /// </summary>
@@ -1007,6 +1011,45 @@ public static class BasisNetworkModeration
             AdminRequestMode.SetGlobalAvatarScaleLimits,
             w => w.Put(minMeters),
             w => w.Put(maxMeters));
+    }
+
+    /// <summary>Server-pushed cap on stored persistent-database entries.</summary>
+    public static int ServerMaxDatabaseEntries { get; private set; } = 10000;
+    /// <summary>Server-pushed cap on a persistent-database entry name length.</summary>
+    public static int ServerMaxDatabaseNameLength { get; private set; } = 256;
+    /// <summary>Server-pushed cap on entries in a single persistent-database payload.</summary>
+    public static int ServerMaxDatabasePayloadEntries { get; private set; } = 1000;
+    /// <summary>Server-pushed cap on active content-share spheres per player.</summary>
+    public static int ServerMaxContentSpheresPerPlayer { get; private set; } = 32;
+
+    /// <summary>Fired when the server pushes new resource limits (db entries, name length, payload entries, spheres/player).</summary>
+    public static event Action<int, int, int, int> OnResourceLimitsChanged;
+
+    private static void HandleResourceLimits(NetDataReader reader)
+    {
+        ServerMaxDatabaseEntries = reader.GetInt();
+        ServerMaxDatabaseNameLength = reader.GetInt();
+        ServerMaxDatabasePayloadEntries = reader.GetInt();
+        ServerMaxContentSpheresPerPlayer = reader.GetInt();
+        OnResourceLimitsChanged?.Invoke(ServerMaxDatabaseEntries, ServerMaxDatabaseNameLength, ServerMaxDatabasePayloadEntries, ServerMaxContentSpheresPerPlayer);
+    }
+
+    /// <summary>
+    /// Admin: set the server-wide resource caps (persistent database growth + content spheres per player).
+    /// Persisted to config.xml and broadcast to every admin panel.
+    /// </summary>
+    public static void SetGlobalResourceLimits(int maxDatabaseEntries, int maxDatabaseNameLength, int maxDatabasePayloadEntries, int maxContentSpheresPerPlayer)
+    {
+        if (maxDatabaseEntries < 1) maxDatabaseEntries = 1;
+        if (maxDatabaseNameLength < 1) maxDatabaseNameLength = 1;
+        if (maxDatabasePayloadEntries < 1) maxDatabasePayloadEntries = 1;
+        if (maxContentSpheresPerPlayer < 1) maxContentSpheresPerPlayer = 1;
+        SendAdminRequest(
+            AdminRequestMode.SetGlobalResourceLimits,
+            w => w.Put(maxDatabaseEntries),
+            w => w.Put(maxDatabaseNameLength),
+            w => w.Put(maxDatabasePayloadEntries),
+            w => w.Put(maxContentSpheresPerPlayer));
     }
 
     private static void HandleGlobalHeadlessDisallowState(NetDataReader reader)

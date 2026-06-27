@@ -163,8 +163,8 @@
       "value": "How far away other players' avatars stay visible."
     },
     {
-      "key": "settings.developer.avatarDistance.tooltip",
-      "value": "Hide distant avatars beyond your set range to save performance."
+      "key": "settings.graphics.avatarRangeIndicator.tooltip",
+      "value": "Show a circle at your feet marking how far away other avatars stay visible."
     },
     {
       "key": "settings.general.limitAvatars.tooltip",
@@ -437,6 +437,10 @@
     {
       "key": "settings.developer.materialCorrection.tooltip",
       "value": "Automatically fix incompatible avatar materials on load."
+    },
+    {
+      "key": "settings.developer.graphicsStatePrewarm.tooltip",
+      "value": "Cache and pre-create full GPU pipeline states to reduce hitches on repeat loads."
     },
     {
       "key": "settings.developer.buildInfo.tooltip",
@@ -1571,24 +1575,24 @@
       "value": "Save the typed message of the day and apply it on the server."
     },
     {
-      "key": "settings.admin.title.whitelistOnly.tooltip",
-      "value": "Allow only whitelisted players to connect to this server."
+      "key": "settings.admin.title.allowlistOnly.tooltip",
+      "value": "Allow only allowlisted players to connect to this server."
     },
     {
       "key": "settings.admin.title.rejoinLockOnly.tooltip",
       "value": "Lock the server to the players connected now — they can rejoin, but nobody new can join. Admins can still join; clears on restart."
     },
     {
-      "key": "settings.admin.title.whitelistUuid.tooltip",
-      "value": "The player identifier to add to or remove from the whitelist."
+      "key": "settings.admin.title.allowlistUuid.tooltip",
+      "value": "The player identifier to add to or remove from the allowlist."
     },
     {
-      "key": "settings.admin.title.addToWhitelist.tooltip",
-      "value": "Add the entered player identifier to the server whitelist."
+      "key": "settings.admin.title.addToAllowList.tooltip",
+      "value": "Add the entered player identifier to the server allowlist."
     },
     {
-      "key": "settings.admin.title.removeFromWhitelist.tooltip",
-      "value": "Remove the entered player identifier from the server whitelist."
+      "key": "settings.admin.title.removeFromAllowList.tooltip",
+      "value": "Remove the entered player identifier from the server allowlist."
     },
     {
       "key": "settings.admin.title.requestAllLogs.tooltip",
@@ -3167,6 +3171,10 @@
       "value": "Sync Spawn"
     },
     {
+      "key": "library.downloadForEveryone",
+      "value": "Download for Everyone"
+    },
+    {
       "key": "library.spawnedCount",
       "value": "({0} spawned)"
     },
@@ -3203,6 +3211,10 @@
       "value": "Everyone (Instant)"
     },
     {
+      "key": "library.networkType.predownload",
+      "value": "Everyone (Pre-Download)"
+    },
+    {
       "key": "library.networkType.loadOnBoot",
       "value": "Load on Boot"
     },
@@ -3213,6 +3225,10 @@
     {
       "key": "library.networkType.networked.description",
       "value": "The item will be spawned on all connected players immediately."
+    },
+    {
+      "key": "library.networkType.predownload.description",
+      "value": "Downloads this to everyone currently here without spawning it, so a later load is instant for them."
     },
     {
       "key": "library.networkType.synchronized.description",
@@ -3383,6 +3399,14 @@
       "value": "Are you sure you want to remove this {0}?"
     },
     {
+      "key": "library.dialog.unloadExisting.title",
+      "value": "Unload existing content?"
+    },
+    {
+      "key": "library.dialog.unloadExisting.body",
+      "value": "Do you want to unload all existing world and prop content before loading this world?"
+    },
+    {
       "key": "library.dialog.share.title",
       "value": "Share {0}?"
     },
@@ -3445,6 +3469,154 @@
     {
       "key": "settings.developer.title",
       "value": "Developer & Debug"
+    },
+    {
+      "key": "settings.developer.bugReport.title",
+      "value": "Report a Bug"
+    },
+    {
+      "key": "settings.developer.bugReport.description",
+      "value": "File a bug report. Fill in the details, then Open on GitHub launches the pre-filled bug form in your browser, or Send to Server uploads it to the connected Basis server like a crash report. Fields marked * are required."
+    },
+    {
+      "key": "settings.developer.bugReport.enable",
+      "value": "Enable Bug Reporting"
+    },
+    {
+      "key": "settings.developer.bugReport.enable.tooltip",
+      "value": "Reveal the bug report form. Build info and recent logs are attached automatically on submit."
+    },
+    {
+      "key": "settings.developer.bugReport.summary",
+      "value": "Title"
+    },
+    {
+      "key": "settings.developer.bugReport.summary.tooltip",
+      "value": "A short, descriptive summary of the bug. Becomes the GitHub issue title."
+    },
+    {
+      "key": "settings.developer.bugReport.describe",
+      "value": "Describe the bug? *"
+    },
+    {
+      "key": "settings.developer.bugReport.describe.tooltip",
+      "value": "Plainly detail what actually happened."
+    },
+    {
+      "key": "settings.developer.bugReport.repro",
+      "value": "Steps to reproduce *"
+    },
+    {
+      "key": "settings.developer.bugReport.repro.tooltip",
+      "value": "The steps needed to reproduce the behavior."
+    },
+    {
+      "key": "settings.developer.bugReport.expected",
+      "value": "Expected behavior *"
+    },
+    {
+      "key": "settings.developer.bugReport.expected.tooltip",
+      "value": "What you expected to happen instead."
+    },
+    {
+      "key": "settings.developer.bugReport.screenshots",
+      "value": "Screenshots"
+    },
+    {
+      "key": "settings.developer.bugReport.screenshots.tooltip",
+      "value": "Links to images or video. You can also attach media after the GitHub page opens."
+    },
+    {
+      "key": "settings.developer.bugReport.build",
+      "value": "Build info *"
+    },
+    {
+      "key": "settings.developer.bugReport.build.tooltip",
+      "value": "Auto-filled from your current build and hardware. Leave as-is unless you need to edit it."
+    },
+    {
+      "key": "settings.developer.bugReport.logs",
+      "value": "Log files *"
+    },
+    {
+      "key": "settings.developer.bugReport.logs.tooltip",
+      "value": "A snippet of the log around the problem. Use Attach Recent Logs to fill this from the current session."
+    },
+    {
+      "key": "settings.developer.bugReport.attachLogs",
+      "value": "Attach Recent Logs"
+    },
+    {
+      "key": "settings.developer.bugReport.attachLogs.tooltip",
+      "value": "Fill the Log files field with the tail of this session's log."
+    },
+    {
+      "key": "settings.developer.bugReport.context",
+      "value": "Additional context"
+    },
+    {
+      "key": "settings.developer.bugReport.context.tooltip",
+      "value": "Any other detail about the issue."
+    },
+    {
+      "key": "settings.developer.bugReport.submit",
+      "value": "Open on GitHub"
+    },
+    {
+      "key": "settings.developer.bugReport.submit.tooltip",
+      "value": "Open the pre-filled GitHub bug form in your browser to review and submit."
+    },
+    {
+      "key": "settings.developer.bugReport.copy",
+      "value": "Copy Report to Clipboard"
+    },
+    {
+      "key": "settings.developer.bugReport.copy.tooltip",
+      "value": "Copy the report as Markdown so you can paste it into GitHub manually."
+    },
+    {
+      "key": "settings.developer.bugReport.missingFields",
+      "value": "Please fill in the required fields (marked *) before opening the report."
+    },
+    {
+      "key": "settings.developer.bugReport.opened",
+      "value": "Opening the pre-filled bug report in your browser. Review the details and submit on GitHub."
+    },
+    {
+      "key": "settings.developer.bugReport.openedTrimmed",
+      "value": "The report was too long for the URL, so the full text was copied to your clipboard. Review the GitHub form and paste anything that is missing."
+    },
+    {
+      "key": "settings.developer.bugReport.copied",
+      "value": "Bug report copied to clipboard as Markdown."
+    },
+    {
+      "key": "settings.developer.bugReport.trimmedNotice",
+      "value": "(trimmed — full report copied to clipboard; paste it here)"
+    },
+    {
+      "key": "settings.developer.bugReport.noLogs",
+      "value": "(no logs captured this session)"
+    },
+    {
+      "key": "settings.developer.bugReport.sendServer",
+      "value": "Send to Server"
+    },
+    {
+      "key": "settings.developer.bugReport.sendServer.tooltip",
+      "value": "Upload this report to the connected Basis server, the same way a crash or exception is reported. Requires a server connection with reporting enabled."
+    },
+    {
+      "key": "settings.developer.bugReport.notConnected",
+      "value": "You are not connected to a Basis server. Join a world first, then try again."
+    },
+    {
+      "key": "settings.developer.bugReport.serverDisabled",
+      "value": "The connected server does not have bug/crash reporting enabled, so the report cannot be uploaded."
+    },
+    {
+      "key": "settings.developer.bugReport.sentServer",
+      "value": "Bug report uploaded to the server. Thanks for the report!"
     },
     {
       "key": "settings.developer.recorder.title",
@@ -4027,6 +4199,10 @@
       "value": "Screen Mode"
     },
     {
+      "key": "settings.graphics.overrides.title",
+      "value": "Overrides"
+    },
+    {
       "key": "settings.graphics.mirrorQuality.title",
       "value": "Mirror Quality"
     },
@@ -4120,7 +4296,7 @@
     },
     {
       "key": "settings.graphics.advanced.showAdvanced",
-      "value": "Show Advanced Settings"
+      "value": "Advanced Settings"
     },
     {
       "key": "settings.graphics.renderScale",
@@ -4241,6 +4417,10 @@
     {
       "key": "settings.chat.raycast.color",
       "value": "Raycast Line Colour"
+    },
+    {
+      "key": "settings.chat.menuStyles.title",
+      "value": "Menu Styles"
     },
     {
       "key": "settings.chat.menuEdge.title",
@@ -5628,7 +5808,7 @@
     },
     {
       "key": "settings.trustedUrls.empty.description",
-      "value": "Add one below, or accept a URL when you're prompted in a world."
+      "value": "Approve a URL when you're prompted in a world, or add one manually above."
     },
     {
       "key": "settings.trustedUrls.add.title",
@@ -5681,6 +5861,18 @@
     {
       "key": "settings.trustedUrls.list.description",
       "value": "Click a URL to remove it from the trusted list."
+    },
+    {
+      "key": "settings.trustedUrls.builtIn.title",
+      "value": "Built-in"
+    },
+    {
+      "key": "settings.trustedUrls.builtIn.locked",
+      "value": "Built-in trusted URLs ship with Basis and can't be removed."
+    },
+    {
+      "key": "settings.trustedUrls.added.title",
+      "value": "Added by you"
     },
     {
       "key": "settings.trustedUrls.clickToRemove",
@@ -5887,6 +6079,50 @@
       "value": "…and {0} more"
     },
     {
+      "key": "settings.developer.vrs.title",
+      "value": "Variable Rate Shading"
+    },
+    {
+      "key": "settings.developer.vrs.desktop",
+      "value": "Desktop Variable Rate Shading"
+    },
+    {
+      "key": "settings.developer.vrs.desktop.tooltip",
+      "value": "Experimental. Applies variable rate shading in flatscreen (non-VR) mode, following gaze when eye tracking is available and otherwise keeping the screen center sharp. Requires DirectX 12 and VRS-capable hardware."
+    },
+    {
+      "key": "settings.graphics.vrs.title",
+      "value": "Variable Rate Shading"
+    },
+    {
+      "key": "settings.graphics.vrs",
+      "value": "Gaze Foveated Shading (VR)"
+    },
+    {
+      "key": "settings.graphics.vrs.tooltip",
+      "value": "Lowers shading rate in your peripheral vision and follows your eye-tracking gaze to keep the center sharp, improving GPU performance in VR. Requires DirectX 12 and VRS-capable hardware."
+    },
+    {
+      "key": "settings.graphics.vrs.inner",
+      "value": "Sharp Center Size"
+    },
+    {
+      "key": "settings.graphics.vrs.inner.tooltip",
+      "value": "Size of the full-resolution region centered on your gaze. Everything inside it renders at full shading rate."
+    },
+    {
+      "key": "settings.graphics.vrs.outer",
+      "value": "Periphery Start"
+    },
+    {
+      "key": "settings.graphics.vrs.outer.tooltip",
+      "value": "Where the lowest shading rate (4x4) begins. Between the sharp center and this point renders at half rate (2x2); beyond it renders at quarter rate."
+    },
+    {
+      "key": "settings.developer.featureSections.title",
+      "value": "Feature Sections"
+    },
+    {
       "key": "settings.developer.gizmos.title",
       "value": "Gizmos"
     },
@@ -5987,16 +6223,84 @@
       "value": "Gizmo Labels"
     },
     {
+      "key": "settings.developer.eyeTracking.title",
+      "value": "Eye Tracking"
+    },
+    {
+      "key": "settings.developer.eyeTracking.preferOsc",
+      "value": "Prefer Face Tracking Gaze"
+    },
+    {
+      "key": "settings.developer.eyeTracking.preferOsc.tooltip",
+      "value": "When both a headset's eye gaze and OSC face tracking are active, use the OSC face tracker for gaze. Turn off to prefer the headset's built-in eye gaze. Eyelid/blink always comes from face tracking."
+    },
+    {
+      "key": "settings.developer.eyeTracking.autoFoveation",
+      "value": "Auto Gaze Foveation"
+    },
+    {
+      "key": "settings.developer.eyeTracking.autoFoveation.tooltip",
+      "value": "When an eye-tracking headset is detected, ask once to enable gaze-foveated Variable Rate Shading, then remember the choice per headset. Auto-disables when no eye-tracking headset is present (desktop, or a headset without eye tracking)."
+    },
+    {
+      "key": "settings.eyeFoveation.prompt.title",
+      "value": "Eye Tracking Detected"
+    },
+    {
+      "key": "settings.eyeFoveation.prompt.body",
+      "value": "Your headset reports eye tracking. Enable gaze foveation (Variable Rate Shading) to render in full detail where you look and save GPU elsewhere? You can change this anytime in Settings → Developer → Eye Tracking."
+    },
+    {
+      "key": "settings.eyeFoveation.prompt.enable",
+      "value": "Enable"
+    },
+    {
+      "key": "settings.eyeFoveation.prompt.no",
+      "value": "No"
+    },
+    {
+      "key": "settings.highPlayerCap.prompt.title",
+      "value": "High Player Cap Performance Mode"
+    },
+    {
+      "key": "settings.highPlayerCap.prompt.body",
+      "value": "This instance has over {0} people. Turn on High Player Cap Performance Mode to keep your frame rate up in the crowd?\n\nIt will:\n• Avatar visibility range → {1} m\n• Maximum visible avatars → {2}\n• Pose update LOD bias → {3}\n• Avatar detail → {4}%\n• Avatar view cone → {5}°\n\nDistant and excess avatars are simplified or hidden. You can change any of this anytime in Settings → Graphics."
+    },
+    {
+      "key": "settings.highPlayerCap.prompt.enable",
+      "value": "Enable"
+    },
+    {
+      "key": "settings.highPlayerCap.prompt.no",
+      "value": "Not Now"
+    },
+    {
       "key": "settings.developer.gizmoLabels.description",
       "value": "Billboarded text labels on whichever gizmos are currently shown: tracker roles, linked-pair names, IK collider names, and the audio gizmos (speaker name with net loudness %, hearing distance, voice-cone angle)."
     },
     {
-      "key": "settings.developer.avatarDistance",
-      "value": "Avatar Distance"
+      "key": "settings.graphics.avatarRangeIndicator",
+      "value": "Avatar Range Indicator"
     },
     {
-      "key": "settings.developer.avatarDistance.description",
+      "key": "settings.graphics.avatarRangeIndicator.description",
       "value": "Show avatar visibility range circle at your feet."
+    },
+    {
+      "key": "settings.remoteAudio.hearingRangeIndicator",
+      "value": "Hearing Range Indicator"
+    },
+    {
+      "key": "settings.remoteAudio.hearingRangeIndicator.tooltip",
+      "value": "Show a circle at your feet marking how far away you can hear other players."
+    },
+    {
+      "key": "settings.microphone.rangeIndicator",
+      "value": "Microphone Range Indicator"
+    },
+    {
+      "key": "settings.microphone.rangeIndicator.tooltip",
+      "value": "Show a circle at your feet marking how far your voice reaches. Matches your microphone colour."
     },
     {
       "key": "settings.developer.enableStatistics",
@@ -6053,6 +6357,14 @@
     {
       "key": "settings.developer.materialCorrection.description",
       "value": "Replace broken or unsupported shaders with the URP fallback shader. Off by default; mainly needed during graphics API changes."
+    },
+    {
+      "key": "settings.developer.graphicsStatePrewarm",
+      "value": "Pipeline State Prewarm"
+    },
+    {
+      "key": "settings.developer.graphicsStatePrewarm.description",
+      "value": "Trace and persist full GPU pipeline states (PSOs), then pre-create them on later loads. Off by default; only helps on DX12, Vulkan, and Metal, and the gain is on re-loads of content seen in a previous session."
     },
     {
       "key": "settings.developer.gridSnap.title",
@@ -7643,24 +7955,24 @@
       "value": "Apply MOTD"
     },
     {
-      "key": "settings.admin.title.whitelistOnly",
-      "value": "Whitelist Only"
+      "key": "settings.admin.title.allowlistOnly",
+      "value": "Allowlist Only"
     },
     {
       "key": "settings.admin.title.rejoinLockOnly",
       "value": "Lockdown — Rejoin Only"
     },
     {
-      "key": "settings.admin.title.whitelistUuid",
-      "value": "Whitelist UUID"
+      "key": "settings.admin.title.allowlistUuid",
+      "value": "Allowlist UUID"
     },
     {
-      "key": "settings.admin.title.addToWhitelist",
-      "value": "Add to Whitelist"
+      "key": "settings.admin.title.addToAllowList",
+      "value": "Add to Allowlist"
     },
     {
-      "key": "settings.admin.title.removeFromWhitelist",
-      "value": "Remove from Whitelist"
+      "key": "settings.admin.title.removeFromAllowList",
+      "value": "Remove from Allowlist"
     },
     {
       "key": "settings.admin.title.defaultLibrary",

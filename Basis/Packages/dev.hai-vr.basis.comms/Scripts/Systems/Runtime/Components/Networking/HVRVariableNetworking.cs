@@ -14,6 +14,7 @@ namespace HVR.Basis.Comms
         private const int MaximumNumberOfCharactersInAnAddress = 512;
 
         private const bool PrintDebug = false;
+        private const bool PrintUnknownHighFrequencyEveryFrame = false;
 
         // 1/60 makes for a maximum encoded delta time of 4.25 seconds.
         private const float DeltaLocalIntToSeconds = 1 / 60f;
@@ -795,9 +796,9 @@ namespace HVR.Basis.Comms
                                 {
                                     highFrequencyInterpolatorDict[addressId] = DecodeFloat(packet.values[index], highFrequency);
                                 }
-                                else if (_reportedUnknownHighFrequencyNetworkIds.Add(highFrequency.networkId))
+                                else if (PrintUnknownHighFrequencyEveryFrame || _reportedUnknownHighFrequencyNetworkIds.Add(highFrequency.networkId))
                                 {
-                                    HVRLogging.ProtocolError($"Network ID {highFrequency.networkId} is not known. High frequency value will be ignored.");
+                                    HVRLogging.ProtocolWarning($"Network ID {highFrequency.networkId} is not known. High frequency value will be ignored.");
                                 }
                             }
                         }
@@ -828,7 +829,10 @@ namespace HVR.Basis.Comms
                         {
                             if (!_networkIdToAddressId.TryGetValue(highFrequency.networkId, out var addressId))
                             {
-                                HVRLogging.ProtocolError($"Network ID {highFrequency.networkId} is not known. Reading from the server reduction will be mangled.");
+                                if (PrintUnknownHighFrequencyEveryFrame || _reportedUnknownHighFrequencyNetworkIds.Add(highFrequency.networkId))
+                                {
+                                    HVRLogging.ProtocolWarning($"Network ID {highFrequency.networkId} is not known. Reading from the server reduction will be mangled.");
+                                }
                                 continue;
                             }
 

@@ -112,12 +112,19 @@ namespace Basis.Scripts.Vehicles.Main
             OnLocalPlayerExitSeat += ExitPilotSeat;
         }
 
+        private bool _loggedMissingLocalPlayer;
         private void FixedUpdate()
         {
             if (!UseLocalControls || _pilotedVehicleBody == null)
             {
                 return;
             }
+            if (BasisLocalPlayer.Instance == null || BasisLocalPlayer.Instance.LocalCharacterDriver == null)
+            {
+                BasisDebug.LogErrorOnce(ref _loggedMissingLocalPlayer, "BasisVehiclePilotSeat cannot read pilot input: local player or character driver is missing.");
+                return;
+            }
+            _loggedMissingLocalPlayer = false;
             ControlScheme actualControlScheme = GetActualControlScheme();
             Vector3 angularInput = GetAngularInput(actualControlScheme);
             Vector3 linearInput = GetLinearInput(actualControlScheme);
