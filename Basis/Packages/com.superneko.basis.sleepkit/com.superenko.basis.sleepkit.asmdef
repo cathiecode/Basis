@@ -2,7 +2,9 @@
     "name": "com.superenko.basis.sleepkit",
     "rootNamespace": "",
     "references": [
-        "GUID:8c9aa0e006f5b5347af5c5470971dfae"
+        "GUID:1e767a4f07fa50745a4fd591bbbbcddb",
+        "GUID:8c9aa0e006f5b5347af5c5470971dfae",
+        "GUID:7f7d1af65c2641843945d409d28f2e20"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
