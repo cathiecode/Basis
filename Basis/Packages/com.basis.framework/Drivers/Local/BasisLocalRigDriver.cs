@@ -56,6 +56,7 @@ namespace Basis.Scripts.Drivers
 
         private BasisLocalPlayer localPlayer;
         private BasisTransformMapping basisTransformMapping;
+        private BasisLocks.LockContext lookRotationLock = BasisLocks.GetContext(BasisLocks.LookRotation);
 
         private static readonly IKOneEuroFilterQuaternion fRotHips = new IKOneEuroFilterQuaternion(MinCutoff, Beta, DerivativeCutoff);
         private static readonly IKOneEuroFilterQuaternion fRotHead = new IKOneEuroFilterQuaternion(MinCutoff, Beta, DerivativeCutoff);
@@ -770,7 +771,8 @@ namespace Basis.Scripts.Drivers
             {
                 var preSolve = VirtualSpinePreSolveConstraint.data;
                 preSolve.Enabled = true;
-                preSolve.FreezeHips = BasisLocalVirtualSpineDriver.HipsFreezeToTpose;
+                preSolve.FreezeHipsToTPose = BasisLocalVirtualSpineDriver.HipsFreezeToTpose;
+                preSolve.RotationLocked = lookRotationLock;
                 preSolve.IsLocomoting = locomotionAnimActive;
                 preSolve.LeftFootTracked = leftHasTracker;
                 preSolve.RightFootTracked = rightHasTracker;
