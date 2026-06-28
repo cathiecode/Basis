@@ -351,8 +351,9 @@ public class BasisLocalVirtualSpineDriver
 
         // The graph-integrated pre-solve has no BoneControl state buffer to borrow a
         // previous hips rotation from, so it keeps the equivalent continuity here.
+        public float3 HipsPosition;
         public quaternion HipsRotation;
-        public byte HipsRotationInitialized;
+        public byte HipsPositionAndRotationInitialized;
     }
 
     /// <summary>Filtered tracker inputs consumed by the FullBodyIK virtual-spine pre-solve.</summary>
@@ -381,7 +382,7 @@ public class BasisLocalVirtualSpineDriver
         public float CompressionStrength;
         public float MaxDrop;
         public bool FreezeHipsToTPose;
-        public bool RotationLocked;
+        public bool VirtualSpineLocked;
         public bool IsLocomoting;
         public float3 TposeHips;
     }
@@ -393,6 +394,13 @@ public class BasisLocalVirtualSpineDriver
     /// </summary>
     public static void SolveHips(ref SpineSolveState state, in VirtualHipsInput input, out Vector3 position, out Quaternion rotation)
     {
+        if (input.VirtualSpineLocked && state.HipsPositionAndRotationInitialized != 0)
+        {
+            position = state.HipsPosition;
+            rotation = state.HipsRotation;
+            return;
+        }
+
         float dt = math.max(input.DeltaTime, 1e-6f);
         NormalizeSafeWithFallback(in input.PlayerUp, new float3(0f, 1f, 0f), out float3 worldUp);
         ExtractYawBurst(in input.HeadRotation, out quaternion headYawRaw);
@@ -411,7 +419,7 @@ public class BasisLocalVirtualSpineDriver
         float noSmoothingBlendAlpha = 1 - math.abs(math.dot(worldUp, animatedHipsToHeadNormalized));
 
         quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in headYaw,
-            input.YawDeadzoneDeg * (1 - noSmoothingBlendAlpha), input.YawBlendSpeed, input.IsLocomoting, input.RotationLocked, dt);
+            input.YawDeadzoneDeg * (1 - noSmoothingBlendAlpha), input.YawBlendSpeed, input.IsLocomoting, dt);
 
         var animatedHeadYawToTorsoYaw = math.mul(math.inverse(animatedHeadYaw), torsoYaw);
         var animatedHipsToHeadWithTorsoYawRaw = math.mul(animatedHeadYawToTorsoYaw, input.AnimatedHeadPosition - input.AnimatedHipsPosition);
@@ -421,21 +429,23 @@ public class BasisLocalVirtualSpineDriver
 
         ComputeHipsPositionBodyFrame(in input.NeckPosition, in animatedHipsToHeadNormalized, input.RestLength, in torsoYaw,
             input.HipsForwardBias * input.Scale, in realisticHipsXZ, input.FreezeHipsToTPose, in input.TposeHips,
-            in input.AnimatedHipsPosition, input.CompressionStrength, input.MaxDrop, out float3 hipsPosition);
+            in input.AnimatedHipsPosition, input.CompressionStrength, input.MaxDrop, out float3 hipsPositionTarget);
 
         // float3 hipsPosition = desiredHipsXZ;
-        quaternion hipsTarget = input.FreezeHipsToTPose ? quaternion.identity : math.mul(torsoYaw, animatedHeadYawToAnimatedHipsRotation);
-        if (state.HipsRotationInitialized == 0)
+        quaternion hipsRotationTarget = input.FreezeHipsToTPose ? quaternion.identity : math.mul(torsoYaw, animatedHeadYawToAnimatedHipsRotation);
+        if (state.HipsPositionAndRotationInitialized == 0)
         {
-            state.HipsRotation = hipsTarget;
-            state.HipsRotationInitialized = 1;
+            state.HipsPosition = hipsPositionTarget;
+            state.HipsRotation = hipsRotationTarget;
+            state.HipsPositionAndRotationInitialized = 1;
         }
         else
         {
-            SmoothSlerpBurst(in state.HipsRotation, in hipsTarget, input.HipsRotationSpeed, noSmoothingBlendAlpha, dt, out state.HipsRotation);
+            state.HipsPosition = hipsPositionTarget; // TODO: Move somoothing here?
+            SmoothSlerpBurst(in state.HipsRotation, in hipsRotationTarget, input.HipsRotationSpeed, noSmoothingBlendAlpha, dt, out state.HipsRotation);
         }
         // ExtractYawBurst(in state.HipsRotation, out quaternion hipsYaw);
-        position = hipsPosition;
+        position = state.HipsPosition;
         rotation = state.HipsRotation;
     }
 
@@ -494,7 +504,7 @@ public class BasisLocalVirtualSpineDriver
             ExtractYawBurst(in eyeRot, out quaternion headYawFromEye);
 
             bool isLocomoting = P.IsLocomoting != 0;
-            quaternion torsoYawTarget = ComputeTorsoYawTargetBurst(ref s, in headYawFromEye, P.TorsoYawDeadzoneDeg, P.TorsoYawBlendSpeed, isLocomoting, false, dt);
+            quaternion torsoYawTarget = ComputeTorsoYawTargetBurst(ref s, in headYawFromEye, P.TorsoYawDeadzoneDeg, P.TorsoYawBlendSpeed, isLocomoting, dt);
 
             float3 tposeHips = P.TposeHips;
             float biasScale = P.HipsForwardBias * P.Scale;
@@ -615,7 +625,7 @@ public class BasisLocalVirtualSpineDriver
     /// the head stops, so reversing has to re-cross the cone. While locomoting the cone is bypassed
     /// so the torso re-aligns to the head. Head and neck are unaffected.
     /// </summary>
-    private static quaternion ComputeTorsoYawTargetBurst(ref SpineSolveState s, in quaternion headYawOnly, float deadzoneDeg, float blendSpeed, bool moving, bool rotationLocked, float dt)
+    private static quaternion ComputeTorsoYawTargetBurst(ref SpineSolveState s, in quaternion headYawOnly, float deadzoneDeg, float blendSpeed, bool moving, float dt)
     {
         YawDegrees(in headYawOnly, out float headYawDeg);
 
@@ -626,11 +636,6 @@ public class BasisLocalVirtualSpineDriver
             s.TorsoYawBroken = 0;
             s.TorsoFollow = 0f;
             s.TorsoYawInitialized = 1;
-        }
-
-        if (rotationLocked)
-        {
-            headYawDeg = s.PrevHeadYawDeg;
         }
 
         float headSpeedDeg = math.abs(DeltaAngleDeg(s.PrevHeadYawDeg, headYawDeg)) / math.max(dt, 1e-5f);

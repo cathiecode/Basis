@@ -9,10 +9,11 @@ public class BasisFootAnchor
 {
     private static BasisLocks.LockContext lookRotationLock = BasisLocks.GetContext(BasisLocks.LookRotation);
     private static BasisLocks.LockContext movementLock = BasisLocks.GetContext(BasisLocks.Movement);
+    private static BasisLocks.LockContext virtualSpineLock = BasisLocks.GetContext(BasisLocks.VirtualSpine);
 
     private const string CONTEXT = "com.superneko.basis.sleepkit.footanchor";
 
-    private static bool Anchored => lookRotationLock.Contains(CONTEXT) || movementLock.Contains(CONTEXT);
+    private static bool Anchored => lookRotationLock.Contains(CONTEXT) || movementLock.Contains(CONTEXT) || virtualSpineLock.Contains(CONTEXT);
 
     public static void ToggleAnchor()
     {
@@ -32,6 +33,7 @@ public class BasisFootAnchor
 
         lookRotationLock.Add(CONTEXT);
         movementLock.Add(CONTEXT);
+        virtualSpineLock.Add(CONTEXT);
     }
 
     public static void UndoAnchor()
@@ -40,5 +42,6 @@ public class BasisFootAnchor
 
         lookRotationLock.Remove(CONTEXT);
         movementLock.Remove(CONTEXT);
+        virtualSpineLock.Remove(CONTEXT);
     }
 }

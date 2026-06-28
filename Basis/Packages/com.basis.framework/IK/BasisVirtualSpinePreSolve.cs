@@ -9,7 +9,7 @@ namespace UnityEngine.Animations.Rigging
         [SerializeField] BasisFullBodyIK m_Source;
         [SyncSceneToStream, SerializeField] bool m_Enabled;
         [SyncSceneToStream, SerializeField] bool m_FreezeHipsToTPose;
-        [SyncSceneToStream, SerializeField] bool m_RotationLocked;
+        [SyncSceneToStream, SerializeField] bool m_VirtualSpineLocked;
         [SyncSceneToStream, SerializeField] bool m_IsLocomoting;
         [SyncSceneToStream, SerializeField] bool m_LeftFootTracked;
         [SyncSceneToStream, SerializeField] bool m_RightFootTracked;
@@ -28,7 +28,7 @@ namespace UnityEngine.Animations.Rigging
         public BasisFullBodyIK Source { get => m_Source; set => m_Source = value; }
         public bool Enabled { get => m_Enabled; set => m_Enabled = value; }
         public bool FreezeHipsToTPose { get => m_FreezeHipsToTPose; set => m_FreezeHipsToTPose = value; }
-        public bool RotationLocked { get => m_RotationLocked; set => m_RotationLocked = value; }
+        public bool SpineLocked { get => m_VirtualSpineLocked; set => m_VirtualSpineLocked = value; }
         public bool IsLocomoting { get => m_IsLocomoting; set => m_IsLocomoting = value; }
         public bool LeftFootTracked { get => m_LeftFootTracked; set => m_LeftFootTracked = value; }
         public bool RightFootTracked { get => m_RightFootTracked; set => m_RightFootTracked = value; }
@@ -46,7 +46,7 @@ namespace UnityEngine.Animations.Rigging
 
         public string EnabledProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_Enabled));
         public string FreezeHipsToTPoseProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_FreezeHipsToTPose));
-        public string RotationLockedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RotationLocked));
+        public string VirtualSpineLockedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_VirtualSpineLocked));
         public string IsLocomotingProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_IsLocomoting));
         public string LeftFootTrackedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_LeftFootTracked));
         public string RightFootTrackedProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RightFootTracked));
@@ -76,7 +76,7 @@ namespace UnityEngine.Animations.Rigging
 
     public struct BasisVirtualSpinePreSolveJob : IWeightedAnimationJob
     {
-        public BoolProperty enabled, freezeHipsToTPose, isLocomoting, leftFootTracked, rightFootTracked, rotationLocked;
+        public BoolProperty enabled, freezeHipsToTPose, isLocomoting, leftFootTracked, rightFootTracked, virtualSpineLocked;
         public BoolProperty hasHipsTracker;
         public Vector3Property neckPosition, tposeHips, playerPosition;
         public Vector4Property playerRotation;
@@ -123,7 +123,7 @@ namespace UnityEngine.Animations.Rigging
             input.CompressionStrength = compressionStrength.Get(stream);
             input.MaxDrop = maxDrop.Get(stream);
             input.FreezeHipsToTPose = freezeHipsToTPose.Get(stream);
-            input.RotationLocked = rotationLocked.Get(stream);
+            input.VirtualSpineLocked = virtualSpineLocked.Get(stream);
             input.IsLocomoting = isLocomoting.Get(stream);
             input.TposeHips = tposeHips.Get(stream);
 
@@ -150,7 +150,7 @@ namespace UnityEngine.Animations.Rigging
             {
                 enabled = BoolProperty.Bind(animator, component, data.EnabledProperty),
                 freezeHipsToTPose = BoolProperty.Bind(animator, component, data.FreezeHipsToTPoseProperty),
-                rotationLocked = BoolProperty.Bind(animator, component, data.RotationLockedProperty),
+                virtualSpineLocked = BoolProperty.Bind(animator, component, data.VirtualSpineLockedProperty),
                 isLocomoting = BoolProperty.Bind(animator, component, data.IsLocomotingProperty),
                 leftFootTracked = BoolProperty.Bind(animator, component, data.LeftFootTrackedProperty),
                 rightFootTracked = BoolProperty.Bind(animator, component, data.RightFootTrackedProperty),

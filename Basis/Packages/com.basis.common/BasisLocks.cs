@@ -18,6 +18,7 @@ namespace Basis.Scripts.Common
         public const string LookRotation = "LookRotation";
         public const string Movement = "Movement";
         public const string Crouching = "Crouching";
+        public const string VirtualSpine = "VirtualSpine";
 
         private static readonly ConcurrentDictionary<string, ContextState> States =
             new ConcurrentDictionary<string, ContextState>();
