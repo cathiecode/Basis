@@ -24,7 +24,6 @@ unity_package/StreamingAssets/dlp/stdlib/
 
 # Unity Editor files
 *.DS_Store
-unity_package/**/*.meta
 
 # Generated C header (reproducible from build)
 /unity_dlp.h
