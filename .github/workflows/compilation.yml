@@ -115,7 +115,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install Python for dlp-native
-        run: uv python install --python=3.12
+        run: uv python install 3.12
       - name: Stage YtDlp stdlib
         shell: pwsh
         working-directory: dlp-native
