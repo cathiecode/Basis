@@ -96,7 +96,7 @@ jobs:
 
       - name: Stage Python stdlib
         run: |
-          "$PYO3_PYTHON" scripts/stage_stdlib.py macos-universal --python "$PYO3_PYTHON"
+          "$PYO3_PYTHON" scripts/stage_stdlib.py macos-universal --python "$PYO3_PYTHON" --exclude-dirs test --exclude-dirs pip --exclude-dirs ensurepip
 
       - name: CLI smoke test
         run: cargo run -p unity_dlp_cli --release -- version
