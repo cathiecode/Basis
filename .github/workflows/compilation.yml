@@ -116,17 +116,6 @@ jobs:
           enable-cache: true
       - name: Install Python for dlp-native
         run: uv python install 3.12
-      - name: Stage YtDlp stdlib
-        shell: pwsh
-        working-directory: dlp-native
-        run: |
-          $python = (uv python find 3.12).Trim()
-          if ("${{ matrix.targetPlatform }}" -eq "StandaloneWindows64") {
-            $platform = "windows-x86_64"
-          } else {
-            $platform = "linux-x86_64"
-          }
-          & $python scripts/stage_stdlib.py $platform --python $python
       - name: "Build Unity project"
         timeout-minutes: 100
         uses: BasisVR/unity-builder@main
