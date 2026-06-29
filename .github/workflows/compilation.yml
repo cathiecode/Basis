@@ -110,10 +110,23 @@ jobs:
             Start-Sleep -Seconds 3
           }
           throw "Docker did not become ready in time"
-      - name: Install python for dlp-native
-        uses: actions/setup-python@v6
+      - name: Install the latest version of uv for dlp-native
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          python-version: '3.12'
+          enable-cache: true
+      - name: Install Python for dlp-native
+        run: uv python install --python=3.12
+      - name: Stage YtDlp stdlib
+        shell: pwsh
+        working-directory: dlp-native
+        run: |
+          $python = (uv python find 3.12).Trim()
+          if ("${{ matrix.targetPlatform }}" -eq "StandaloneWindows64") {
+            $platform = "windows-x86_64"
+          } else {
+            $platform = "linux-x86_64"
+          }
+          & $python scripts/stage_stdlib.py $platform --python $python
       - name: "Build Unity project"
         timeout-minutes: 100
         uses: BasisVR/unity-builder@main
