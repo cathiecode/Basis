@@ -110,6 +110,10 @@ jobs:
             Start-Sleep -Seconds 3
           }
           throw "Docker did not become ready in time"
+      - name: Install python for dlp-native
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - name: "Build Unity project"
         timeout-minutes: 100
         uses: BasisVR/unity-builder@main
