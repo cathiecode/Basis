@@ -37,7 +37,7 @@ echo "==> Python prefix : $PY_PREFIX"
 echo "==> PYO3_CROSS_LIB_DIR : $PY_LIB_DIR"
 
 echo "==> Building arm64 (native)..."
-cargo build -p unity_dlp_core --release --target "$ARM"
+cargo build -p unity_dlp_core --profile release-with-debuginfo --target "$ARM"
 
 echo "==> Building x86_64 (cross)..."
 # PYO3_CROSS_PYTHON_VERSION: skip arm64 Python binary interrogation.
@@ -45,12 +45,12 @@ echo "==> Building x86_64 (cross)..."
 # The Python.org universal2 framework dylib at $PY_PREFIX/lib/libpython3.12.dylib
 # contains both arm64 and x86_64 slices, so the linker picks the right one.
 PYO3_CROSS_PYTHON_VERSION=3.12 PYO3_CROSS_LIB_DIR="${PY_LIB_DIR}" \
-  cargo build -p unity_dlp_core --release --target "$X86"
+  cargo build -p unity_dlp_core --profile release-with-debuginfo --target "$X86"
 
 echo "==> Lipo into universal binary..."
 lipo -create \
-  "target/$ARM/release/libunity_dlp.dylib" \
-  "target/$X86/release/libunity_dlp.dylib" \
+  "target/$ARM/release-with-debuginfo/libunity_dlp.dylib" \
+  "target/$X86/release-with-debuginfo/libunity_dlp.dylib" \
   -output "unity_dlp.dylib"
 
 DEST="unity_package/Plugins/x86_64"
