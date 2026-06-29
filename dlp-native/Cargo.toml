@@ -27,6 +27,7 @@ inherits = "release"
 debug = true
 split-debuginfo = "packed"
 strip = "debuginfo"
+lto = fat
 
 [patch.crates-io]
 deno_ast = { path = "crates/deno_ast_patch" }
