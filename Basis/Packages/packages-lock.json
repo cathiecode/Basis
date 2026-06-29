@@ -677,6 +677,14 @@
       "source": "embedded",
       "dependencies": {}
     },
+    "com.yewnyx.ytdlp": {
+      "version": "file:../../dlp-native/unity_package",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.1"
+      }
+    },
     "dev.hai-vr.basis.comms": {
       "version": "file:dev.hai-vr.basis.comms",
       "depth": 0,

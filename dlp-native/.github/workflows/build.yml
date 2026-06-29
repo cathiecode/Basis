@@ -1,0 +1,342 @@
+name: Build
+
+on:
+  push:
+    branches: [mss]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Windows x64 ─────────────────────────────────────────────────────────────
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: windows-cargo-
+
+      - name: Build
+        run: pwsh scripts/build-host.ps1
+
+      - name: Stage Python stdlib
+        shell: pwsh
+        run: |
+          $python = (uv python find 3.12).Trim()
+          & $python scripts/stage_stdlib.py windows-x86_64 --python $python
+
+      - name: CLI smoke test
+        run: cargo run -p unity_dlp_cli --release -- version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity_dlp-windows-x64
+          path: |
+            unity_package/Plugins/x86_64/unity_dlp.dll
+            unity_package/StreamingAssets/dlp/
+
+  # ── macOS universal ──────────────────────────────────────────────────────────
+  macos:
+    name: macOS universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # actions/setup-python on macos-latest installs a universal2 Python 3.12,
+      # which PyO3 can use for both the native arm64 and the x86_64 cross-compile.
+      - name: Install Python 3.12 (universal2)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Export PYO3_PYTHON
+        run: echo "PYO3_PYTHON=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+
+      - name: Install uv (for hatch_build.py in build.rs)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: macos-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-cargo-
+
+      - name: Build universal dylib
+        run: bash scripts/build-macos-universal.sh
+
+      - name: Stage Python stdlib
+        run: |
+          "$PYO3_PYTHON" scripts/stage_stdlib.py macos-universal --python "$PYO3_PYTHON"
+
+      - name: CLI smoke test
+        run: cargo run -p unity_dlp_cli --release -- version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity_dlp-macos-universal
+          path: |
+            unity_package/Plugins/x86_64/unity_dlp.dylib
+            unity_package/Plugins/x86_64/Python
+            unity_package/StreamingAssets/dlp/
+
+  # ── Linux x64 ───────────────────────────────────────────────────────────────
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-cargo-
+
+      - name: Build
+        run: bash scripts/build-host.sh
+
+      - name: Stage Python stdlib
+        run: |
+          PYTHON="$(uv python find 3.12)"
+          "$PYTHON" scripts/stage_stdlib.py linux-x86_64 --python "$PYTHON"
+
+      - name: CLI smoke test
+        run: cargo run -p unity_dlp_cli --release --no-default-features --features js-quickjs -- version
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity_dlp-linux-x64
+          path: |
+            unity_package/Plugins/x86_64/libunity_dlp.so
+            unity_package/Plugins/x86_64/libpython*.so*
+            unity_package/StreamingAssets/dlp/
+
+  # ── Android arm64-v8a ────────────────────────────────────────────────────────
+  android:
+    name: Android arm64-v8a
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust Android target
+        run: rustup target add aarch64-linux-android
+
+      - name: Install libclang (for rquickjs-sys bindgen)
+        run: sudo apt-get install -y libclang-dev
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Locate Android NDK and configure bindgen sysroot
+        run: |
+          NDK_DIR="$(ls -d "$ANDROID_SDK_ROOT"/ndk/*/ | sort -V | tail -1)"
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> "$GITHUB_ENV"
+          NDK_SYSROOT="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          echo "BINDGEN_EXTRA_CLANG_ARGS=--sysroot=$NDK_SYSROOT --target=aarch64-linux-android26" \
+            >> "$GITHUB_ENV"
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: android-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: android-cargo-
+
+      - name: Download Termux Python 3.12 for aarch64
+        run: |
+          BASE="https://packages.termux.dev/apt/termux-main/pool/main/p/python"
+          PYTHON_DEB="$(curl -fsSL "$BASE/" \
+            | grep -oP 'python_[^"]+_aarch64\.deb' | sort -V | tail -1)"
+          echo "==> $PYTHON_DEB"
+          curl -fsSL "$BASE/$PYTHON_DEB" -o /tmp/python.deb
+          mkdir -p /tmp/termux-extract
+          cd /tmp/termux-extract && ar x /tmp/python.deb && tar xf data.tar.xz
+
+      - name: Set up PYO3_CROSS_LIB_DIR for Android arm64
+        run: |
+          PREFIX="/tmp/termux-extract/data/data/com.termux/files/usr"
+          mkdir -p python-android-lib
+          # Detect the actual Python version shipped in the .deb
+          LIBPY="$(find "$PREFIX/lib" -maxdepth 1 -name 'libpython3.*.so*' | sort -V | tail -1)"
+          PY_VER="$(echo "$LIBPY" | grep -oP '(?<=libpython)\d+\.\d+')"
+          echo "==> Found libpython${PY_VER}"
+          cp -L "$LIBPY" "python-android-lib/libpython${PY_VER}.so"
+          LIB_DIR="$(pwd)/python-android-lib"
+          echo "PYO3_CROSS_LIB_DIR=$LIB_DIR" >> "$GITHUB_ENV"
+          echo "PYO3_CROSS_PYTHON_VERSION=${PY_VER}" >> "$GITHUB_ENV"
+          # PYO3_NO_PYTHON skips sysconfig parsing; without it pyo3-build-config reads
+          # LIBDIR from the Termux sysconfig (/data/data/com.termux/...) which doesn't
+          # exist on the runner, so the linker search path is wrong.
+          echo "PYO3_NO_PYTHON=1" >> "$GITHUB_ENV"
+          # Expose prefix for stdlib staging
+          echo "TERMUX_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+
+      - name: Build Android arm64-v8a
+        run: |
+          cargo ndk \
+            --target aarch64-linux-android \
+            --platform 26 \
+            -- build -p unity_dlp_core --release \
+            --no-default-features --features js-quickjs
+
+      - name: Stage Python stdlib
+        run: |
+          python3 scripts/stage_stdlib.py android-arm64-v8a --prefix "$TERMUX_PREFIX"
+
+      - name: Stage artifact
+        run: |
+          mkdir -p unity_package/Plugins/Android/libs/arm64-v8a
+          cp target/aarch64-linux-android/release/libunity_dlp.so \
+            unity_package/Plugins/Android/libs/arm64-v8a/
+          LIBPY="$(find "$TERMUX_PREFIX/lib" -maxdepth 1 -name 'libpython3.*.so*' \
+            | sort -V | tail -1)"
+          cp -L "$LIBPY" unity_package/Plugins/Android/libs/arm64-v8a/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity_dlp-android-arm64
+          path: |
+            unity_package/Plugins/Android/libs/arm64-v8a/libunity_dlp.so
+            unity_package/Plugins/Android/libs/arm64-v8a/libpython*.so*
+            unity_package/StreamingAssets/dlp/
+
+  # ── iOS arm64 ────────────────────────────────────────────────────────────────
+  ios:
+    name: iOS arm64
+    runs-on: macos-latest
+    env:
+      PYO3_CROSS_PYTHON_VERSION: '3.12'
+      IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Install Python 3.12 (host — stdlib source for iOS)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Python for iOS arm64 (python-apple-support)
+        id: cache-py-ios
+        uses: actions/cache@v4
+        with:
+          path: python-ios
+          key: python-3.12-ios-support-b8
+
+      - name: Download Python 3.12 for iOS (BeeWare python-apple-support)
+        if: steps.cache-py-ios.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o Python-3.12-iOS-support.b8.tar.gz \
+            "https://github.com/beeware/python-apple-support/releases/download/3.12-b8/Python-3.12-iOS-support.b8.tar.gz"
+          mkdir python-ios
+          tar -xzf Python-3.12-iOS-support.b8.tar.gz -C python-ios
+
+      # python-apple-support ships Python.xcframework; PyO3 wants a lib dir with
+      # libpython3.12.a. Create shim directories for both device and simulator.
+      - name: Set up Python lib dirs for iOS device and simulator
+        run: |
+          DEVICE_FW="$(pwd)/python-ios/Python.xcframework/ios-arm64/Python.framework"
+          SIM_FW_DIR="$(ls -d "$(pwd)/python-ios/Python.xcframework/"*simulator*/ | head -1)"
+          SIM_FW="${SIM_FW_DIR%/}/Python.framework"
+          mkdir -p python-ios-device-lib python-ios-sim-lib
+          cp "${DEVICE_FW}/Python" python-ios-device-lib/libpython3.12.a
+          cp "${SIM_FW}/Python"    python-ios-sim-lib/libpython3.12.a
+          echo "CFLAGS=-I${DEVICE_FW}/Headers" >> "$GITHUB_ENV"
+          echo "IOS_DEVICE_LIB=$(pwd)/python-ios-device-lib" >> "$GITHUB_ENV"
+          echo "IOS_SIM_LIB=$(pwd)/python-ios-sim-lib"       >> "$GITHUB_ENV"
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ios-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ios-cargo-
+
+      - name: Build iOS device (arm64)
+        run: |
+          export SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          PYO3_NO_PYTHON=1 PYO3_CROSS_LIB_DIR="$IOS_DEVICE_LIB" \
+            cargo build -p unity_dlp_core --release --target aarch64-apple-ios \
+            --no-default-features --features js-quickjs
+
+      - name: Build iOS simulator (arm64)
+        run: |
+          export SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          PYO3_NO_PYTHON=1 PYO3_CROSS_LIB_DIR="$IOS_SIM_LIB" \
+            cargo build -p unity_dlp_core --release --target aarch64-apple-ios-sim \
+            --no-default-features --features js-quickjs
+
+      - name: Stage Python stdlib
+        run: |
+          # python-apple-support only ships the compiled static lib + headers;
+          # the stdlib comes from the macOS host Python installed above.
+          # Exclude lib-dynload (macOS .so binaries — not usable on iOS; C
+          # extensions are compiled into libpython3.12.a by python-apple-support).
+          python3 scripts/stage_stdlib.py ios-arm64 \
+            --exclude-dirs lib-dynload test
+
+      - name: Stage artifact
+        run: |
+          mkdir -p unity_package/Plugins/iOS
+          rm -rf unity_package/Plugins/iOS/unity_dlp.xcframework
+          xcodebuild -create-xcframework \
+            -library target/aarch64-apple-ios/release/libunity_dlp.a \
+            -library target/aarch64-apple-ios-sim/release/libunity_dlp.a \
+            -output unity_package/Plugins/iOS/unity_dlp.xcframework
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity_dlp-ios-arm64
+          path: |
+            unity_package/Plugins/iOS/unity_dlp.xcframework/
+            unity_package/StreamingAssets/dlp/

@@ -1,0 +1,6 @@
+[submodule "dlp-native/vendor/yt-dlp"]
+	path = dlp-native/vendor/yt-dlp
+	url = https://github.com/yt-dlp/yt-dlp
+[submodule "dlp-native/vendor/yt-dlp-ejs"]
+	path = dlp-native/vendor/yt-dlp-ejs
+	url = https://github.com/yt-dlp/ejs
