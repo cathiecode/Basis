@@ -36,7 +36,9 @@ jobs:
   dlp-native-windows:
     name: Windows x64
     runs-on: windows-latest
-    working-directory: dlp-native
+    defaults:
+      run:
+        working-directory: ./dlp-native
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,7 +82,9 @@ jobs:
   dlp-native-macos:
     name: macOS universal
     runs-on: macos-latest
-    working-directory: dlp-native
+    defaults:
+      run:
+        working-directory: ./dlp-native
     steps:
       - uses: actions/checkout@v4
         with:
@@ -134,7 +138,9 @@ jobs:
   dlp-native-linux:
     name: Linux x64
     runs-on: ubuntu-latest
-    working-directory: dlp-native
+    defaults:
+      run:
+        working-directory: ./dlp-native
     steps:
       - uses: actions/checkout@v4
         with:
@@ -178,7 +184,9 @@ jobs:
   dlp-native-android:
     name: Android arm64-v8a
     runs-on: ubuntu-latest
-    working-directory: dlp-native
+    defaults:
+      run:
+        working-directory: ./dlp-native
     steps:
       - uses: actions/checkout@v4
         with:
@@ -273,7 +281,9 @@ jobs:
   dlp-native-ios:
     name: iOS arm64
     runs-on: macos-latest
-    working-directory: dlp-native
+    defaults:
+      run:
+        working-directory: ./dlp-native
     env:
       PYO3_CROSS_PYTHON_VERSION: '3.12'
       IPHONEOS_DEPLOYMENT_TARGET: '16.0'
