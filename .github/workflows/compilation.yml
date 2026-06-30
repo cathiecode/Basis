@@ -57,6 +57,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ./dlp-native/target
           key: windows-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: windows-cargo-
 
@@ -121,6 +122,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ./dlp-native/target
           key: macos-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: macos-cargo-
 
@@ -231,6 +233,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ./dlp-native/target
           key: android-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: android-cargo-
 
@@ -354,6 +357,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ./dlp-native/target
           key: ios-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ios-cargo-
 
