@@ -78,13 +78,9 @@ jobs:
         with:
           name: unity_dlp-windows-x64
           path: |
-            dlp-native/unity_package/Plugins/x86_64/unity_dlp.dll
-            dlp-native/unity_package/Plugins/x86_64/python3.dll
-            dlp-native/unity_package/Plugins/x86_64/python312.dll
-            dlp-native/unity_package/Plugins/x86_64/vcruntime140.dll
-            dlp-native/unity_package/Plugins/x86_64/vcruntime140_1.dll
-            dlp-native/unity_package/StreamingAssets/dlp/yt_dlp.zip
-            dlp-native/unity_package/StreamingAssets/dlp/stdlib/windows-x86_64.zip
+            dlp-native/unity_package/Plugins/
+            dlp-native/unity_package/StreamingAssets/
+
 
   # ── macOS universal ──────────────────────────────────────────────────────────
   dlp-native-macos:
@@ -141,10 +137,8 @@ jobs:
         with:
           name: unity_dlp-macos-universal
           path: |
-            dlp-native/unity_package/Plugins/x86_64/unity_dlp.dylib
-            dlp-native/unity_package/Plugins/x86_64/Python
-            dlp-native/unity_package/StreamingAssets/dlp/yt_dlp.zip
-            dlp-native/unity_package/StreamingAssets/dlp/stdlib/macos-universal.zip
+            dlp-native/unity_package/Plugins/
+            dlp-native/unity_package/StreamingAssets/
 
   # ── Linux x64 ───────────────────────────────────────────────────────────────
   dlp-native-linux:
@@ -191,10 +185,8 @@ jobs:
         with:
           name: unity_dlp-linux-x64
           path: |
-            dlp-native/unity_package/Plugins/x86_64/libunity_dlp.so
-            dlp-native/unity_package/Plugins/x86_64/libpython*.so*
-            dlp-native/unity_package/StreamingAssets/dlp/yt_dlp.zip
-            dlp-native/unity_package/StreamingAssets/dlp/stdlib/linux-x86_x64.zip
+            dlp-native/unity_package/Plugins/
+            dlp-native/unity_package/StreamingAssets/
 
   # ── Android arm64-v8a ────────────────────────────────────────────────────────
   dlp-native-android:
@@ -292,10 +284,8 @@ jobs:
         with:
           name: unity_dlp-android-arm64
           path: |
-            dlp-native/unity_package/Plugins/Android/libs/arm64-v8a/libunity_dlp.so
-            dlp-native/unity_package/Plugins/Android/libs/arm64-v8a/libpython*.so*
-            dlp-native/unity_package/StreamingAssets/dlp/yt_dlp.zip
-            dlp-native/unity_package/StreamingAssets/dlp/stdlib/linux-x86_x64.zip
+            dlp-native/unity_package/Plugins/
+            dlp-native/unity_package/StreamingAssets/
 
   # ── iOS arm64 ────────────────────────────────────────────────────────────────
   dlp-native-ios:
@@ -398,9 +388,8 @@ jobs:
         with:
           name: unity_dlp-ios-arm64
           path: |
-            dlp-native/unity_package/Plugins/iOS/unity_dlp.xcframework/
-            dlp-native/unity_package/StreamingAssets/dlp/yt_dlp.zip
-            dlp-native/unity_package/StreamingAssets/dlp/stdlib/ios-arm64.zip
+            dlp-native/unity_package/Plugins/
+            dlp-native/unity_package/StreamingAssets/
 
   build-client:
     name: Build client for ${{ matrix.targetPlatform }}
