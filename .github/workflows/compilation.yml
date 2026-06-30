@@ -470,11 +470,15 @@ jobs:
         with:
           name: ${{ matrix.dlpNative }}
           path: ./dlp-native-artifact
-
-      - name: Copy dlp-native artifact into dlp-native unity_package folder
+      - name: Copy dlp-native artifact into dlp-native unity_package folder (Windows Runner)
+        if: matrix.buildPlatform == 'windows-2022'
         shell: powershell
         run: |
-          Copy-Item -Path ./dlp-native-artifact -Destination ./dlp-native
+          Copy-Item -Recurse -Path ./dlp-native-artifact/* -Destination ${{ env.projectPath }}/Packages/com.yewnyx.dlp-native/unity_package
+      - name: Copy dlp-native artifact into dlp-native unity_package folder (Linux Runner)
+        if: matrix.buildPlatform == 'ubuntu-latest'
+        run: |
+          cp -r ./dlp-native-artifact/* ${{ env.projectPath }}/Packages/com.yewnyx.dlp-native/unity_package
       - name: "Build Unity project"
         timeout-minutes: 100
         uses: BasisVR/unity-builder@main
