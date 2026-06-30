@@ -36,6 +36,8 @@ jobs:
   dlp-native-windows:
     name: Windows x64
     runs-on: windows-latest
+    needs: [check-secret]
+    if: needs.check-secret.outputs.secret-is-set == 'true'
     defaults:
       run:
         working-directory: ./dlp-native
@@ -82,6 +84,8 @@ jobs:
   dlp-native-macos:
     name: macOS universal
     runs-on: macos-latest
+    needs: [check-secret]
+    if: needs.check-secret.outputs.secret-is-set == 'true'
     defaults:
       run:
         working-directory: ./dlp-native
@@ -138,6 +142,8 @@ jobs:
   dlp-native-linux:
     name: Linux x64
     runs-on: ubuntu-latest
+    needs: [check-secret]
+    if: needs.check-secret.outputs.secret-is-set == 'true'
     defaults:
       run:
         working-directory: ./dlp-native
@@ -185,6 +191,8 @@ jobs:
   dlp-native-android:
     name: Android arm64-v8a
     runs-on: ubuntu-latest
+    needs: [check-secret]
+    if: needs.check-secret.outputs.secret-is-set == 'true'
     defaults:
       run:
         working-directory: ./dlp-native
@@ -282,6 +290,8 @@ jobs:
   dlp-native-ios:
     name: iOS arm64
     runs-on: macos-latest
+    needs: [check-secret]
+    if: needs.check-secret.outputs.secret-is-set == 'true'
     defaults:
       run:
         working-directory: ./dlp-native
