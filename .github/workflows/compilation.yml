@@ -34,7 +34,7 @@ jobs:
 
   # ── Windows x64 ─────────────────────────────────────────────────────────────
   dlp-native-windows:
-    name: Windows x64
+    name: Bulid dlp-native for Windows x64
     runs-on: windows-latest
     needs: [check-secret]
     if: needs.check-secret.outputs.secret-is-set == 'true'
@@ -87,7 +87,7 @@ jobs:
 
   # ── macOS universal ──────────────────────────────────────────────────────────
   dlp-native-macos:
-    name: macOS universal
+    name: Bulid dlp-native for macOS universal
     runs-on: macos-latest
     needs: [check-secret]
     if: needs.check-secret.outputs.secret-is-set == 'true'
@@ -146,7 +146,7 @@ jobs:
 
   # ── Linux x64 ───────────────────────────────────────────────────────────────
   dlp-native-linux:
-    name: Linux x64
+    name: Bulid dlp-native for Linux x64
     runs-on: ubuntu-latest
     needs: [check-secret]
     if: needs.check-secret.outputs.secret-is-set == 'true'
@@ -196,7 +196,7 @@ jobs:
 
   # ── Android arm64-v8a ────────────────────────────────────────────────────────
   dlp-native-android:
-    name: Android arm64-v8a
+    name: Bulid dlp-native for Android arm64-v8a
     runs-on: ubuntu-latest
     needs: [check-secret]
     if: needs.check-secret.outputs.secret-is-set == 'true'
@@ -296,7 +296,7 @@ jobs:
 
   # ── iOS arm64 ────────────────────────────────────────────────────────────────
   dlp-native-ios:
-    name: iOS arm64
+    name: Bulid dlp-native for iOS arm64
     runs-on: macos-latest
     needs: [check-secret]
     if: needs.check-secret.outputs.secret-is-set == 'true'
