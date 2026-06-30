@@ -157,6 +157,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ./dlp-native/target
           key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: linux-cargo-
 
@@ -474,7 +475,7 @@ jobs:
         if: matrix.buildPlatform == 'windows-2022'
         shell: powershell
         run: |
-          Copy-Item -Recurse -Force -Path ./dlp-native-artifact/* -Destination ./dlp-native/unity_package
+          Copy-Item -Verbose -Recurse -Force -Path ./dlp-native-artifact/* -Destination ./dlp-native/unity_package
       - name: Copy dlp-native artifact into dlp-native unity_package folder (Linux Runner)
         if: matrix.buildPlatform == 'ubuntu-latest'
         run: |
