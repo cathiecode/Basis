@@ -29,15 +29,15 @@ fn do_init(python_home: &str, packages_path: &str) -> Result<(), String> {
         unsafe { std::env::set_var("PYTHONHOME", python_home) };
     }
 
-    // pyo3::prepare_freethreaded_python calls Py_InitializeEx(0). We do this
+    // pyo3::Python::initialize() calls Py_InitializeEx(0). We do this
     // manually (no auto-initialize feature) so we control the order: env vars
     // first, then init, then sys.path configuration.
-    pyo3::prepare_freethreaded_python();
+    Python::initialize();
 
-    Python::with_gil(|py| -> Result<(), String> {
+    Python::attach(|py| -> Result<(), String> {
         if !packages_path.is_empty() {
             // packages_path may be a .zip or a directory; Python handles both.
-            let sys = py.import_bound("sys").map_err(|e| format!("import sys: {e}"))?;
+            let sys = py.import("sys").map_err(|e| format!("import sys: {e}"))?;
             sys.getattr("path")
                 .map_err(|e| format!("sys.path get: {e}"))?
                 .call_method1("insert", (0i32, packages_path))
@@ -49,7 +49,7 @@ fn do_init(python_home: &str, packages_path: &str) -> Result<(), String> {
 
         // Importing unity_dlp_jsc triggers @register_provider, which enrolls
         // UnityDlpJCP into yt-dlp's JCP registry before any extraction runs.
-        py.run_bound("import unity_dlp_jsc", None, None)
+        py.run(c"import unity_dlp_jsc", None, None)
             .map_err(|e| format!("import unity_dlp_jsc: {e}"))?;
 
         log::debug!(
@@ -68,5 +68,5 @@ pub fn with_python<F, R>(f: F) -> R
 where
     F: for<'py> FnOnce(Python<'py>) -> R,
 {
-    Python::with_gil(f)
+    Python::attach(f)
 }

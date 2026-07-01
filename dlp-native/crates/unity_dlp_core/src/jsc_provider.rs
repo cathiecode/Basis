@@ -73,9 +73,9 @@ fn py_run_js(_py: Python<'_>, script: String) -> PyResult<String> {
 /// `import unity_dlp_js; unity_dlp_js.run_js(stdin)`.
 pub fn register_module(py: Python<'_>) -> Result<(), String> {
     (|| -> PyResult<()> {
-        let m = PyModule::new_bound(py, "unity_dlp_js")?;
+        let m = PyModule::new(py, "unity_dlp_js")?;
         m.add_function(wrap_pyfunction!(py_run_js, &m)?)?;
-        py.import_bound("sys")?.getattr("modules")?.set_item("unity_dlp_js", &m)?;
+        py.import("sys")?.getattr("modules")?.set_item("unity_dlp_js", &m)?;
         Ok(())
     })()
     .map_err(|e| format!("register unity_dlp_js: {e}"))
