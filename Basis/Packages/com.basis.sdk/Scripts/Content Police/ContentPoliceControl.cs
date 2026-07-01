@@ -12,6 +12,23 @@ public static class ContentPoliceControl
     public static bool ShaderPrewarmEnabled = false;
     public static bool MaterialCorrectionEnabled = false;
 
+    // Reused renderer buffer for the no-content-removal path when no harvest is
+    // supplied. Main-thread only; consumed synchronously by prewarm/correction.
+    private static readonly List<Renderer> NoRemovalRendererScratch = new List<Renderer>(64);
+
+    // Server-pushed admin lock, mirrored from BasisNetworkModeration.GlobalCilboxLocked by the
+    // shim bridge. While set, the avatar content walk strips the Cilbox sandbox host + proxies so
+    // no avatar script runs. Avatar content only — props and worlds keep their own Cilbox.
+    public static bool AvatarCilboxLocked = false;
+
+    // Cilbox lives in com.cnlohr.cilbox which this assembly does not reference, so the lock strip
+    // matches by full type name: the avatar sandbox host and its per-behaviour proxies.
+    private static readonly HashSet<string> LockedAvatarCilboxTypeNames = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "Cilbox.CilboxAvatarBasis",
+        "Cilbox.CilboxProxy",
+    };
+
     /// <summary>
     /// Creates a copy of a GameObject, removes any unapproved MonoBehaviours, and returns the cleaned copy through instantiation. 
     /// </summary>
@@ -23,6 +40,23 @@ public static class ContentPoliceControl
     /// <returns>A copy of the GameObject with unapproved scripts removed.</returns>
     public static GameObject ContentControl(GameObject DisabledGameobject, GameObject SearchAndDestroy, ChecksRequired ChecksRequired, Vector3 Position, Quaternion Rotation, bool ModifyScale, Vector3 Scale, BundledContentHolder.Selector Selector, Transform Parent = null,int colliderlayer = -1, List<BasisHeadChop.HeadChopTarget> HarvestedHeadChop = null, BasisContentHarvest harvest = null)
     {
+        ContentControlState state = BeginContentControl(DisabledGameobject, SearchAndDestroy, ChecksRequired, Position, Rotation, ModifyScale, Scale, Selector, Parent, colliderlayer, HarvestedHeadChop, harvest);
+        return FinishContentControl(state);
+    }
+
+    // Phase one of the content walk: the atomic GameObject.Instantiate (the single largest cost,
+    // and one Unity can't chunk) plus the police-selector lookup. The clone is parked under the
+    // inactive host, so it stays dormant — no Awake/OnEnable/event fires — until FinishContentControl
+    // runs the strip/scrub and activates it. That dormancy is what lets the heavy component walk run
+    // on a later frame: deferring it is as safe as the original single-frame walk. Main-thread only.
+    public static ContentControlState BeginContentControl(GameObject DisabledGameobject, GameObject SearchAndDestroy, ChecksRequired ChecksRequired, Vector3 Position, Quaternion Rotation, bool ModifyScale, Vector3 Scale, BundledContentHolder.Selector Selector, Transform Parent = null, int colliderlayer = -1, List<BasisHeadChop.HeadChopTarget> HarvestedHeadChop = null, BasisContentHarvest harvest = null)
+    {
+        ContentControlState state = default;
+        state.Checks = ChecksRequired;
+        state.Selector = Selector;
+        state.Parent = Parent;
+        state.ColliderLayer = colliderlayer;
+        state.HarvestedHeadChop = HarvestedHeadChop;
         if (ChecksRequired.UseContentRemoval)
         {
             SearchAndDestroy = GameObject.Instantiate(SearchAndDestroy, Position, Rotation, DisabledGameobject.transform);
@@ -31,20 +65,90 @@ public static class ContentPoliceControl
                 BasisDebug.Log($"Overriding Default scale is now {Scale} for GameObject {SearchAndDestroy.name}");
                 SearchAndDestroy.transform.localScale = Scale;
             }
-            // Create a list to hold all components in the original GameObject
-            UnityEngine.Component[] components = SearchAndDestroy.GetComponentsInChildren<UnityEngine.Component>(true);
-
-            int count = components.Length;
-
+            state.Clone = SearchAndDestroy;
             if (BundledContentHolder.Instance.GetSelector(Selector, out ContentPoliceSelector PoliceCheck))
             {
                 harvest ??= new BasisContentHarvest();
-                // Renderers harvested during the same walk that strips dangerous components,
-                // so shader prewarm runs without paying for a second GetComponentsInChildren.
-                List<Renderer> renderersForPrewarm = new List<Renderer>();
-                List<SkinnedMeshRenderer> skinnedForHarvest = harvest != null ? new List<SkinnedMeshRenderer>() : null;
-                List<BasisAuthoredMotion> authoredForHarvest = harvest != null ? new List<BasisAuthoredMotion>() : null;
-                BasisComponentKind[] kinds = harvest != null ? new BasisComponentKind[count] : null;
+                state.Harvest = harvest;
+                state.Police = PoliceCheck;
+                state.RemovalWalkPending = true;
+            }
+            else
+            {
+                BasisDebug.LogError("Can't find Police check for " + Selector, BasisDebug.LogTag.Event);
+                state.Harvest = harvest;
+            }
+        }
+        else
+        {
+            if (Parent == null)
+            {
+                SearchAndDestroy = GameObject.Instantiate(SearchAndDestroy, Position, Rotation);
+            }
+            else
+            {
+                SearchAndDestroy = GameObject.Instantiate(SearchAndDestroy, Position, Rotation, Parent);
+            }
+            // No content-removal walk happened, so a dedicated Renderer-typed walk is the only
+            // way to feed the prewarm here. Cheaper than the full component walk above. Only the
+            // renderer bucket is filled; the harvest's other buckets stay null so EnsureHarvest
+            // still rebuilds a full snapshot for the avatar driver.
+            List<Renderer> rawRenderers;
+            if (harvest != null)
+            {
+                harvest.RentRenderers();
+                rawRenderers = harvest.Renderers;
+            }
+            else
+            {
+                rawRenderers = NoRemovalRendererScratch;
+            }
+            SearchAndDestroy.GetComponentsInChildren(true, rawRenderers);
+            if (MaterialCorrectionEnabled)
+            {
+                BasisShaderFallback.MaterialCorrection(rawRenderers, BundledContentHolder.Instance.UrpShader);
+            }
+            if (ShaderPrewarmEnabled)
+            {
+                BasisShaderPrewarm.Warm(rawRenderers, SearchAndDestroy.name);
+            }
+            BasisGraphicsStatePrewarm.WarmResident(SearchAndDestroy.name);
+            state.Clone = SearchAndDestroy;
+            state.Harvest = harvest;
+        }
+        return state;
+    }
+
+    // Phase two: the component walk, MonoBehaviour/event strip, persistent-listener scrub, and the
+    // final reparent + SetActive. Every security strip still completes before the clone goes active.
+    public static GameObject FinishContentControl(ContentControlState state)
+    {
+        GameObject SearchAndDestroy = state.Clone;
+        if (state.RemovalWalkPending)
+        {
+            // The clone is parked under the inactive host; if the load was torn down during the
+            // frame gap it (and its host) are gone, so there is nothing left to scrub or activate.
+            if (SearchAndDestroy != null)
+            {
+                ChecksRequired ChecksRequired = state.Checks;
+                ContentPoliceSelector PoliceCheck = state.Police;
+                BundledContentHolder.Selector Selector = state.Selector;
+                Transform Parent = state.Parent;
+                int colliderlayer = state.ColliderLayer;
+                List<BasisHeadChop.HeadChopTarget> HarvestedHeadChop = state.HarvestedHeadChop;
+                BasisContentHarvest harvest = state.Harvest;
+                // Buffers are loaned from the harvest pool and filled in place, so the
+                // component walk allocates nothing on a warm pool. Renderers (for prewarm)
+                // and per-slot kind tags are collected in this same pass.
+                harvest ??= new BasisContentHarvest();
+                harvest.RentBuffers();
+                List<Component> components = harvest.Components;
+                SearchAndDestroy.GetComponentsInChildren(true, components);
+                int count = components.Count;
+                List<Renderer> renderersForPrewarm = harvest.Renderers;
+                List<SkinnedMeshRenderer> skinnedForHarvest = harvest.SkinnedMeshRenderers;
+                List<BasisAuthoredMotion> authoredForHarvest = harvest.AuthoredMotions;
+                List<BasisComponentKind> kinds = harvest.Kinds;
 
                 // BasisHeadChop is harvested during this walk so the local avatar driver
                 // doesn't need a second GetComponentsInChildren pass at calibration. Harvest
@@ -53,10 +157,7 @@ public static class ContentPoliceControl
                 for (int Index = 0; Index < count; Index++)
                 {
                     Component component = components[Index];
-                    if (kinds != null)
-                    {
-                        kinds[Index] = BasisContentHarvest.Classify(component);
-                    }
+                    kinds.Add(BasisContentHarvest.Classify(component));
                     //do this first before we nuke stuff
                     switch (component)
                     {
@@ -70,7 +171,7 @@ public static class ContentPoliceControl
                                 HarvestedHeadChop.AddRange(headChop.Targets);
                             }
                             GameObject.DestroyImmediate(headChop);
-                            if (kinds != null) kinds[Index] = BasisComponentKind.Removed;
+                            kinds[Index] = BasisComponentKind.Removed;
                             break;
                         case BasisAuthoredMotion authoredMotion:
                             authoredForHarvest?.Add(authoredMotion);
@@ -104,7 +205,7 @@ public static class ContentPoliceControl
                             {
                                 BasisDebug.Log("Remove Collider ", BasisDebug.LogTag.Avatar);
                                 GameObject.Destroy(collider);
-                                if (kinds != null) kinds[Index] = BasisComponentKind.Removed;
+                                kinds[Index] = BasisComponentKind.Removed;
                             }
                             else
                             {
@@ -151,6 +252,17 @@ public static class ContentPoliceControl
                             renderersForPrewarm.Add(vfxRenderer);
                             break;
                     }
+                    // Admin Cilbox lock: strip the sandbox host + proxies from avatar content even
+                    // though they're normally approved, so no avatar script can run. Avatar selector
+                    // only — props and worlds keep their own Cilbox.
+                    if (AvatarCilboxLocked && Selector == BundledContentHolder.Selector.Avatar
+                        && component != null && LockedAvatarCilboxTypeNames.Contains(component.GetType().FullName))
+                    {
+                        GameObject.DestroyImmediate(component);
+                        kinds[Index] = BasisComponentKind.Removed;
+                        continue;
+                    }
+
                     // Check if the component is a MonoBehaviour and not in the approved list
                     if (component is UnityEngine.Component monoBehaviour)
                     {
@@ -159,18 +271,9 @@ public static class ContentPoliceControl
                         {
                             BasisDebug.LogError($"MonoBehaviour {monoTypeName} is not approved and will be removed. Request the {Application.productName} team to add it to the approved list, or add it yourself!", BasisDebug.LogTag.System);
                             GameObject.DestroyImmediate(monoBehaviour); // Destroy the unapproved MonoBehaviour immediately
-                            if (kinds != null) kinds[Index] = BasisComponentKind.Removed;
+                            kinds[Index] = BasisComponentKind.Removed;
                         }
                     }
-                }
-
-                if (harvest != null)
-                {
-                    harvest.Components = components;
-                    harvest.Kinds = kinds;
-                    harvest.Renderers = renderersForPrewarm;
-                    harvest.SkinnedMeshRenderers = skinnedForHarvest;
-                    harvest.AuthoredMotions = authoredForHarvest;
                 }
 
                 if (MaterialCorrectionEnabled)
@@ -208,43 +311,27 @@ public static class ContentPoliceControl
                     SearchAndDestroy.SetActive(true);
                 }
             }
-            else
-            {
-                BasisDebug.LogError("Can't find Police check for " + Selector, BasisDebug.LogTag.Event);
-            }
         }
-        else
+        if (state.Harvest != null && SearchAndDestroy != null && SearchAndDestroy.TryGetComponent(out BasisContentBase contentBase))
         {
-            if (Parent == null)
-            {
-                SearchAndDestroy = GameObject.Instantiate(SearchAndDestroy, Position, Rotation);
-            }
-            else
-            {
-                SearchAndDestroy = GameObject.Instantiate(SearchAndDestroy, Position, Rotation, Parent);
-            }
-            // No content-removal walk happened, so a dedicated Renderer-typed walk is the only
-            // way to feed the prewarm here. Cheaper than the full Component[] walk above.
-            Renderer[] rawRenderers = SearchAndDestroy.GetComponentsInChildren<Renderer>(true);
-            if (harvest != null)
-            {
-                harvest.Renderers = new List<Renderer>(rawRenderers);
-            }
-            if (MaterialCorrectionEnabled)
-            {
-                BasisShaderFallback.MaterialCorrection(rawRenderers, BundledContentHolder.Instance.UrpShader);
-            }
-            if (ShaderPrewarmEnabled)
-            {
-                BasisShaderPrewarm.Warm(rawRenderers, SearchAndDestroy.name);
-            }
-            BasisGraphicsStatePrewarm.WarmResident(SearchAndDestroy.name);
-        }
-        if (harvest != null && SearchAndDestroy != null && SearchAndDestroy.TryGetComponent(out BasisContentBase contentBase))
-        {
-            contentBase.Harvest = harvest;
+            contentBase.Harvest = state.Harvest;
         }
         return SearchAndDestroy;
+    }
+
+    // Carries the parked clone plus the inputs the deferred strip/scrub pass needs, so the loader
+    // can put a frame between BeginContentControl and FinishContentControl. Treat as an opaque handle.
+    public struct ContentControlState
+    {
+        public GameObject Clone;
+        public bool RemovalWalkPending;
+        public ContentPoliceSelector Police;
+        public ChecksRequired Checks;
+        public BundledContentHolder.Selector Selector;
+        public Transform Parent;
+        public int ColliderLayer;
+        public List<BasisHeadChop.HeadChopTarget> HarvestedHeadChop;
+        public BasisContentHarvest Harvest;
     }
     /// <summary>
     /// Scrubs a scene by removing any unapproved MonoBehaviours and applying optional safety checks.
@@ -267,16 +354,18 @@ public static class ContentPoliceControl
             return;
         }
 
-        GameObject[] roots = targetScene.GetRootGameObjects();
+        List<GameObject> roots = new List<GameObject>();
+        targetScene.GetRootGameObjects(roots);
         // Renderers harvested across all roots during the same walk that strips dangerous
-        // components, so shader prewarm runs without paying for a second walk.
+        // components, so shader prewarm runs without paying for a second walk. Both scratch
+        // lists are reused across roots so the scrub allocates only these once.
         List<Renderer> renderersForPrewarm = new List<Renderer>();
-        for (int RootIndex = 0; RootIndex < roots.Length; RootIndex++)
+        List<Component> components = new List<Component>();
+        for (int RootIndex = 0; RootIndex < roots.Count; RootIndex++)
         {
-            // Get ALL components in this subtree
-            Component[] components = roots[RootIndex].transform.GetComponentsInChildren<Component>(includeInactive);
+            roots[RootIndex].transform.GetComponentsInChildren(includeInactive, components);
             // Check if the component is a MonoBehaviour and not in the approved list
-            for (int ComponentIndex = 0; ComponentIndex < components.Length; ComponentIndex++)
+            for (int ComponentIndex = 0; ComponentIndex < components.Count; ComponentIndex++)
             {
                 Component component = components[ComponentIndex];
                 //do this first before we nuke stuff
@@ -435,14 +524,14 @@ public static class ContentPoliceControl
 
     private static readonly HashSet<object> EventWalkVisited = new HashSet<object>(ReferenceEqualityComparerLocal.Instance);
 
-    private static void ScrubDangerousPersistentListeners(Component[] comps, ContentPoliceSelector police)
+    private static void ScrubDangerousPersistentListeners(IReadOnlyList<Component> comps, ContentPoliceSelector police)
     {
         if (comps == null) return;
         HashSet<string> approved = police != null ? police.ApprovedTypeNames : null;
 
         HashSet<object> visited = EventWalkVisited;
         visited.Clear();
-        for (int i = 0; i < comps.Length; i++)
+        for (int i = 0; i < comps.Count; i++)
         {
             Component c = comps[i];
             if (c == null) continue;

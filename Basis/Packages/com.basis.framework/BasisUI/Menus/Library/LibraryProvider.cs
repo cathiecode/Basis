@@ -647,6 +647,9 @@ namespace Basis.BasisUI
                     BasisRuntimeSpawnRegistry.OnRegistryChanged -= OnRegistryChanged;
                     BasisRuntimeSpawnRegistry.OnRegistryChanged += OnRegistryChanged;
 
+                    BasisShareableRegistry.OnChanged -= OnShareablesRegistryChanged;
+                    BasisShareableRegistry.OnChanged += OnShareablesRegistryChanged;
+
                     // force update this page
                     UpdateInstantiatedTab();
                 }
@@ -1931,6 +1934,8 @@ namespace Basis.BasisUI
             // rebuild the page items
             BuildItemsListForInstantiatedObjects(collections, page);
 
+            BuildShareablesList(page);
+
             // force rebuild it
             page.Descriptor.ForceRebuild();
         }
@@ -1987,6 +1992,97 @@ namespace Basis.BasisUI
 
                 CreateListEntry(entry, container, instanceId);
             }
+        }
+
+        private static void OnShareablesRegistryChanged() => UpdateInstantiatedTab();
+
+        private static void BuildShareablesList(PanelTabPage tab)
+        {
+            RectTransform container = tab.Descriptor.ContentParent;
+
+            foreach (BasisShareableEntry entry in BasisShareableRegistry.GetAll())
+            {
+                if (entry == null) continue;
+
+                if (!string.IsNullOrWhiteSpace(_currentSearchQuery))
+                {
+                    string haystack = ShareableDisplayName(entry) + " " + (entry.SharerName ?? string.Empty);
+                    if (haystack.IndexOf(_currentSearchQuery, StringComparison.InvariantCultureIgnoreCase) < 0) continue;
+                }
+
+                CreateShareableListEntry(entry, container);
+            }
+        }
+
+        private static void CreateShareableListEntry(BasisShareableEntry entry, RectTransform parentTabGroup)
+        {
+            PanelTabGroup itemListPanel = PanelTabGroup.CreateNew(PanelTabGroup.TabGroupStyles.HorizontalStackedNoBackground, parentTabGroup);
+
+            if (itemListPanel.TabButtonParent.gameObject.TryGetComponent<UiStyleImage>(out UiStyleImage imageStyle))
+            {
+                imageStyle.SetStyle("Menu Element");
+            }
+
+            itemListPanel.Descriptor.SetWidth(1400);
+            itemListPanel.Descriptor.SetHeight(95);
+
+            PanelImage typePanelImage = PanelImage.CreateNew(PanelImage.ImageStyles.SimpleSquare, itemListPanel.TabButtonParent);
+            typePanelImage.SetSize(new Vector2(80, 80));
+            typePanelImage.SetIcon(ShareableIcon(entry.Kind));
+            typePanelImage.Descriptor.SetTooltip(ShareableKindLabel(entry.Kind));
+
+            PanelTextField itemTextInfo = PanelTextField.CreateNew(TextFieldStyles.Entry, itemListPanel.TabButtonParent);
+            itemTextInfo._inputField.gameObject.SetActive(false);
+            itemTextInfo.Descriptor.SetTitle(ShareableDisplayName(entry));
+            if (!string.IsNullOrEmpty(entry.SharerName))
+            {
+                itemTextInfo.Descriptor.SetDescription(BasisLocalization.Get("library.shareable.sharedBy", LibraryProviderStrUtil.TitleToCase(entry.SharerName)));
+            }
+            itemTextInfo.Descriptor.SetHeight(50);
+            itemTextInfo.Descriptor.SetWidth(400);
+
+            PanelButton removeItem = PanelButton.CreateNew(ButtonStyles.CancelButton, itemListPanel.TabButtonParent);
+            removeItem.Descriptor.SetTitle(string.Empty);
+            removeItem.SetIcon(AddressableAssets.Sprites.Trash);
+            removeItem.SetSize(new Vector2(80, 80));
+            removeItem.Descriptor.IconImage.rectTransform.sizeDelta = new Vector2(-30, -30);
+            removeItem.Descriptor.SetTooltip(BasisLocalization.Get("library.instantiated.remove.tooltip"));
+            removeItem.OnClicked += async () =>
+            {
+                bool confirmed = await LibraryProviderDialogRemove.PromptUserForRemoval(panel, ShareableDisplayName(entry), ShareableKindLabel(entry.Kind));
+                if (!confirmed) return;
+                entry.Remove?.Invoke();
+            };
+        }
+
+        private static string ShareableIcon(BasisShareableKind kind)
+        {
+            switch (kind)
+            {
+                case BasisShareableKind.Avatar: return AddressableAssets.Sprites.Avatars;
+                case BasisShareableKind.World: return AddressableAssets.Sprites.World;
+                case BasisShareableKind.Server: return AddressableAssets.Sprites.Network;
+                default: return AddressableAssets.Sprites.Items;
+            }
+        }
+
+        private static string ShareableKindLabel(BasisShareableKind kind)
+        {
+            switch (kind)
+            {
+                case BasisShareableKind.Avatar: return BasisLocalization.Get("library.shareable.avatar");
+                case BasisShareableKind.Prop: return BasisLocalization.Get("library.shareable.prop");
+                case BasisShareableKind.World: return BasisLocalization.Get("library.shareable.world");
+                case BasisShareableKind.Server: return BasisLocalization.Get("library.shareable.server");
+                case BasisShareableKind.Image: return BasisLocalization.Get("library.shareable.image");
+                default: return BasisLocalization.Get("library.shareable.other");
+            }
+        }
+
+        private static string ShareableDisplayName(BasisShareableEntry entry)
+        {
+            string label = ShareableKindLabel(entry.Kind);
+            return string.IsNullOrEmpty(entry.Title) ? label : BasisLocalization.Get("library.shareable.withDetail", label, entry.Title);
         }
 
         private static BasisNetworkPlayer TryFindPlayer(string uuid) => BasisNetworkPlayers.Players.Values.FirstOrDefault(p => p.Player.UUID == uuid);

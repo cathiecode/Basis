@@ -161,6 +161,12 @@ public class BasisContentSphere : BasisInteractableObject
                 block.SetTexture("_EmissionMap", texture);
                 Renderer.SetPropertyBlock(block, MaterialIndex);
             }
+
+            string sharedName = wrapper.LoadableBundle.BasisBundleConnector.BasisBundleDescription?.AssetBundleName;
+            if (!string.IsNullOrEmpty(sharedName))
+            {
+                BasisShareableRegistry.SetDetail(SphereNetID, ClampName(sharedName));
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception e)
@@ -411,6 +417,7 @@ public class BasisContentSphere : BasisInteractableObject
         {
             if (wrapper.GetState() == BasisInteractInputState.Hovering)
             {
+                Inputs.ChangeStateByRole(wrapper.Role, BasisInteractInputState.Interacting);
                 WasPressed();
                 OnInteractStartEvent?.Invoke(input);
             }

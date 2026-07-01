@@ -121,6 +121,33 @@ namespace Basis.Scripts.UI.NamePlate
             public float2 Uv0;
             public float2 Uv1;
         }
+
+        // Manual text merge (same idea as the panel, but the forked TMP SDF vertex is multi-channel:
+        // position + normal + color + 4-component UV0 (atlas + SDF scale in .w) + the plate id in UV2).
+        public static bool ManualMergeText = true;
+        private static NativeArray<TextVertex> textScratch;
+        // Per-source-mesh write offsets + plate id, filled on the main thread and read by MergeTextJob.
+        private static NativeArray<int> textVOff;
+        private static NativeArray<int> textIOff;
+        private static NativeArray<int> textPlateId;
+        private static readonly VertexAttributeDescriptor[] TextLayout =
+        {
+            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
+            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3),
+            new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 2),
+        };
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TextVertex
+        {
+            public float3 Pos;
+            public float3 Normal;
+            public float4 Color;
+            public float4 Uv0;
+            public float2 Uv2;
+        }
         /// <summary>
         /// Build per-plate matrices from RemoteBoneJobSystem's computed pose (no Transform /
         /// isActiveAndEnabled reads). Falls back to the Transform path when the bone system isn't
@@ -350,10 +377,11 @@ namespace Basis.Scripts.UI.NamePlate
                 return;
             }
 
-            // Panel: build the merged buffers by hand (no CombineMeshes / CombineInstance[] GC).
-            if (isPanel && l.Gpu && ManualMergePanel)
+            // Build the merged buffers by hand (no CombineMeshes / CombineInstance[] GC).
+            if (l.Gpu && (isPanel ? ManualMergePanel : ManualMergeText))
             {
-                BuildPanelMerged(l);
+                if (isPanel) BuildPanelMerged(l);
+                else BuildTextMerged(l);
                 l.Mesh.bounds = new Bounds(Vector3.zero, Vector3.one * NoCullExtent);
                 return;
             }
@@ -479,6 +507,67 @@ namespace Basis.Scripts.UI.NamePlate
             l.Mesh.Clear();
             l.Mesh.SetVertexBufferParams(totalV, PanelLayout);
             l.Mesh.SetVertexBufferData(panelScratch, 0, 0, totalV);
+            l.Mesh.SetIndexBufferParams(totalI, IndexFormat.UInt32);
+            l.Mesh.SetIndexBufferData(indexScratch, 0, 0, totalI);
+            l.Mesh.subMeshCount = 1;
+            l.Mesh.SetSubMesh(0, new SubMeshDescriptor(0, totalI), MeshUpdateFlags.DontRecalculateBounds);
+        }
+
+        /// <summary>
+        /// Same as <see cref="BuildPanelMerged"/> for a text layer: concatenates the TMP SDF channels
+        /// (position + normal + color + 4-component UV0) plus the per-vertex plate id in UV2. The
+        /// forked TMP shader ignores TEXCOORD1, so it's omitted. Reads via MeshData typed getters so
+        /// channel formats convert safely.
+        /// </summary>
+        private static void BuildTextMerged(Layer l)
+        {
+            int n = l.Combine.Count;
+            srcMeshList.Clear();
+            for (int i = 0; i < n; i++) srcMeshList.Add(l.Combine[i].mesh);
+
+            using Mesh.MeshDataArray mda = Mesh.AcquireReadOnlyMeshData(srcMeshList);
+
+            EnsureScratch(ref textVOff, n);
+            EnsureScratch(ref textIOff, n);
+            EnsureScratch(ref textPlateId, n);
+
+            int totalV = 0, totalI = 0;
+            for (int i = 0; i < n; i++)
+            {
+                textVOff[i] = totalV;
+                textIOff[i] = totalI;
+                textPlateId[i] = l.SrcPlate[i];
+                totalV += mda[i].vertexCount;
+                totalI += mda[i].GetSubMesh(0).indexCount;
+            }
+
+            l.VertexCount = totalV;
+            if (totalV == 0)
+            {
+                SetLayerEnabled(l, false);
+                return;
+            }
+
+            EnsureScratch(ref textScratch, totalV);
+            EnsureScratch(ref indexScratch, totalI);
+
+            // Each plate's channel reads (the per-mesh MeshData getters) + interleave run in Burst on a
+            // worker, writing into the plate's own disjoint slice of the merged buffers (offsets above).
+            var job = new MergeTextJob
+            {
+                Src = mda,
+                VOff = textVOff,
+                IOff = textIOff,
+                PlateId = textPlateId,
+                OutVerts = textScratch,
+                OutIdx = indexScratch
+            };
+            if (totalV >= ParallelVertexThreshold) job.Schedule(n, 16).Complete();
+            else job.Run(n);
+
+            l.Mesh.Clear();
+            l.Mesh.SetVertexBufferParams(totalV, TextLayout);
+            l.Mesh.SetVertexBufferData(textScratch, 0, 0, totalV);
             l.Mesh.SetIndexBufferParams(totalI, IndexFormat.UInt32);
             l.Mesh.SetIndexBufferData(indexScratch, 0, 0, totalI);
             l.Mesh.subMeshCount = 1;
@@ -668,7 +757,9 @@ namespace Basis.Scripts.UI.NamePlate
             {
                 BasisRemoteNamePlate p = snapArr[gi];
                 int pid = keyPtr[gi];
-                int slot = (p != null && p.RenderActive && (uint)pid < (uint)mapLen) ? indexMap[pid] : -1;
+                // ReferenceEquals + the cached RenderActive flag (cleared in DeInitialize) stand in for
+                // Unity's `p != null`, so the per-plate gather makes no managed→native op_Inequality call.
+                int slot = (!ReferenceEquals(p, null) && p.RenderActive && (uint)pid < (uint)mapLen) ? indexMap[pid] : -1;
                 if ((uint)slot >= (uint)frameLen) slot = -1;
 
                 if (slot >= 0)
@@ -895,10 +986,14 @@ namespace Basis.Scripts.UI.NamePlate
             if (plateSlot.IsCreated) plateSlot.Dispose();
             if (uvScratch.IsCreated) uvScratch.Dispose();
             if (panelScratch.IsCreated) panelScratch.Dispose();
+            if (textScratch.IsCreated) textScratch.Dispose();
             if (indexScratch.IsCreated) indexScratch.Dispose();
             if (tmpPos.IsCreated) tmpPos.Dispose();
             if (tmpUv0.IsCreated) tmpUv0.Dispose();
             if (tmpIdx.IsCreated) tmpIdx.Dispose();
+            if (textVOff.IsCreated) textVOff.Dispose();
+            if (textIOff.IsCreated) textIOff.Dispose();
+            if (textPlateId.IsCreated) textPlateId.Dispose();
             srcMeshList.Clear();
             snapArr = System.Array.Empty<BasisRemoteNamePlate>();
             plateCapacity = 0;
@@ -952,6 +1047,73 @@ namespace Basis.Scripts.UI.NamePlate
                 int gi = PlateIdx[v];
                 World[v] = math.transform(Matrices[gi], Local[v]);
                 Colors[v] = PlateColors[gi];
+            }
+        }
+
+        /// <summary>
+        /// Reads each source text mesh's channels (position/normal/color/UV0) via the MeshData typed
+        /// getters and writes the interleaved <see cref="TextVertex"/> plus offset indices into the
+        /// merged buffers at the plate's precomputed slice. Burst across worker threads replaces the
+        /// single-threaded per-mesh read + interleave that dominated the topology rebuild.
+        /// </summary>
+        [BurstCompile]
+        private struct MergeTextJob : IJobParallelFor
+        {
+            [ReadOnly] public Mesh.MeshDataArray Src;
+            [ReadOnly] public NativeArray<int> VOff;
+            [ReadOnly] public NativeArray<int> IOff;
+            [ReadOnly] public NativeArray<int> PlateId;
+            [NativeDisableParallelForRestriction] public NativeArray<TextVertex> OutVerts;
+            [NativeDisableParallelForRestriction] public NativeArray<uint> OutIdx;
+
+            public void Execute(int i)
+            {
+                Mesh.MeshData md = Src[i];
+                int vc = md.vertexCount;
+                int vo = VOff[i];
+
+                var pos = new NativeArray<Vector3>(vc, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                var uv0 = new NativeArray<Vector4>(vc, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                md.GetVertices(pos);
+                md.GetUVs(0, uv0);
+
+                var nrm = new NativeArray<Vector3>(vc, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                if (md.HasVertexAttribute(VertexAttribute.Normal)) md.GetNormals(nrm);
+                else for (int j = 0; j < vc; j++) nrm[j] = new Vector3(0f, 0f, -1f);
+
+                var col = new NativeArray<Color>(vc, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                if (md.HasVertexAttribute(VertexAttribute.Color)) md.GetColors(col);
+                else for (int j = 0; j < vc; j++) col[j] = new Color(1f, 1f, 1f, 1f);
+
+                NativeArray<float3> pp = pos.Reinterpret<float3>();
+                NativeArray<float3> np = nrm.Reinterpret<float3>();
+                NativeArray<float4> cp = col.Reinterpret<float4>();   // Color is r,g,b,a floats == float4
+                NativeArray<float4> u0 = uv0.Reinterpret<float4>();
+
+                float2 uv2 = new float2(PlateId[i], 0f);
+                for (int j = 0; j < vc; j++)
+                {
+                    OutVerts[vo + j] = new TextVertex
+                    {
+                        Pos = pp[j],
+                        Normal = np[j],
+                        Color = cp[j],
+                        Uv0 = u0[j],
+                        Uv2 = uv2
+                    };
+                }
+
+                int ic = md.GetSubMesh(0).indexCount;
+                int io = IOff[i];
+                var idx = new NativeArray<int>(ic, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                md.GetIndices(idx, 0);
+                for (int k = 0; k < ic; k++) OutIdx[io + k] = (uint)(idx[k] + vo);
+
+                pos.Dispose();
+                uv0.Dispose();
+                nrm.Dispose();
+                col.Dispose();
+                idx.Dispose();
             }
         }
 

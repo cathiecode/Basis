@@ -26,6 +26,7 @@ namespace Basis.ImagePickup
         private const byte OpChunk = 2;
         private const byte OpTransform = 3;
         private const byte OpDespawn = 4;
+        private const byte OpClaim = 5;
 
         private sealed class OwnedImage
         {
@@ -34,10 +35,6 @@ namespace Basis.ImagePickup
             public int Width;
             public int Height;
             public string OwnerName;
-            public float LastSendTime;
-            public Vector3 LastPosition;
-            public Quaternion LastRotation;
-            public float LastScale;
         }
 
         private sealed class InboundTransfer
@@ -93,6 +90,12 @@ namespace Basis.ImagePickup
         /// <summary>Validates a PNG file, spawns the owner pickup locally, and broadcasts it to all peers.</summary>
         public bool SpawnFromFile(string path)
         {
+            if (BasisNetworkModeration.GlobalImagesLocked && !BasisNetworkModeration.LocalPlayerHasGlobalLockBypass())
+            {
+                BasisDebug.LogWarning("Image pickup blocked: an admin has locked shared images on this server.");
+                return false;
+            }
+
             BasisImageValidationResult result = BasisImageSecurity.ValidateFile(path);
             if (!result.Ok)
             {
@@ -106,7 +109,7 @@ namespace Basis.ImagePickup
 
             GetSpawnPose(out Vector3 position, out Quaternion rotation);
 
-            var pickup = BasisImagePickupObject.Build(this, id, ownerId, ownerName, true, result.Texture, result.CleanPng, position, rotation);
+            var pickup = BasisImagePickupObject.Build(this, id, ownerId, ownerName, true, result.Texture, result.CleanPng, result.HasAlpha, position, rotation);
             _images[id] = pickup;
             _owned[id] = new OwnedImage
             {
@@ -115,12 +118,17 @@ namespace Basis.ImagePickup
                 Width = result.Width,
                 Height = result.Height,
                 OwnerName = ownerName,
-                LastSendTime = 0f,
-                LastPosition = position,
-                LastRotation = rotation,
-                LastScale = 1f,
             };
             IncrementSenderCount(ownerId);
+
+            BasisShareableRegistry.Register(new BasisShareableEntry
+            {
+                Id = id.ToString(),
+                Kind = BasisShareableKind.Image,
+                Title = $"{result.Width}x{result.Height}",
+                SharerName = ownerName,
+                Remove = () => { if (Instance != null) Instance.RequestDespawn(id); },
+            });
 
             if (HasNetworkID)
             {
@@ -144,6 +152,15 @@ namespace Basis.ImagePickup
             RemoveImage(id);
         }
 
+        /// <summary>Takes movement authority when this client grabs an image, demoting other clients to followers.</summary>
+        public void ClaimControl(Guid id)
+        {
+            if (!_images.TryGetValue(id, out BasisImagePickupObject pickup) || pickup == null) return;
+            if (pickup.IsController) return;
+            pickup.SetController(true);
+            if (HasNetworkID) SendCustomNetworkEventDirect(EncodeClaim(id), DeliveryMethod.ReliableOrdered, null);
+        }
+
         private void Update()
         {
             if (!HasNetworkID) return;
@@ -151,24 +168,24 @@ namespace Basis.ImagePickup
             float now = Time.unscaledTime;
             float interval = 1f / BasisImagePickupSettings.TransmitTransformHz;
 
-            foreach (KeyValuePair<Guid, OwnedImage> entry in _owned)
+            foreach (KeyValuePair<Guid, BasisImagePickupObject> entry in _images)
             {
-                OwnedImage owned = entry.Value;
-                if (owned.Object == null) continue;
-                if (now - owned.LastSendTime < interval) continue;
+                BasisImagePickupObject pickup = entry.Value;
+                if (pickup == null || !pickup.IsController) continue;
+                if (now - pickup.LastSendTime < interval) continue;
 
-                owned.Object.transform.GetPositionAndRotation(out Vector3 position, out Quaternion rotation);
-                float scale = owned.Object.transform.localScale.x;
-                bool moved = (position - owned.LastPosition).sqrMagnitude > BasisImagePickupSettings.MovedPositionEpsilon * BasisImagePickupSettings.MovedPositionEpsilon
-                    || Quaternion.Angle(rotation, owned.LastRotation) > BasisImagePickupSettings.MovedRotationEpsilonDegrees
-                    || Mathf.Abs(scale - owned.LastScale) > BasisImagePickupSettings.MovedScaleEpsilon;
+                pickup.transform.GetPositionAndRotation(out Vector3 position, out Quaternion rotation);
+                float scale = pickup.transform.localScale.x;
+                bool moved = (position - pickup.LastSentPosition).sqrMagnitude > BasisImagePickupSettings.MovedPositionEpsilon * BasisImagePickupSettings.MovedPositionEpsilon
+                    || Quaternion.Angle(rotation, pickup.LastSentRotation) > BasisImagePickupSettings.MovedRotationEpsilonDegrees
+                    || Mathf.Abs(scale - pickup.LastSentScale) > BasisImagePickupSettings.MovedScaleEpsilon;
                 if (!moved) continue;
 
-                owned.LastSendTime = now;
-                owned.LastPosition = position;
-                owned.LastRotation = rotation;
-                owned.LastScale = scale;
-                SendCustomNetworkEventDirect(EncodeTransform(entry.Key, position, rotation, scale), DeliveryMethod.Sequenced, null);
+                pickup.LastSendTime = now;
+                pickup.LastSentPosition = position;
+                pickup.LastSentRotation = rotation;
+                pickup.LastSentScale = scale;
+                SendCustomNetworkEventDirect(EncodeTransform(entry.Key, position, rotation, scale), DeliveryMethod.ReliableOrdered, null);
             }
 
             CleanupExpiredTransfers(now);
@@ -219,6 +236,7 @@ namespace Basis.ImagePickup
             using var stream = new MemoryStream(buffer, false);
             using var reader = new BinaryReader(stream, Encoding.UTF8);
             byte opcode = reader.ReadByte();
+            BasisDebug.Log($"Image pickup RX: opcode={opcode} from player {senderId} ({buffer.Length} bytes), my NetworkID={NetworkID}.");
             try
             {
                 switch (opcode)
@@ -226,6 +244,7 @@ namespace Basis.ImagePickup
                     case OpSpawn: HandleSpawn(senderId, reader); break;
                     case OpChunk: HandleChunk(senderId, reader); break;
                     case OpTransform: HandleTransform(senderId, reader); break;
+                    case OpClaim: HandleClaim(senderId, reader); break;
                     case OpDespawn: HandleDespawn(reader); break;
                 }
             }
@@ -315,9 +334,19 @@ namespace Basis.ImagePickup
                 return;
             }
 
-            var pickup = BasisImagePickupObject.Build(this, transfer.Id, transfer.OwnerId, transfer.OwnerName, false, result.Texture, result.CleanPng, transfer.Position, transfer.Rotation);
+            var pickup = BasisImagePickupObject.Build(this, transfer.Id, transfer.OwnerId, transfer.OwnerName, false, result.Texture, result.CleanPng, result.HasAlpha, transfer.Position, transfer.Rotation);
             _images[transfer.Id] = pickup;
             IncrementSenderCount(transfer.OwnerId);
+
+            Guid imageId = transfer.Id;
+            BasisShareableRegistry.Register(new BasisShareableEntry
+            {
+                Id = imageId.ToString(),
+                Kind = BasisShareableKind.Image,
+                Title = $"{transfer.Width}x{transfer.Height}",
+                SharerName = transfer.OwnerName,
+                Remove = () => { if (Instance != null) Instance.RequestDespawn(imageId); },
+            });
         }
 
         private void HandleTransform(ushort senderId, BinaryReader reader)
@@ -327,9 +356,18 @@ namespace Basis.ImagePickup
             Quaternion rotation = new Quaternion(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             float scale = reader.ReadSingle();
 
-            if (_images.TryGetValue(id, out BasisImagePickupObject pickup) && pickup != null && !pickup.IsOwner && pickup.OwnerId == senderId)
+            if (_images.TryGetValue(id, out BasisImagePickupObject pickup) && pickup != null && !pickup.IsController)
             {
                 pickup.SetRemoteTarget(position, rotation, scale);
+            }
+        }
+
+        private void HandleClaim(ushort senderId, BinaryReader reader)
+        {
+            Guid id = new Guid(reader.ReadBytes(16));
+            if (_images.TryGetValue(id, out BasisImagePickupObject pickup) && pickup != null)
+            {
+                pickup.SetController(false);
             }
         }
 
@@ -342,6 +380,7 @@ namespace Basis.ImagePickup
         private bool CanAcceptSpawn(ushort sender, int totalBytes, int width, int height, int totalChunks, out string reason)
         {
             reason = null;
+            if (BasisNetworkModeration.GlobalImagesLocked && !BasisNetworkModeration.LocalPlayerHasGlobalLockBypass()) { reason = "shared images locked by admin"; return false; }
             if (!BasisImagePickupSettings.ReceiveEnabled) { reason = "receiving disabled"; return false; }
             if (totalBytes <= 0 || totalBytes > BasisImagePickupSettings.MaxImageBytes) { reason = "size"; return false; }
             if (width <= 0 || height <= 0 || width > BasisImagePickupSettings.MaxDimension || height > BasisImagePickupSettings.MaxDimension) { reason = "dimensions"; return false; }
@@ -387,6 +426,7 @@ namespace Basis.ImagePickup
                 _images.Remove(id);
             }
             _owned.Remove(id);
+            BasisShareableRegistry.Unregister(id.ToString());
         }
 
         private void IncrementSenderCount(ushort sender)
@@ -466,6 +506,16 @@ namespace Basis.ImagePickup
             using var stream = new MemoryStream();
             using var writer = new BinaryWriter(stream, Encoding.UTF8);
             writer.Write(OpDespawn);
+            writer.Write(id.ToByteArray());
+            writer.Flush();
+            return stream.ToArray();
+        }
+
+        private static byte[] EncodeClaim(Guid id)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream, Encoding.UTF8);
+            writer.Write(OpClaim);
             writer.Write(id.ToByteArray());
             writer.Flush();
             return stream.ToArray();

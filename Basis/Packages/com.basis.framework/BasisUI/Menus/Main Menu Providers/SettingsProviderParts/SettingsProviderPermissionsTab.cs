@@ -225,9 +225,6 @@ namespace Basis.BasisUI
 
             // Initially hide the admin section until we know if the user is admin.
             adminToggle.gameObject.SetActive(false);
-
-            // Auto-fetch on open
-            BasisNetworkModeration.RequestPermissions();
         }
 
         /// <summary>
@@ -258,8 +255,20 @@ namespace Basis.BasisUI
 
             private void OnEnable()
             {
+                BasisNetworkModeration.OnPermissionsReceived -= OnPermissionsReceived;
                 BasisNetworkModeration.OnPermissionsReceived += OnPermissionsReceived;
+                SettingsProviderAdminTab.OnPlayerUuidSelected -= OnPlayerUuidSelected;
                 SettingsProviderAdminTab.OnPlayerUuidSelected += OnPlayerUuidSelected;
+
+                if (BasisNetworkModeration.LastPermissionSnapshot != null)
+                    RebuildDisplay(BasisNetworkModeration.LastPermissionSnapshot);
+                BasisNetworkModeration.RequestPermissions();
+            }
+
+            private void OnDisable()
+            {
+                BasisNetworkModeration.OnPermissionsReceived -= OnPermissionsReceived;
+                SettingsProviderAdminTab.OnPlayerUuidSelected -= OnPlayerUuidSelected;
             }
 
             private void OnDestroy()
@@ -302,8 +311,12 @@ namespace Basis.BasisUI
                     AdminGroupRoot.SetActive(BasisNetworkManagement.LocalPermissions.Contains(PermNodes.PermissionsEdit));
                 }
 
-                // Build group display
+                // Build group display. Instantiate while the section is active so each entry's
+                // Awake runs now and keeps the title we set below; a collapsed (inactive) section
+                // defers Awake until expand, which re-applies the prefab's default ("Press"/blank).
                 GroupsGroup.SetDescription($"{snapshot.Groups.Count} group(s) on server.");
+                bool groupsWasActive = GroupsGroup.gameObject.activeSelf;
+                GroupsGroup.gameObject.SetActive(true);
                 foreach (var group in snapshot.Groups)
                 {
                     PanelElementDescriptor entry =
@@ -334,8 +347,12 @@ namespace Basis.BasisUI
                     }
                 }
 
-                // Build user display
+                GroupsGroup.gameObject.SetActive(groupsWasActive);
+
+                // Build user display (same active-while-building requirement as groups above).
                 UsersGroup.SetDescription($"{snapshot.Users.Count} user(s) with explicit entries.");
+                bool usersWasActive = UsersGroup.gameObject.activeSelf;
+                UsersGroup.gameObject.SetActive(true);
                 foreach (var user in snapshot.Users)
                 {
                     PanelElementDescriptor entry =
@@ -365,6 +382,8 @@ namespace Basis.BasisUI
                         _userEntries.Add(fillBtn.gameObject);
                     }
                 }
+
+                UsersGroup.gameObject.SetActive(usersWasActive);
 
                 // Force layout rebuild
                 if (Container != null)

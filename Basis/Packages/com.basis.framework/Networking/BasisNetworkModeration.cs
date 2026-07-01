@@ -352,6 +352,10 @@ public static class BasisNetworkModeration
                 HandleResourceLimits(reader);
                 break;
 
+            case AdminRequestMode.GlobalGetReductionSettings:
+                HandleReductionSettings(reader);
+                break;
+
             case AdminRequestMode.LogBundleBegin:
                 BasisLogBundleReceiver.Begin(reader);
                 break;
@@ -448,6 +452,17 @@ public static class BasisNetworkModeration
     {
         SendAdminRequest(AdminRequestMode.DisableShoutMode,
             w => w.Put(playerId));
+    }
+
+    /// <summary>
+    /// Admin: enable/disable full-quality broadcast for a player. While enabled the server
+    /// bypasses the distance reduction system and sends their High avatar data to everyone.
+    /// </summary>
+    public static void SetFullQualityBroadcast(ushort playerId, bool enable)
+    {
+        SendAdminRequest(AdminRequestMode.SetFullQualityBroadcast,
+            w => w.Put(playerId),
+            w => w.Put(enable));
     }
 
     #endregion
@@ -740,6 +755,27 @@ public static class BasisNetworkModeration
     public static event Action<bool> OnGlobalDirectConnectLockedChanged;
 
     /// <summary>
+    /// Server-pushed lock: while true, every avatar that loads has its Cilbox sandbox host + proxies
+    /// stripped by ContentPolice, so no avatar script runs. Load-time only — avatars already loaded
+    /// keep their Cilbox until they reload. Props and worlds keep their own Cilbox.
+    /// </summary>
+    public static bool GlobalCilboxLocked { get; private set; }
+
+    /// <summary>Fired when the Cilbox lock flag changes.</summary>
+    public static event Action<bool> OnGlobalCilboxLockChanged;
+
+    /// <summary>
+    /// Server-pushed lock: while true, non-bypass clients can't share new image pickups and won't
+    /// accept inbound ones. Enforced client-side by the image-pickup package (image pickups ride the
+    /// generic scene relay, so the server can't single them out like content shares). Admins with the
+    /// global-lock bypass are exempt.
+    /// </summary>
+    public static bool GlobalImagesLocked { get; private set; }
+
+    /// <summary>Fired when the shared-image lock flag changes.</summary>
+    public static event Action<bool> OnGlobalImagesLockedChanged;
+
+    /// <summary>
     /// True when the local player holds the global-lock moderation permission (or the '*' wildcard),
     /// which exempts them from the admin-controlled avatar-scale clamp, playspace-mover lockout, and
     /// direct-connect lockout. Mirrors the server's permission check; direct connect is still gated
@@ -828,7 +864,27 @@ public static class BasisNetworkModeration
                 OnGlobalDirectConnectLockedChanged?.Invoke(GlobalDirectConnectLocked);
             }
         }
-        BasisDebug.Log($"Global lock state updated - Avatars: {GlobalAvatarsLocked}, Props: {GlobalPropsLocked}, Worlds: {GlobalWorldsLocked}, Servers: {GlobalServersLocked}, ThirdPerson: {GlobalThirdPersonDisabled}, AdditionalAvatarData: {GlobalAdditionalAvatarDataLock}, CameraMask: {GlobalCameraDisallowMask}, Restriction: {GlobalUserRestrictionMode}, PlayspaceMover: {GlobalPlayspaceMoverLocked}, DirectConnect: {GlobalDirectConnectLocked}", BasisDebug.LogTag.Networking);
+        // CilboxLocked appended after DirectConnectLocked — same back-compat trick.
+        if (reader.AvailableBytes >= 1)
+        {
+            bool nextCilboxLocked = reader.GetBool();
+            if (nextCilboxLocked != GlobalCilboxLocked)
+            {
+                GlobalCilboxLocked = nextCilboxLocked;
+                OnGlobalCilboxLockChanged?.Invoke(GlobalCilboxLocked);
+            }
+        }
+        // ImagesLocked appended after CilboxLocked — same back-compat trick.
+        if (reader.AvailableBytes >= 1)
+        {
+            bool nextImagesLocked = reader.GetBool();
+            if (nextImagesLocked != GlobalImagesLocked)
+            {
+                GlobalImagesLocked = nextImagesLocked;
+                OnGlobalImagesLockedChanged?.Invoke(GlobalImagesLocked);
+            }
+        }
+        BasisDebug.Log($"Global lock state updated - Avatars: {GlobalAvatarsLocked}, Props: {GlobalPropsLocked}, Worlds: {GlobalWorldsLocked}, Servers: {GlobalServersLocked}, ThirdPerson: {GlobalThirdPersonDisabled}, AdditionalAvatarData: {GlobalAdditionalAvatarDataLock}, CameraMask: {GlobalCameraDisallowMask}, Restriction: {GlobalUserRestrictionMode}, PlayspaceMover: {GlobalPlayspaceMoverLocked}, DirectConnect: {GlobalDirectConnectLocked}, Cilbox: {GlobalCilboxLocked}, Images: {GlobalImagesLocked}", BasisDebug.LogTag.Networking);
         OnGlobalLockStateChanged?.Invoke(GlobalAvatarsLocked, GlobalPropsLocked, GlobalWorldsLocked, GlobalServersLocked);
     }
 
@@ -900,6 +956,25 @@ public static class BasisNetworkModeration
     public static void GlobalToggleDirectConnect()
     {
         SendAdminRequest(AdminRequestMode.GlobalToggleDirectConnect);
+    }
+
+    /// <summary>
+    /// Admin: toggle the global Cilbox lock. While set, every client blocks sandboxed Cilbox code
+    /// on avatars from running. Server flips the flag and broadcasts the new lock state.
+    /// </summary>
+    public static void GlobalToggleCilbox()
+    {
+        SendAdminRequest(AdminRequestMode.GlobalToggleCilbox);
+    }
+
+    /// <summary>
+    /// Admin: toggle the global shared-image lock. While set, non-bypass clients can't share new
+    /// image pickups and won't accept inbound ones. Server flips the flag and broadcasts the new
+    /// lock state; the image-pickup package honors it client-side.
+    /// </summary>
+    public static void GlobalToggleImages()
+    {
+        SendAdminRequest(AdminRequestMode.GlobalToggleImages);
     }
 
     /// <summary>
@@ -1050,6 +1125,68 @@ public static class BasisNetworkModeration
             w => w.Put(maxDatabaseNameLength),
             w => w.Put(maxDatabasePayloadEntries),
             w => w.Put(maxContentSpheresPerPlayer));
+    }
+
+    /// <summary>Server-pushed BSR reduction settings. Mirror of the config.xml BSR block; populated on connect and on every admin change.</summary>
+    public static int ServerBSRSMillisecondDefaultInterval { get; private set; } = 50;
+    public static int ServerBSRBaseMultiplier { get; private set; } = 1;
+    public static float ServerBSRSIncreaseRate { get; private set; } = 0.005f;
+    public static float ServerBSRSlowestSendRate { get; private set; } = 2.55f;
+    public static float ServerHighQualityDistance { get; private set; } = 10f;
+    public static float ServerMediumQualityDistance { get; private set; } = 20f;
+    public static float ServerLowQualityDistance { get; private set; } = 40f;
+    public static bool ServerEnableAvatarBundleCompression { get; private set; } = true;
+    public static int ServerAvatarBundleMinMessages { get; private set; } = 4;
+    public static int ServerAvatarBundleMinBytes { get; private set; } = 128;
+    public static bool ServerEnableBSRProfiling { get; private set; } = false;
+
+    /// <summary>Fired when the server pushes new BSR reduction settings. The Server* values above hold the current set.</summary>
+    public static event Action OnReductionSettingsChanged;
+
+    private static void HandleReductionSettings(NetDataReader reader)
+    {
+        ServerBSRSMillisecondDefaultInterval = reader.GetInt();
+        ServerBSRBaseMultiplier = reader.GetInt();
+        ServerBSRSIncreaseRate = reader.GetFloat();
+        ServerBSRSlowestSendRate = reader.GetFloat();
+        ServerHighQualityDistance = reader.GetFloat();
+        ServerMediumQualityDistance = reader.GetFloat();
+        ServerLowQualityDistance = reader.GetFloat();
+        ServerEnableAvatarBundleCompression = reader.GetBool();
+        ServerAvatarBundleMinMessages = reader.GetInt();
+        ServerAvatarBundleMinBytes = reader.GetInt();
+        ServerEnableBSRProfiling = reader.GetBool();
+        OnReductionSettingsChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Admin: set the server avatar-reduction (BSR) tuning. Persisted to config.xml, re-applied live,
+    /// and broadcast to every admin panel. SlowestSendRate only affects clients that join afterwards.
+    /// </summary>
+    public static void SetGlobalReductionSettings(int defaultIntervalMs, int baseMultiplier, float increaseRate, float slowestSendRate, float highDistance, float mediumDistance, float lowDistance, bool bundleCompression, int bundleMinMessages, int bundleMinBytes, bool profiling)
+    {
+        if (defaultIntervalMs < 1) defaultIntervalMs = 1;
+        if (baseMultiplier < 1) baseMultiplier = 1;
+        if (increaseRate < 0f) increaseRate = 0f;
+        if (slowestSendRate < 0f) slowestSendRate = 0f;
+        if (highDistance < 0f) highDistance = 0f;
+        if (mediumDistance < 0f) mediumDistance = 0f;
+        if (lowDistance < 0f) lowDistance = 0f;
+        if (bundleMinMessages < 1) bundleMinMessages = 1;
+        if (bundleMinBytes < 0) bundleMinBytes = 0;
+        SendAdminRequest(
+            AdminRequestMode.SetGlobalReductionSettings,
+            w => w.Put(defaultIntervalMs),
+            w => w.Put(baseMultiplier),
+            w => w.Put(increaseRate),
+            w => w.Put(slowestSendRate),
+            w => w.Put(highDistance),
+            w => w.Put(mediumDistance),
+            w => w.Put(lowDistance),
+            w => w.Put(bundleCompression),
+            w => w.Put(bundleMinMessages),
+            w => w.Put(bundleMinBytes),
+            w => w.Put(profiling));
     }
 
     private static void HandleGlobalHeadlessDisallowState(NetDataReader reader)

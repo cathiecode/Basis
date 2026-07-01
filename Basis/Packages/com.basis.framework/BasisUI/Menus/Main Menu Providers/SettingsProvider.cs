@@ -1,6 +1,7 @@
 ﻿using Basis.Scripts.Device_Management;
 using Basis.Scripts.Drivers;
 using Basis.Scripts.Networking;
+using Basis.Scripts.Rendering;
 using Basis.Network.Core;
 using BasisNetworkClient;
 using BasisPermissions;
@@ -432,11 +433,6 @@ namespace Basis.BasisUI
 
             BuildLanguageSelector(container, descriptor);
 
-            PanelToggle toggleRememberMenuState = PanelToggle.CreateNewEntry(container);
-            toggleRememberMenuState.AssignBinding(BasisSettingsDefaults.RememberMenuState);
-            toggleRememberMenuState.Descriptor.SetTitle(BasisLocalization.Get("settings.general.rememberMenuState"));
-            toggleRememberMenuState.Descriptor.SetTooltip(BasisLocalization.Get("settings.general.rememberMenuState.tooltip"));
-
             // Range / visibility / audio-source-limit settings moved out of General:
             //   Avatar Range / Limit Avatars / View Cone Avatars → Graphics
             //   Hearing Range / Limit Audio Sources              → Audio
@@ -445,6 +441,11 @@ namespace Basis.BasisUI
             PanelSectionToggleHelpers.CreateCollapsibleFlatSection(container,
                 BasisLocalization.Get("settings.general.interactions.title"), () =>
             {
+                PanelToggle toggleRememberMenuState = PanelToggle.CreateNewEntry(container);
+                toggleRememberMenuState.AssignBinding(BasisSettingsDefaults.RememberMenuState);
+                toggleRememberMenuState.Descriptor.SetTitle(BasisLocalization.Get("settings.general.rememberMenuState"));
+                toggleRememberMenuState.Descriptor.SetTooltip(BasisLocalization.Get("settings.general.rememberMenuState.tooltip"));
+
                 PanelToggle toggleDisableSeats = PanelToggle.CreateNewEntry(container);
                 toggleDisableSeats.AssignBinding(BasisSettingsDefaults.DisableSeats);
                 toggleDisableSeats.Descriptor.SetTitle(BasisLocalization.Get("settings.general.disableSeats"));
@@ -851,7 +852,7 @@ namespace Basis.BasisUI
 
             // Remote Players (Spatial Audio) — also hosts Hearing Range and the
             // Audio Source cap, since both are "how do I hear other players" controls.
-            SettingsProviderRemoteAudio.BuildRemoteAudioUI(container, descriptor);
+            SettingsProviderRemoteAudio.BuildRemoteAudioUI(container);
 
             // One reset button for this whole page
             AddResetPageButton(container, "settings.tab.audio", ResetAudioDefaults);
@@ -1654,6 +1655,8 @@ namespace Basis.BasisUI
                 toggleVrsVr.Descriptor.SetTitle(BasisLocalization.Get("settings.graphics.vrs"));
                 toggleVrsVr.Descriptor.SetTooltip(BasisLocalization.Get("settings.graphics.vrs.tooltip"));
                 toggleVrsVr.AssignBinding(BasisSettingsDefaults.DevVariableRateShading);
+                if (!BasisVariableRateShadingFeature.IsSupported)
+                    toggleVrsVr.SetInteractable(false, BasisLocalization.Get("settings.graphics.vrs.unsupported"));
 
                 sliderVrsInner = PanelSlider.CreateEntryAndBind(
                     container,
@@ -2151,6 +2154,8 @@ namespace Basis.BasisUI
             toggleVrsDesktop.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.vrs.desktop"));
             toggleVrsDesktop.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.vrs.desktop.tooltip"));
             toggleVrsDesktop.AssignBinding(BasisSettingsDefaults.DevVariableRateShadingDesktop);
+            if (!BasisVariableRateShadingFeature.IsSupported)
+                toggleVrsDesktop.SetInteractable(false, BasisLocalization.Get("settings.developer.vrs.unsupported"));
 
             PanelSectionToggleHelpers.FinalizeFlatSectionFromIndex(vrsToggle, container, vrsStart, false,
                 _ => descriptor.ForceRebuild());
@@ -2194,6 +2199,31 @@ namespace Basis.BasisUI
             toggleIKColliders.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.ikColliders"));
             toggleIKColliders.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.ikColliders.tooltip"));
             toggleIKColliders.AssignBinding(BasisSettingsDefaults.GizmoIKColliders);
+
+            PanelToggle togglePointerRay = PanelToggle.CreateNewEntry(container);
+            togglePointerRay.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.pointerRay"));
+            togglePointerRay.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.pointerRay.tooltip"));
+            togglePointerRay.AssignBinding(BasisSettingsDefaults.GizmoPointerRay);
+
+            PanelToggle toggleHintOffsets = PanelToggle.CreateNewEntry(container);
+            toggleHintOffsets.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.hintOffsets"));
+            toggleHintOffsets.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.hintOffsets.tooltip"));
+            toggleHintOffsets.AssignBinding(BasisSettingsDefaults.GizmoHintOffsets);
+
+            PanelToggle toggleFootPlacement = PanelToggle.CreateNewEntry(container);
+            toggleFootPlacement.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.footPlacement"));
+            toggleFootPlacement.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.footPlacement.tooltip"));
+            toggleFootPlacement.AssignBinding(BasisSettingsDefaults.GizmoFootPlacement);
+
+            PanelToggle toggleInteractionHover = PanelToggle.CreateNewEntry(container);
+            toggleInteractionHover.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.interactionHover"));
+            toggleInteractionHover.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.interactionHover.tooltip"));
+            toggleInteractionHover.AssignBinding(BasisSettingsDefaults.GizmoInteractionHover);
+
+            PanelToggle toggleSeatTargets = PanelToggle.CreateNewEntry(container);
+            toggleSeatTargets.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.seatTargets"));
+            toggleSeatTargets.Descriptor.SetTooltip(BasisLocalization.Get("settings.developer.seatTargets.tooltip"));
+            toggleSeatTargets.AssignBinding(BasisSettingsDefaults.GizmoSeatTargets);
 
             PanelToggle toggleAudioRanges = PanelToggle.CreateNewEntry(container);
             toggleAudioRanges.Descriptor.SetTitle(BasisLocalization.Get("settings.developer.audioRanges"));
@@ -2924,6 +2954,11 @@ namespace Basis.BasisUI
             BasisSettingsDefaults.LinkedTrackerLines.ResetToDefault();
             BasisSettingsDefaults.GizmoEyeGaze.ResetToDefault();
             BasisSettingsDefaults.GizmoIKColliders.ResetToDefault();
+            BasisSettingsDefaults.GizmoPointerRay.ResetToDefault();
+            BasisSettingsDefaults.GizmoHintOffsets.ResetToDefault();
+            BasisSettingsDefaults.GizmoFootPlacement.ResetToDefault();
+            BasisSettingsDefaults.GizmoInteractionHover.ResetToDefault();
+            BasisSettingsDefaults.GizmoSeatTargets.ResetToDefault();
             BasisSettingsDefaults.GizmoAudioRanges.ResetToDefault();
             BasisSettingsDefaults.GizmoAudioListenerCone.ResetToDefault();
             BasisSettingsDefaults.GizmoAudioLevels.ResetToDefault();

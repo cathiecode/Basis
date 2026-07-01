@@ -44,7 +44,33 @@ public static class BasisBundleLoadAsset
                             ChecksRequired.ChangeCollidersToCorrectLayer = ChangeColidersToCorrectLayer;
                             ChecksRequired.ScrubPersistentUnityEvents = true;
                             BasisContentHarvest harvest = BasisAvatar != null ? new BasisContentHarvest() : null;
-                            GameObject CreatedCopy = ContentPoliceControl.ContentControl(DisabledGameobject,loadedObject, ChecksRequired, Position, Rotation, ModifyScale, Scale, Selector, Parent, LayerMask.NameToLayer("IgnoredByInteractable"), HarvestedHeadChop, harvest);
+                            // Instantiate (phase one) and the component strip/scrub walk (phase two) are
+                            // each a multi-ms main-thread cost; running both in one frame is the load hitch.
+                            // BeginContentControl parks the clone inactive after Instantiate; yield a frame
+                            // before FinishContentControl runs the walk + activate so the two never share a
+                            // frame. The budget gate still spreads concurrent loads across frames on top of that.
+                            await BasisLoadFrameBudget.WaitForBudgetAsync();
+                            double instantiateStart = BasisLoadFrameBudget.BeginStep();
+                            ContentPoliceControl.ContentControlState scrubState = ContentPoliceControl.BeginContentControl(DisabledGameobject, loadedObject, ChecksRequired, Position, Rotation, ModifyScale, Scale, Selector, Parent, LayerMask.NameToLayer("IgnoredByInteractable"), HarvestedHeadChop, harvest);
+                            BasisLoadFrameBudget.EndStep(instantiateStart);
+                            GameObject CreatedCopy;
+                            if (scrubState.RemovalWalkPending)
+                            {
+                                await Task.Yield();
+                                await BasisLoadFrameBudget.WaitForBudgetAsync();
+                                double walkStart = BasisLoadFrameBudget.BeginStep();
+                                CreatedCopy = ContentPoliceControl.FinishContentControl(scrubState);
+                                BasisLoadFrameBudget.EndStep(walkStart);
+                            }
+                            else
+                            {
+                                CreatedCopy = ContentPoliceControl.FinishContentControl(scrubState);
+                            }
+                            if (CreatedCopy == null)
+                            {
+                                BasisDebug.LogError("ContentControl returned null; clone was destroyed during the frame-split load.");
+                                return null;
+                            }
                             if (harvest != null && CreatedCopy != null && CreatedCopy.TryGetComponent(out Basis.Scripts.BasisSdk.BasisAvatar createdAvatar))
                             {
                                 createdAvatar.Harvest = harvest;
@@ -132,5 +158,49 @@ public static class BasisBundleLoadAsset
             BasisDebug.LogError("Path was null or empty! this should not be happening!");
         }
         return new Scene();
+    }
+}
+
+// Cooperative per-frame budget for the synchronous Instantiate + ContentPolice scrub tail of a
+// bundle load (that work can't leave the main thread, so concurrent loads otherwise stack their
+// tails into one hitch). Loads call WaitForBudgetAsync before the heavy step; once a frame has
+// spent FrameBudgetMs on load tails, further loads defer to the next frame. Light frames still
+// run many back-to-back, so mass joins aren't throttled. Main-thread only (no locks needed).
+public static class BasisLoadFrameBudget
+{
+    // <= 0 disables the gate (original stack-in-one-frame behavior).
+    public static double FrameBudgetMs = 4.0;
+
+    private static int _budgetFrame = -1;
+    private static double _spentThisFrameMs;
+
+    public static async Task WaitForBudgetAsync()
+    {
+        if (FrameBudgetMs <= 0) return;
+        ResetIfNewFrame();
+        while (_spentThisFrameMs >= FrameBudgetMs)
+        {
+            await Task.Yield();
+            ResetIfNewFrame();
+        }
+    }
+
+    public static double BeginStep() => Time.realtimeSinceStartupAsDouble * 1000.0;
+
+    public static void EndStep(double startMs)
+    {
+        if (FrameBudgetMs <= 0) return;
+        ResetIfNewFrame();
+        _spentThisFrameMs += Time.realtimeSinceStartupAsDouble * 1000.0 - startMs;
+    }
+
+    private static void ResetIfNewFrame()
+    {
+        int frame = Time.frameCount;
+        if (frame != _budgetFrame)
+        {
+            _budgetFrame = frame;
+            _spentThisFrameMs = 0;
+        }
     }
 }

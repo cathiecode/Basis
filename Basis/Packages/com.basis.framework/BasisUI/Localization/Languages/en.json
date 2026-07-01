@@ -363,6 +363,26 @@
       "value": "Show the collision shapes used by inverse kinematics."
     },
     {
+      "key": "settings.developer.pointerRay.tooltip",
+      "value": "Show each pointer's raycast line and the placement box when positioning objects."
+    },
+    {
+      "key": "settings.developer.hintOffsets.tooltip",
+      "value": "Show IK hint trackers and their calibrated push up/out offsets."
+    },
+    {
+      "key": "settings.developer.footPlacement.tooltip",
+      "value": "Show procedural foot placement: step targets, arcs, and knee hints."
+    },
+    {
+      "key": "settings.developer.interactionHover.tooltip",
+      "value": "Show interaction hover spheres and lines to hovered objects."
+    },
+    {
+      "key": "settings.developer.seatTargets.tooltip",
+      "value": "Show the seated-pose solve targets for the back, knees, and feet."
+    },
+    {
       "key": "settings.developer.audioRanges.tooltip",
       "value": "Show your hearing-distance sphere and each speaker's full-volume range."
     },
@@ -1699,6 +1719,14 @@
       "value": "Return this player's voice to normal distance-based spatial audio."
     },
     {
+      "key": "menu.individualPlayer.fullquality.enable.tooltip",
+      "value": "Send this player's High-quality avatar data to everyone, skipping the distance reduction system. Uses more bandwidth."
+    },
+    {
+      "key": "menu.individualPlayer.fullquality.disable.tooltip",
+      "value": "Return this player to the normal distance-based reduction system."
+    },
+    {
       "key": "settings.permissions.refresh.tooltip",
       "value": "Fetch the latest permission groups and user assignments from the server."
     },
@@ -2371,6 +2399,14 @@
       "value": "Toggles rendering of this player's avatar on your client."
     },
     {
+      "key": "menu.individualPlayer.alwaysShowAvatar",
+      "value": "Always Show Avatar"
+    },
+    {
+      "key": "menu.individualPlayer.alwaysShowAvatar.description",
+      "value": "Always render this player's avatar, even when distance, the max visible avatar cap, or the view cone filter would normally replace it with the loading avatar. Blocking and the performance filter still apply."
+    },
+    {
       "key": "menu.individualPlayer.enableInteractions",
       "value": "Enable Interactions"
     },
@@ -2693,6 +2729,14 @@
     {
       "key": "menu.individualPlayer.shout.enable",
       "value": "Enable Shout Mode"
+    },
+    {
+      "key": "menu.individualPlayer.fullquality.enable",
+      "value": "Enable Full-Quality Broadcast"
+    },
+    {
+      "key": "menu.individualPlayer.fullquality.disable",
+      "value": "Disable Full-Quality Broadcast"
     },
     {
       "key": "menu.individualPlayer.shout.disable",
@@ -3117,6 +3161,38 @@
     {
       "key": "library.instantiated.remove.tooltip",
       "value": "Remove this item."
+    },
+    {
+      "key": "library.shareable.avatar",
+      "value": "Shared Avatar"
+    },
+    {
+      "key": "library.shareable.prop",
+      "value": "Shared Prop"
+    },
+    {
+      "key": "library.shareable.world",
+      "value": "Shared World"
+    },
+    {
+      "key": "library.shareable.server",
+      "value": "Shared Server"
+    },
+    {
+      "key": "library.shareable.image",
+      "value": "Shared Image"
+    },
+    {
+      "key": "library.shareable.other",
+      "value": "Shared Item"
+    },
+    {
+      "key": "library.shareable.sharedBy",
+      "value": "Shared by {0}"
+    },
+    {
+      "key": "library.shareable.withDetail",
+      "value": "{0} ({1})"
     },
     {
       "key": "library.instantiated.icon.admin.tooltip",
@@ -5516,7 +5592,7 @@
     },
     {
       "key": "settings.platform.activeMode",
-      "value": "Active Mode"
+      "value": "Active Device Mode"
     },
     {
       "key": "settings.platform.vrRuntime",
@@ -5711,6 +5787,10 @@
       "value": "Experimental. Applies variable rate shading in flatscreen (non-VR) mode, following gaze when eye tracking is available and otherwise keeping the screen center sharp. Requires DirectX 12 and VRS-capable hardware."
     },
     {
+      "key": "settings.developer.vrs.unsupported",
+      "value": "Unavailable — Variable Rate Shading requires DirectX 12. Your current graphics API does not support it."
+    },
+    {
       "key": "settings.graphics.vrs.title",
       "value": "Variable Rate Shading"
     },
@@ -5721,6 +5801,10 @@
     {
       "key": "settings.graphics.vrs.tooltip",
       "value": "Lowers shading rate in your peripheral vision and follows your eye-tracking gaze to keep the center sharp, improving GPU performance in VR. Requires DirectX 12 and VRS-capable hardware."
+    },
+    {
+      "key": "settings.graphics.vrs.unsupported",
+      "value": "Unavailable — Variable Rate Shading requires DirectX 12. Your current graphics API does not support it."
     },
     {
       "key": "settings.graphics.vrs.inner",
@@ -5813,6 +5897,26 @@
     {
       "key": "settings.developer.ikColliders.description",
       "value": "Draws the chest and hand collision capsules used by the IK solver to prevent the hands and arms from intersecting the torso. Useful when tuning ChestRadius, HandRadius, and CollisionSkin on the FullBodyIK constraint."
+    },
+    {
+      "key": "settings.developer.pointerRay",
+      "value": "Pointer Raycast"
+    },
+    {
+      "key": "settings.developer.hintOffsets",
+      "value": "IK Hint Offsets"
+    },
+    {
+      "key": "settings.developer.footPlacement",
+      "value": "Foot Placement"
+    },
+    {
+      "key": "settings.developer.interactionHover",
+      "value": "Interaction Hover"
+    },
+    {
+      "key": "settings.developer.seatTargets",
+      "value": "Seat Targets"
     },
     {
       "key": "settings.developer.audioRanges",
@@ -7477,6 +7581,22 @@
     {
       "key": "settings.admin.title.lockDirectConnect.tooltip",
       "value": "Stop non-admin players from opening direct peer-to-peer connections. Admins are unaffected."
+    },
+    {
+      "key": "settings.admin.title.lockCilbox",
+      "value": "Lock Avatar Scripts (Cilbox)"
+    },
+    {
+      "key": "settings.admin.title.lockCilbox.tooltip",
+      "value": "Strip sandboxed Cilbox code from avatars as they load so their scripts can't run. Applies to avatars loaded while this is on; anyone already loaded keeps theirs until they reload. Props and worlds are unaffected. Admins are not exempt."
+    },
+    {
+      "key": "settings.admin.title.lockSharedImages",
+      "value": "Lock Shared Images"
+    },
+    {
+      "key": "settings.admin.title.lockSharedImages.tooltip",
+      "value": "Stop non-admin players from sharing new image pickups, and from receiving images shared while this is on. Admins are unaffected."
     },
     {
       "key": "settings.admin.minAvatarHeight",
