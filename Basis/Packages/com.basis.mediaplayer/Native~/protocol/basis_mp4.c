@@ -52,6 +52,17 @@ typedef struct {
 } mp4_frag_t;
 
 typedef struct {
+    uint32_t reference_id;
+    uint32_t timescale;
+    uint64_t earliest_presentation_time;
+    uint64_t first_offset;
+    uint64_t referenced_size;
+    uint64_t duration;
+    uint16_t reference_count;
+    uint16_t media_reference_count;
+} mp4_sidx_t;
+
+typedef struct {
     basis_media_sink_t* sink;
     basis_read_fn read;
     void* ctx;
@@ -61,8 +72,11 @@ typedef struct {
     /* runs from the last moof (one per traf/trun), consumed against its mdat */
     mp4_frag_t frags[MP4_MAX_FRAGS];
     int nfrags;
+    mp4_sidx_t sidx;
+    int read_bytes;
 } mp4_t;
 
+static uint16_t rd16(const uint8_t* p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
 static uint32_t rd32(const uint8_t* p) { return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3]; }
 static uint64_t rd64(const uint8_t* p) { return ((uint64_t)rd32(p)<<32)|rd32(p+4); }
 
@@ -74,6 +88,7 @@ static int read_exact(mp4_t* m, uint8_t* buf, int n) {
         if (r <= 0) return got;
         got += r;
     }
+    m->read_bytes += got;
     return got;
 }
 
@@ -309,6 +324,54 @@ static void parse_moof(mp4_t* m, const uint8_t* p, int len) {
     }
 }
 
+static void parse_sidx(mp4_t* m, const uint8_t* p, int len) {
+    mp4_sidx_t sidx;
+    int off;
+
+    if (!m || !p || len < 24) return;
+    memset(&sidx, 0, sizeof(sidx));
+
+    /* p starts at the FullBox payload (version/flags), not the box header. */
+    if (p[0] > 1) return;
+    sidx.reference_id = rd32(p + 4);
+    sidx.timescale = rd32(p + 8);
+    off = 12;
+
+    if (p[0] == 0) {
+        sidx.earliest_presentation_time = rd32(p + off);
+        sidx.first_offset = rd32(p + off + 4);
+        off += 8;
+    } else {
+        if (len < 32) return;
+        sidx.earliest_presentation_time = rd64(p + off);
+        sidx.first_offset = rd64(p + off + 8);
+        off += 16;
+    }
+
+    /* reserved(16), reference_count(16), then 12 bytes per reference. */
+    if (off > len - 4) return;
+    sidx.reference_count = rd16(p + off + 2);
+    off += 4;
+    if ((size_t)sidx.reference_count > (size_t)(len - off) / 12) return;
+
+    for (uint16_t i = 0; i < sidx.reference_count; ++i, off += 12) {
+        uint32_t reference = rd32(p + off);
+        /* reference = 1 means the referenced material is another SegmentBox, */
+        /* which we don't support currently */
+        if ((reference & 0x80000000U) == 0) {
+            sidx.media_reference_count++;
+            sidx.referenced_size += reference & 0x7FFFFFFFU;
+            sidx.duration += rd32(p + off + 4);
+        }
+        /* The final word contains SAP metadata. It is intentionally consumed
+         * but does not affect sequential playback. */
+        (void)rd32(p + off + 8);
+    }
+
+    /* Commit only after the complete box has passed all bounds checks. */
+    m->sidx = sidx;
+}
+
 static void consume_frag(mp4_t* m, const mp4_frag_t* f, const uint8_t* data, int len, int base_off) {
     mp4_track_t* t = track_by_id(m, f->track_id);
     if (!t) return;
@@ -373,8 +436,11 @@ int basis_mp4_run(basis_media_sink_t* sink, basis_read_fn read, void* ctx) {
             case 0x6d646174: /* mdat */
                 consume_mdat(&m, buf, (int)blen);
                 break;
+            case 0x73696478: /* sidx */
+                parse_sidx(&m, buf, (int)blen);
+                break;
             default:
-                break; /* ftyp, styp, sidx, free, ... ignored */
+                break; /* ftyp, styp, free, ... ignored */
         }
         free(buf);
     }
