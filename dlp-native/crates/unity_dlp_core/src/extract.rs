@@ -1,5 +1,3 @@
-use std::ffi::CStr;
-
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -16,9 +14,7 @@ pub fn extract(url: &str, opts_json: Option<&str>) -> Result<String, String> {
 }
 
 fn run_extract(py: Python<'_>, url: &str, opts_json: Option<&str>) -> Result<String, String> {
-    log::debug!("Running python script with {url}");
-
-    let locals = PyDict::new(py);
+    let locals = PyDict::new_bound(py);
     locals
         .set_item("_url", url)
         .map_err(|e| format!("set _url: {e}"))?;
@@ -26,7 +22,7 @@ fn run_extract(py: Python<'_>, url: &str, opts_json: Option<&str>) -> Result<Str
         .set_item("_opts_json", opts_json)
         .map_err(|e| format!("set _opts_json: {e}"))?;
 
-    py.run(EXTRACT_PY, None, Some(&locals))
+    py.run_bound(EXTRACT_PY, None, Some(&locals))
         .map_err(|e| format!("yt-dlp extraction failed: {e}"))?;
 
     locals
@@ -46,7 +42,7 @@ fn run_extract(py: Python<'_>, url: &str, opts_json: Option<&str>) -> Result<Str
 //  - `sanitize_info` removes non-JSON-serialisable objects (e.g. datetime) that
 //    appear in some extractors' info_dict.
 //  - `extract_flat=False` ensures full format list resolution.
-const EXTRACT_PY: &CStr = cr#"
+const EXTRACT_PY: &str = r#"
 import yt_dlp as _ydl_mod
 import json as _json
 import threading as _threading
