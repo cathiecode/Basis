@@ -73,8 +73,14 @@ typedef struct {
     /* runs from the last moof (one per traf/trun), consumed against its mdat */
     mp4_frag_t frags[MP4_MAX_FRAGS];
     int nfrags;
+
     mp4_sidx_t sidx;
     int read_bytes;
+
+    int seek_allowed;
+    int seekable;
+    volatile uint64_t* seek_request_us;
+    uint64_t last_seek_request;
 } mp4_t;
 
 static uint16_t rd16(const uint8_t* p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
@@ -371,6 +377,7 @@ static void parse_sidx(mp4_t* m, const uint8_t* p, int len) {
 
     /* Commit only after the complete box has passed all bounds checks. */
     m->sidx = sidx;
+    m->seekable = 1;
 }
 
 static void consume_frag(mp4_t* m, const mp4_frag_t* f, const uint8_t* data, int len, int base_off) {
@@ -418,14 +425,21 @@ static void consume_mdat(mp4_t* m, const uint8_t* data, int len) {
         consume_frag(m, &m->frags[k], data, len, base_off);
 }
 
-int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* http, void* ctx) {
+int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* http, void* ctx, const char* url, volatile uint64_t* seek_request_us, int allow_seek) {
     mp4_t m; memset(&m, 0, sizeof(m));
-    m.sink = sink; m.read = http->read; m.ctx = ctx;
+    m.sink = sink; m.read = http->read; m.ctx = ctx; m.seek_request_us = seek_request_us; m.seek_allowed = allow_seek;
 
     while (sink->is_running(sink->user)) {
         uint32_t type; uint8_t* buf; int64_t blen;
-        if (read_box(&m, &type, &buf, &blen) != 0) break;
 
+        if (m.seek_allowed && m.seekable && m.seek_request_us != NULL && m.last_seek_request != *m.seek_request_us && url != NULL) {
+            http->close(m.ctx);
+            m.ctx = NULL;
+            m.ctx = http->open(url); /* TODO: Range Request */
+            m.last_seek_request = *m.seek_request_us;
+        }
+
+        if (read_box(&m, &type, &buf, &blen) != 0) break;
         switch (type) {
             case 0x6d6f6f76: /* moov */
                 parse_box_tree(&m, NULL, buf, (int)blen);

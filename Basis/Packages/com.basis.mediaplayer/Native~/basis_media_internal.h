@@ -175,6 +175,7 @@ basis_decoder_t* basis_engine_get_decoder(basis_media_engine_t* engine);
  * audio reads; running going to 0 tells decode/demux loops to unwind. */
 int basis_engine_is_paused(basis_media_engine_t* engine);
 int basis_engine_is_running(basis_media_engine_t* engine);
+int64_t basis_engine_seek_from(basis_media_engine_t* engine);
 
 /* Non-zero when the source opened in paced (VOD) mode: the platform backend
  * presents on a fixed 1x-from-first-PTS clock instead of the live-edge clock. */

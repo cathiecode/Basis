@@ -121,6 +121,8 @@ BASIS_API int BASIS_CALL basis_media_get_frame_origin(basis_media_engine_t* engi
  * microseconds from stream start. -1 if unknown. */
 BASIS_API int64_t BASIS_CALL basis_media_get_position_us(basis_media_engine_t* engine);
 
+BASIS_API int BASIS_CALL basis_media_seek_vod_us(basis_media_engine_t* engine, uint64_t* us);
+
 /* Copies the in-band caption cue (CEA-608 CC1) active at the current presentation
  * position into buf (UTF-8, NUL-terminated). Returns bytes written (0 = no active
  * cue), or -1 on bad args. out_start_us/out_end_us receive the active cue's time

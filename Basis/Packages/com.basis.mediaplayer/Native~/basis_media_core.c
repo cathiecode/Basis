@@ -116,6 +116,7 @@ struct basis_media_engine {
     int thread_started;
     volatile int running;
     volatile int paused;
+    volatile int64_t seek_request_us;
 
     basis_mutex_t lock;
     /* Serialises decoder submit/format from the two demux threads (video + audio leg) so
@@ -197,6 +198,7 @@ void basis_engine_set_error(basis_media_engine_t* e, const char* msg) {
 basis_decoder_t* basis_engine_get_decoder(basis_media_engine_t* e) { return e ? e->decoder : NULL; }
 int basis_engine_is_paused(basis_media_engine_t* e) { return e ? e->paused : 0; }
 int basis_engine_is_running(basis_media_engine_t* e) { return e ? e->running : 0; }
+int64_t basis_engine_seek_from(basis_media_engine_t* e) { return e->seek_request_us; }
 int basis_engine_is_paced(basis_media_engine_t* e) { return e ? e->paced : 0; }
 
 /* Real-time delivery pacing. Blocks the demux thread so an access unit is handed to the
@@ -506,12 +508,15 @@ typedef struct http_context {
 static one = 1;
 
 static void* open_http_context_use_readahead(const char* url) {
-    void* src = NULL;
     basis_read_fn rd = NULL;
+    void* src = NULL;
     http_context_t* h = calloc(1, sizeof(*h));
     byte_ring_t* ring = calloc(1, sizeof(*ring));
+    reader_args_t* ra = calloc(1, sizeof(*ra));
 
     if (!h) return NULL;
+    if (!ra) return NULL;
+    if (!ring) return NULL;
 
 #if defined(_WIN32)
     src = basis_win_http_open(url);   /* WinHTTP: handles http + https/TLS */
@@ -544,24 +549,31 @@ static void* open_http_context_use_readahead(const char* url) {
     void* demux_ctx = &src;
     basis_thread_t reader;
     int reader_started = 0;
-    reader_args_t ra;
 
     if (use_readahead) {
         ring->running = &one; /* TODO: Can we assume running=true? */
-        ra.ring = ring; ra.net_read = rd; ra.net_ctx = &h->src; ra.running = &one; /* TODO: We cannot assume running=true */
+        ra->ring = ring; ra->net_read = rd; ra->net_ctx = h->src; ra->running = &one; /* TODO: We cannot assume running=true */
 #if defined(_WIN32)
-        reader = CreateThread(NULL, 0, reader_entry, &ra, 0, NULL);
+        reader = CreateThread(NULL, 0, reader_entry, ra, 0, NULL);
         reader_started = (reader != NULL);
 #else
         reader_started = (pthread_create(&reader, NULL, reader_entry, &ra) == 0);
 #endif
         if (reader_started) { demux_read = ring_read_fn; demux_ctx = ring; h->reader = reader; }
-        else { ring_free(ring); use_readahead = 0; }
+        else { free(ra);  ring_free(ring); use_readahead = 0; }
+    }
+    else
+    {
+        free(ra);
+        ring_free(ring);
     }
 
     h->use_readahead = use_readahead;
+    h->src = src;
     h->demux_read = demux_read;
     h->demux_ctx = demux_ctx;
+
+    return h;
 }
 
 static int read_http_context(void* ctx, uint8_t* buf, int len) {
@@ -623,7 +635,7 @@ static void run_hls(demux_ctx_t* c) {
     c->e->pace_delivery = 1;
     c->sink->on_state(c->sink->user, BASIS_MEDIA_STATE_BUFFERING);
     if (is_fmp4)
-        basis_mp4_run(c->sink, &provider, hls);
+        basis_mp4_run(c->sink, &provider, hls, NULL, NULL, 0);
     else
         basis_ts_run(c->sink, &provider, hls);
     basis_hls_close(hls);
@@ -752,7 +764,7 @@ static void run_http_like(demux_ctx_t* c) {
     ctx->demux_read = demux_read;
 
     if (is_mp4)
-        basis_mp4_run(c->sink, &http, ctx);
+        basis_mp4_run(c->sink, &http, ctx, c->url, &c->e->seek_request_us, basis_win_http_is_seekable(src));
     else
         basis_ts_run(c->sink, &http, demux_ctx); /* default to MPEG-TS */
 }
@@ -1093,6 +1105,10 @@ BASIS_API int BASIS_CALL basis_media_get_frame_origin(basis_media_engine_t* e) {
 BASIS_API int64_t BASIS_CALL basis_media_get_position_us(basis_media_engine_t* e) {
     if (!e || !e->decoder) return -1;
     return basis_decoder_get_position_us(e->decoder);
+}
+
+BASIS_API int BASIS_CALL basis_media_seek_vod_us(basis_media_engine_t* e, uint64_t us) {
+    e->seek_request_us = us;
 }
 
 BASIS_API int BASIS_CALL basis_media_poll_caption(basis_media_engine_t* e, char* buf, int buf_size,

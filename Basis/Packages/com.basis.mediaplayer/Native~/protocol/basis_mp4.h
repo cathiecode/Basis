@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* read, void* ctx);
+int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* read, void* ctx, const char* url, volatile uint64_t* seek_request_us, int allow_seek);
 
 #ifdef __cplusplus
 }
