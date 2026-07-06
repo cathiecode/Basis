@@ -5,12 +5,13 @@
 #define BASIS_MP4_H
 
 #include "../basis_media_internal.h"
+#include "basis_http_provider.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int basis_mp4_run(basis_media_sink_t* sink, basis_read_fn read, void* ctx);
+int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* read, void* ctx);
 
 #ifdef __cplusplus
 }

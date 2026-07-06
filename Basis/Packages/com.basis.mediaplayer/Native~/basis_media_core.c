@@ -24,6 +24,7 @@
 #include "protocol/basis_hls.h"
 #include "protocol/basis_rist.h"
 #include "protocol/basis_caption.h"
+#include "protocol/basis_http_provider.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -494,6 +495,107 @@ static DWORD WINAPI reader_entry(LPVOID p) { reader_body((reader_args_t*)p); ret
 static void* reader_entry(void* p) { reader_body((reader_args_t*)p); return NULL; }
 #endif
 
+typedef struct http_context {
+    int use_readahead;
+    basis_read_fn demux_read;
+    basis_thread_t reader;
+    void* src;
+    void* demux_ctx;
+} http_context_t;
+
+static one = 1;
+
+static void* open_http_context_use_readahead(const char* url) {
+    void* src = NULL;
+    basis_read_fn rd = NULL;
+    http_context_t* h = calloc(1, sizeof(*h));
+    byte_ring_t* ring = calloc(1, sizeof(*ring));
+
+    if (!h) return NULL;
+
+#if defined(_WIN32)
+    src = basis_win_http_open(url);   /* WinHTTP: handles http + https/TLS */
+    rd = basis_win_http_read;
+#elif defined(__ANDROID__)
+    /* AMediaExtractor either took the URL (already returned above) or rejected
+     * it (unsupported live container, etc). Fall back to a JNI-backed Java
+     * HttpsURLConnection feeding the portable TS/MP4 demuxers — same path used
+     * for RTSP/RTMP. Works for both http:// and https://.
+     *
+     * Read timeout is 60s, not 15s: live streams can have brief stalls (key-
+     * frame intervals, network jitter, server buffering) that a short timeout
+     * would mistake for a dead socket. Connect timeout stays implicitly short
+     * (the open call). */
+    src = basis_jni_https_open(c->url, 60000);
+    rd = basis_jni_https_read;
+#else
+    if (c->parts->tls) {
+        c->sink->on_error(c->sink->user, "https requires the platform TLS stack (WinHTTP/AMediaExtractor); not available on this build.");
+        return;
+    }
+    src = basis_http_open(c->parts, 15000);
+    rd = basis_http_read;
+#endif
+
+    h->src = src;
+    h->demux_read = rd;
+    int use_readahead = ring_init(ring, BASIS_READAHEAD_CAP);
+    basis_read_fn demux_read = rd;
+    void* demux_ctx = &src;
+    basis_thread_t reader;
+    int reader_started = 0;
+    reader_args_t ra;
+
+    if (use_readahead) {
+        ring->running = &one; /* TODO: Can we assume running=true? */
+        ra.ring = ring; ra.net_read = rd; ra.net_ctx = &h->src; ra.running = &one; /* TODO: We cannot assume running=true */
+#if defined(_WIN32)
+        reader = CreateThread(NULL, 0, reader_entry, &ra, 0, NULL);
+        reader_started = (reader != NULL);
+#else
+        reader_started = (pthread_create(&reader, NULL, reader_entry, &ra) == 0);
+#endif
+        if (reader_started) { demux_read = ring_read_fn; demux_ctx = ring; h->reader = reader; }
+        else { ring_free(ring); use_readahead = 0; }
+    }
+
+    h->use_readahead = use_readahead;
+    h->demux_read = demux_read;
+    h->demux_ctx = demux_ctx;
+}
+
+static int read_http_context(void* ctx, uint8_t* buf, int len) {
+    http_context_t* http = ctx;
+    return http->demux_read(http->demux_ctx, buf, len);
+}
+
+static void close_http_context(void* ctx) {
+    http_context_t* http = ctx;
+    if (http->use_readahead) {
+        byte_ring_t* ring = http->demux_ctx;
+        mutex_lock(&ring->lock); ring->closing = 1; mutex_unlock(&ring->lock); /* tell the reader to stop */
+#if defined(_WIN32)
+        /* The reader may be parked in WinHttpReadData; abort the request so the read returns
+         * at once and the join can't stall on a stalled socket (src is the WinHTTP handle). */
+        basis_win_http_abort(http->src);
+        WaitForSingleObject(http->reader, INFINITE); CloseHandle(http->reader);
+#else
+        pthread_join(reader, NULL);
+#endif
+        ring_free(ring);
+    }
+
+#if defined(_WIN32)
+    basis_win_http_close(http->src);
+#elif defined(__ANDROID__)
+    basis_jni_https_close(src);
+#else
+    basis_http_close(src);
+#endif
+
+    free(http);
+}
+
 /* HLS / LL-HLS: the URL is a playlist, not a continuous byte stream. The HLS
  * source fetches+parses the M3U8, stitches segments (and LL-HLS parts) into one
  * byte stream, and the existing TS/fMP4 demuxers consume it. Windows fetches via
@@ -521,9 +623,9 @@ static void run_hls(demux_ctx_t* c) {
     c->e->pace_delivery = 1;
     c->sink->on_state(c->sink->user, BASIS_MEDIA_STATE_BUFFERING);
     if (is_fmp4)
-        basis_mp4_run(c->sink, basis_hls_read, hls);
+        basis_mp4_run(c->sink, &provider, hls);
     else
-        basis_ts_run(c->sink, basis_hls_read, hls);
+        basis_ts_run(c->sink, &provider, hls);
     basis_hls_close(hls);
 #else
     c->sink->on_error(c->sink->user, "HLS playback currently requires the Windows backend.");
@@ -549,6 +651,11 @@ static void run_http_like(demux_ctx_t* c) {
 
     void* src = NULL;
     basis_read_fn rd = NULL;
+    http_context_t* ctx = calloc(1, sizeof(*ctx));
+
+    if (ctx == NULL) {
+        return;
+    }
 
 #if defined(_WIN32)
     src = basis_win_http_open(c->url);   /* WinHTTP: handles http + https/TLS */
@@ -629,35 +736,25 @@ static void run_http_like(demux_ctx_t* c) {
 #else
         reader_started = (pthread_create(&reader, NULL, reader_entry, &ra) == 0);
 #endif
-        if (reader_started) { demux_read = ring_read_fn; demux_ctx = &ring; }
+        if (reader_started) { demux_read = ring_read_fn; demux_ctx = &ring; ctx->reader = reader; }
         else { ring_free(&ring); use_readahead = 0; }
     }
 
+    basis_http_provider_t http = {
+        open_http_context_use_readahead,
+        read_http_context,
+        close_http_context
+    };
+
+    ctx->use_readahead = use_readahead;
+    ctx->src = src;
+    ctx->demux_ctx = demux_ctx;
+    ctx->demux_read = demux_read;
+
     if (is_mp4)
-        basis_mp4_run(c->sink, demux_read, demux_ctx);
+        basis_mp4_run(c->sink, &http, ctx);
     else
-        basis_ts_run(c->sink, demux_read, demux_ctx); /* default to MPEG-TS */
-
-    if (use_readahead) {
-        mutex_lock(&ring.lock); ring.closing = 1; mutex_unlock(&ring.lock); /* tell the reader to stop */
-#if defined(_WIN32)
-        /* The reader may be parked in WinHttpReadData; abort the request so the read returns
-         * at once and the join can't stall on a stalled socket (src is the WinHTTP handle). */
-        basis_win_http_abort(src);
-        WaitForSingleObject(reader, INFINITE); CloseHandle(reader);
-#else
-        pthread_join(reader, NULL);
-#endif
-        ring_free(&ring);
-    }
-
-#if defined(_WIN32)
-    basis_win_http_close(src);
-#elif defined(__ANDROID__)
-    basis_jni_https_close(src);
-#else
-    basis_http_close(src);
-#endif
+        basis_ts_run(c->sink, &http, demux_ctx); /* default to MPEG-TS */
 }
 
 /* RIST: librist recovers an MPEG-TS byte stream over UDP (ARQ + optional PSK-AES);

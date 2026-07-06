@@ -15,6 +15,7 @@
 
 #include "basis_mp4.h"
 #include "basis_bitstream.h"
+#include "basis_http_provider.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -417,9 +418,9 @@ static void consume_mdat(mp4_t* m, const uint8_t* data, int len) {
         consume_frag(m, &m->frags[k], data, len, base_off);
 }
 
-int basis_mp4_run(basis_media_sink_t* sink, basis_read_fn read, void* ctx) {
+int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* http, void* ctx) {
     mp4_t m; memset(&m, 0, sizeof(m));
-    m.sink = sink; m.read = read; m.ctx = ctx;
+    m.sink = sink; m.read = http->read; m.ctx = ctx;
 
     while (sink->is_running(sink->user)) {
         uint32_t type; uint8_t* buf; int64_t blen;
@@ -448,5 +449,9 @@ int basis_mp4_run(basis_media_sink_t* sink, basis_read_fn read, void* ctx) {
     for (int k = 0; k < MP4_MAX_FRAGS; ++k) {
         free(m.frags[k].sizes); free(m.frags[k].durs); free(m.frags[k].ctos);
     }
+
+    http->close(m.ctx);
+    m.ctx = NULL;
+
     return 0;
 }

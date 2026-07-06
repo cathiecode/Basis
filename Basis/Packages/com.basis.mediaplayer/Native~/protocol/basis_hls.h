@@ -23,18 +23,11 @@
 
 #include <stdint.h>
 
+#include "basis_http_provider.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Pluggable HTTP(S) byte-source. Matches basis_win_http_open/read/close exactly:
- * open(url) returns a context that streams the response body; read is
- * basis_read_fn-compatible (bytes read, 0 on EOF, <0 on error); close frees it. */
-typedef struct basis_http_provider {
-    void* (*open)(const char* url);
-    int   (*read)(void* ctx, uint8_t* buf, int len);
-    void  (*close)(void* ctx);
-} basis_http_provider_t;
 
 /* Open an HLS source. Fetches the (master and/or media) playlist via `http`,
  * resolves a single rendition, and prepares the stitched live byte stream.
