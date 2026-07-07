@@ -206,7 +206,7 @@ static void handle_video(rtmp_t* r, basis_media_sink_t* sink, chunk_state_t* c) 
             int n = basis_avcc_to_annexb(data, dlen, nls, out, dlen + 64);
             if (n > 0) {
                 int key = (p[0] >> 4) == 1; /* FLV frametype 1 = keyframe */
-                sink->on_video_au(sink->user, out, n, pts_us, key);
+                sink->on_video_au(sink->user, out, n, pts_us, key, 0);
             }
             free(out);
         }
@@ -234,7 +234,7 @@ static void handle_audio(rtmp_t* r, basis_media_sink_t* sink, chunk_state_t* c) 
         }
     } else if (aac_pkt == 1) { /* raw AAC */
         if (!r->audio_announced) { sink->on_audio_format(sink->user, BASIS_CODEC_AAC, 48000, 2, NULL, 0); r->audio_announced = 1; }
-        sink->on_audio_frame(sink->user, data, dlen, pts_us);
+        sink->on_audio_frame(sink->user, data, dlen, pts_us, 0);
     }
 }
 

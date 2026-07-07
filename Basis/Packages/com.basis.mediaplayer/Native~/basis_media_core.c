@@ -211,14 +211,14 @@ int basis_engine_is_paced(basis_media_engine_t* e) { return e ? e->paced : 0; }
  * pace_delivery is set (VOD, or live HLS — whose own byte-rate metering is disabled). */
 #define BASIS_PACE_LEAD_US 400000
 
-static void pace_gate(basis_media_engine_t* e, int64_t pts_us) {
+static void pace_gate(basis_media_engine_t* e, int64_t pts_us, int pts_broken) {
     if (!e->pace_delivery) return;
     /* Init-or-read the anchor under the lock, once, into locals — the anchor is immutable
      * after the first AU, so the wait loop runs lock-free on the locals. Reading under the
      * lock makes the two demux threads agree on one timeline regardless of memory model. */
     int64_t wall0, base;
     mutex_lock(&e->lock);
-    if (!e->pace_started) {
+    if (!e->pace_started || pts_broken) {
         e->pace_wall0_us = now_us();
         e->pace_base_pts = pts_us;
         e->pace_started = 1;
@@ -250,10 +250,10 @@ static void sink_video_format(void* user, basis_codec_t codec, const uint8_t* ed
     basis_decoder_set_video_format(e->decoder, codec, ed, ed_len, w, h);
     mutex_unlock(&e->submit_lock);
 }
-static void sink_video_au(void* user, const uint8_t* au, int len, int64_t pts, int key) {
+static void sink_video_au(void* user, const uint8_t* au, int len, int64_t pts, int key, int pts_broken) {
     basis_media_engine_t* e = (basis_media_engine_t*)user;
     if (!e->running) return;
-    pace_gate(e, pts);              /* paced mode: hold until ~real time; no-op otherwise */
+    pace_gate(e, pts, pts_broken);              /* paced mode: hold until ~real time; no-op otherwise */
     if (!e->running) return;        /* may have been stopped while pacing */
     e->video_au_count++;
     mutex_lock(&e->submit_lock);
@@ -274,10 +274,10 @@ static void sink_audio_format(void* user, basis_codec_t codec, int rate, int ch,
     basis_decoder_set_audio_format(e->decoder, codec, rate, ch, asc, asc_len);
     mutex_unlock(&e->submit_lock);
 }
-static void sink_audio_frame(void* user, const uint8_t* data, int len, int64_t pts) {
+static void sink_audio_frame(void* user, const uint8_t* data, int len, int64_t pts, int pts_broken) {
     basis_media_engine_t* e = (basis_media_engine_t*)user;
     if (!e->running) return;
-    pace_gate(e, pts);              /* paced mode: hold until ~real time; no-op otherwise */
+    pace_gate(e, pts, pts_broken);              /* paced mode: hold until ~real time; no-op otherwise */
     if (!e->running) return;
     e->audio_frame_count++;
     mutex_lock(&e->submit_lock);
@@ -507,7 +507,7 @@ typedef struct http_context {
 
 static one = 1;
 
-static void* open_http_context_use_readahead(const char* url) {
+static void* open_http_context_use_readahead_ranged(const char* url, int range) {
     basis_read_fn rd = NULL;
     void* src = NULL;
     http_context_t* h = calloc(1, sizeof(*h));
@@ -519,7 +519,7 @@ static void* open_http_context_use_readahead(const char* url) {
     if (!ring) return NULL;
 
 #if defined(_WIN32)
-    src = basis_win_http_open(url);   /* WinHTTP: handles http + https/TLS */
+    src = basis_win_http_open_ranged(url, range);   /* WinHTTP: handles http + https/TLS */
     rd = basis_win_http_read;
 #elif defined(__ANDROID__)
     /* AMediaExtractor either took the URL (already returned above) or rejected
@@ -576,6 +576,10 @@ static void* open_http_context_use_readahead(const char* url) {
     return h;
 }
 
+static void* open_http_context_use_readahead(const char* url) {
+    return open_http_context_use_readahead_ranged(url, 0);
+}
+
 static int read_http_context(void* ctx, uint8_t* buf, int len) {
     http_context_t* http = ctx;
     return http->demux_read(http->demux_ctx, buf, len);
@@ -615,7 +619,7 @@ static void close_http_context(void* ctx) {
 static void run_hls(demux_ctx_t* c) {
 #if defined(_WIN32)
     basis_http_provider_t provider = {
-        basis_win_http_open, basis_win_http_read, basis_win_http_close
+        basis_win_http_open, basis_win_http_open, basis_win_http_read, basis_win_http_close
     };
     int is_fmp4 = 0;
     void* hls = basis_hls_open(c->url, &provider, c->sink->is_running, c->sink->user, &is_fmp4);
@@ -754,6 +758,7 @@ static void run_http_like(demux_ctx_t* c) {
 
     basis_http_provider_t http = {
         open_http_context_use_readahead,
+        open_http_context_use_readahead_ranged,
         read_http_context,
         close_http_context
     };

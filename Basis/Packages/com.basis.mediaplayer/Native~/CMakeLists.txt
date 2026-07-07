@@ -77,6 +77,7 @@ set(CORE_SOURCES
     protocol/basis_hls.c
     protocol/basis_rist.c
     protocol/basis_caption.c
+    protocol/basis_http_provider.c
 )
 
 # ---------------------------------------------------------------------------

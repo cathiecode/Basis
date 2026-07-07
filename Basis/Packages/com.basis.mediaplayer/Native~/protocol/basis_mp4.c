@@ -52,16 +52,88 @@ typedef struct {
     int       cap;
 } mp4_frag_t;
 
+typedef enum segment_reference_type {
+    INVALID = 0,
+    FRAGMENT = 1,
+	SEGMENT_INDEX = 2,
+} segment_reference_type_t;
+
 typedef struct {
-    uint32_t reference_id;
-    uint32_t timescale;
-    uint64_t earliest_presentation_time;
-    uint64_t first_offset;
-    uint64_t referenced_size;
-    uint64_t duration;
-    uint16_t reference_count;
-    uint16_t media_reference_count;
-} mp4_sidx_t;
+    segment_reference_type_t type;
+    uint64_t start_pts_us;
+    uint64_t end_pts_us;
+    uint64_t offset;
+    uint64_t size;
+
+} mp4_segment_index_reference_t;
+
+typedef struct mp4_segment_index {
+    int length;
+    int actual_length;
+    mp4_segment_index_reference_t* references;
+} mp4_segment_index_t;
+
+int extend_segment_index(mp4_segment_index_t* index, int len) {
+    if (index->actual_length >= len) {
+        return TRUE;
+    }
+
+    mp4_segment_index_reference_t* allocated;
+
+    if (index->references == NULL) {
+        allocated = malloc(sizeof(mp4_segment_index_reference_t) * len);
+        if (allocated != NULL) {
+            memset(allocated, 0, sizeof(mp4_segment_index_reference_t) * len);
+        }
+    }
+    else
+    {
+        allocated = realloc(index->references, sizeof(mp4_segment_index_reference_t) * len);
+
+        if (allocated != NULL) {
+            memset(allocated + index->actual_length, 0, sizeof(mp4_segment_index_reference_t) * (len - index->actual_length));
+        }
+    }
+
+    if (allocated == NULL) {
+        return FALSE;
+    }
+
+    index->references = allocated;
+    index->actual_length = len;
+
+    return TRUE;
+}
+
+int insert_segment_index(mp4_segment_index_t* index, mp4_segment_index_reference_t* reference) {
+    if (!extend_segment_index(index, index->length + 1)) {
+        return FALSE;
+    }
+
+    index->references[index->length++] = *reference;
+
+    return TRUE;
+}
+
+mp4_segment_index_reference_t* search_segment_index(mp4_segment_index_t* index, uint64_t pts_us) {
+    mp4_segment_index_reference_t *segment_index_ref = NULL;
+
+    for (int i = 0; i < index->length; i++) {
+        mp4_segment_index_reference_t* ref = &index->references[i];
+
+        if (ref->start_pts_us <= pts_us && pts_us <= ref->end_pts_us) {
+            if (ref->type == FRAGMENT) {
+                return segment_index_ref;
+            }
+            else if (ref->type == SEGMENT_INDEX)
+            {
+                segment_index_ref = ref;
+            }
+        }
+    }
+
+    return segment_index_ref;
+}
 
 typedef struct {
     basis_media_sink_t* sink;
@@ -74,13 +146,16 @@ typedef struct {
     mp4_frag_t frags[MP4_MAX_FRAGS];
     int nfrags;
 
-    mp4_sidx_t sidx;
+    mp4_segment_index_t segment_index;
     int read_bytes;
 
     int seek_allowed;
     int seekable;
     volatile uint64_t* seek_request_us;
     uint64_t last_seek_request;
+
+    int video_base_pts_submitted;
+    int audio_base_pts_submitted;
 } mp4_t;
 
 static uint16_t rd16(const uint8_t* p) { return (uint16_t)(((uint16_t)p[0] << 8) | p[1]); }
@@ -332,51 +407,74 @@ static void parse_moof(mp4_t* m, const uint8_t* p, int len) {
 }
 
 static void parse_sidx(mp4_t* m, const uint8_t* p, int len) {
-    mp4_sidx_t sidx;
-    int off;
-
     if (!m || !p || len < 24) return;
-    memset(&sidx, 0, sizeof(sidx));
+
+    int off;
 
     /* p starts at the FullBox payload (version/flags), not the box header. */
     if (p[0] > 1) return;
-    sidx.reference_id = rd32(p + 4);
-    sidx.timescale = rd32(p + 8);
+    /* sidx.reference_id = rd32(p + 4); */
+    uint64_t timescale = rd32(p + 8);
     off = 12;
 
+    uint64_t epts;
+    uint64_t foff;
     if (p[0] == 0) {
-        sidx.earliest_presentation_time = rd32(p + off);
-        sidx.first_offset = rd32(p + off + 4);
+        epts = rd32(p + off);
+        foff = rd32(p + off + 4);
         off += 8;
     } else {
         if (len < 32) return;
-        sidx.earliest_presentation_time = rd64(p + off);
-        sidx.first_offset = rd64(p + off + 8);
+        epts = rd64(p + off);
+        foff = rd64(p + off + 8);
         off += 16;
     }
 
     /* reserved(16), reference_count(16), then 12 bytes per reference. */
     if (off > len - 4) return;
-    sidx.reference_count = rd16(p + off + 2);
-    off += 4;
-    if ((size_t)sidx.reference_count > (size_t)(len - off) / 12) return;
 
-    for (uint16_t i = 0; i < sidx.reference_count; ++i, off += 12) {
+	int reference_count = rd16(p + off + 2);
+    off += 4;
+
+    if ((size_t)reference_count > (size_t)(len - off) / 12) return;
+
+    uint64_t moff = (uint64_t)m->read_bytes;
+    uint64_t mpts = epts;
+
+    for (uint16_t i = 0; i < reference_count; i++, off += 12) {
+        mp4_segment_index_reference_t ref;
         uint32_t reference = rd32(p + off);
-        /* reference = 1 means the referenced material is another SegmentBox, */
-        /* which we don't support currently */
-        if ((reference & 0x80000000U) == 0) {
-            sidx.media_reference_count++;
-            sidx.referenced_size += reference & 0x7FFFFFFFU;
-            sidx.duration += rd32(p + off + 4);
+        int reference_type = (reference & 0x80000000U) >> 31;
+        int referenced_size = reference & 0x7FFFFFFFU;
+        uint64_t duration = rd32(p + off + 4);
+        uint32_t sap_metadata = rd32(p + off + 8);
+        short starts_with_sap = (sap_metadata >> 31) & 1;
+        short sap_type = (sap_metadata >> 28) & 0b111;
+        uint64_t sap_delta_time = sap_metadata & 0x0FFFFFFFU;
+
+        if (reference_type == 0 && starts_with_sap) {
+            /* fragment */
+            ref.type = FRAGMENT;
+            ref.start_pts_us = (mpts) * 1000000 / timescale;
+            ref.end_pts_us = (mpts + duration) * 1000000 / timescale;
+            ref.offset = moff;
+            ref.size = referenced_size;
+
+            if (!insert_segment_index(&m->segment_index, &ref)) {
+                break;
+            }
         }
-        /* The final word contains SAP metadata. It is intentionally consumed
-         * but does not affect sequential playback. */
-        (void)rd32(p + off + 8);
+        else
+        {
+            /* segment index */
+            /* TODO */
+        }
+
+        moff += referenced_size;
+        mpts += duration;
     }
 
     /* Commit only after the complete box has passed all bounds checks. */
-    m->sidx = sidx;
     m->seekable = 1;
 }
 
@@ -399,12 +497,18 @@ static void consume_frag(mp4_t* m, const mp4_frag_t* f, const uint8_t* data, int
                 int n = basis_avcc_to_annexb(data + pos, ssize, t->nal_len_size ? t->nal_len_size : 4, out, ssize + 64);
                 if (n > 0) {
                     int key = t->codec == BASIS_CODEC_H265 ? basis_h265_is_keyframe(out, n) : basis_h264_is_keyframe(out, n);
-                    m->sink->on_video_au(m->sink->user, out, n, pts_us, key);
+                    m->sink->on_video_au(m->sink->user, out, n, pts_us, key, !m->video_base_pts_submitted);
+                    m->video_base_pts_submitted = 1;
                 }
                 free(out);
             }
         } else {
-            m->sink->on_audio_frame(m->sink->user, data + pos, ssize, pts_us);
+            m->sink->on_audio_frame(m->sink->user, data + pos, ssize, pts_us, !m->audio_base_pts_submitted);
+            m->audio_base_pts_submitted = 1;
+        }
+
+        if (m->last_seek_request != *m->seek_request_us) {
+            return;
         }
 
         pos += ssize;
@@ -425,6 +529,20 @@ static void consume_mdat(mp4_t* m, const uint8_t* data, int len) {
         consume_frag(m, &m->frags[k], data, len, base_off);
 }
 
+static int try_get_segment_offset_for_pts(mp4_t* m, uint64_t pts, mp4_segment_index_reference_t** segment_offset) {
+    /* O(n) */	
+    for (int i = 0; i < m->segment_index.length; i++) {
+        mp4_segment_index_reference_t *reference = &m->segment_index.references[i];
+
+        if (reference->type == FRAGMENT && reference->start_pts_us <= pts && pts < reference->end_pts_us) {
+            *segment_offset = reference;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* http, void* ctx, const char* url, volatile uint64_t* seek_request_us, int allow_seek) {
     mp4_t m; memset(&m, 0, sizeof(m));
     m.sink = sink; m.read = http->read; m.ctx = ctx; m.seek_request_us = seek_request_us; m.seek_allowed = allow_seek;
@@ -433,10 +551,22 @@ int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* http, void* c
         uint32_t type; uint8_t* buf; int64_t blen;
 
         if (m.seek_allowed && m.seekable && m.seek_request_us != NULL && m.last_seek_request != *m.seek_request_us && url != NULL) {
+            mp4_segment_index_reference_t* segment;
+
+            if (!try_get_segment_offset_for_pts(&m, *m.seek_request_us, &segment)) {
+                /* Failed to get segment */
+                m.last_seek_request = *m.seek_request_us;
+                continue;
+            }
+
             http->close(m.ctx);
             m.ctx = NULL;
-            m.ctx = http->open(url); /* TODO: Range Request */
+            /* TODO: Range Request */
+            m.ctx = http->open_range_request(url, segment->offset);
             m.last_seek_request = *m.seek_request_us;
+            m.video_base_pts_submitted = 0;
+            m.audio_base_pts_submitted = 0;
+            continue;
         }
 
         if (read_box(&m, &type, &buf, &blen) != 0) break;
@@ -466,6 +596,10 @@ int basis_mp4_run(basis_media_sink_t* sink, basis_http_provider_t* http, void* c
 
     http->close(m.ctx);
     m.ctx = NULL;
+
+    if (m.segment_index.references != NULL) {
+        free(m.segment_index.references);
+    }
 
     return 0;
 }

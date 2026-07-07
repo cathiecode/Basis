@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 void* basis_win_http_open(const char* url);
+void* basis_win_http_open_ranged(const char* url, int range);
 int   basis_win_http_read(void* ctx, uint8_t* buf, int len);
 void  basis_win_http_close(void* ctx);
 

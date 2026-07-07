@@ -28,6 +28,7 @@ extern "C" {
  * basis_read_fn-compatible (bytes read, 0 on EOF, <0 on error); close frees it. */
 typedef struct basis_http_provider {
     void* (*open)(const char* url);
+    void* (*open_range_request)(const char* url, int start);
     int   (*read)(void* ctx, uint8_t* buf, int len);
     void  (*close)(void* ctx);
 } basis_http_provider_t;

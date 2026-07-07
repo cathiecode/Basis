@@ -101,7 +101,7 @@ static void flush_video(ts_t* t) {
 
     int key = (t->video_codec == BASIS_CODEC_H265) ? basis_h265_is_keyframe(au, au_len)
                                                    : basis_h264_is_keyframe(au, au_len);
-    t->sink->on_video_au(t->sink->user, au, au_len, pts_us, key);
+    t->sink->on_video_au(t->sink->user, au, au_len, pts_us, key, 0);
 
     e->len = 0;
     e->started = 0;
@@ -136,7 +136,7 @@ static void flush_audio_lpcm(ts_t* t, const uint8_t* p, int remain, int64_t pts_
     int dlen = (p[0] << 8) | p[1];
     int alen = remain - 4;
     if (dlen > 0 && dlen < alen) alen = dlen;
-    t->sink->on_audio_frame(t->sink->user, p + 4, alen, pts_us);
+    t->sink->on_audio_frame(t->sink->user, p + 4, alen, pts_us, 0);
 }
 
 static void flush_audio(ts_t* t) {
@@ -175,7 +175,7 @@ static void flush_audio(ts_t* t) {
 
         int raw_len = ad.frame_len - ad.header_len;
         int64_t fpts = base_us + (int64_t)frame_idx * 1024 * 1000000 / (ad.sample_rate > 0 ? ad.sample_rate : 48000);
-        t->sink->on_audio_frame(t->sink->user, p + ad.header_len, raw_len, fpts);
+        t->sink->on_audio_frame(t->sink->user, p + ad.header_len, raw_len, fpts, 0);
 
         p += ad.frame_len;
         remain -= ad.frame_len;

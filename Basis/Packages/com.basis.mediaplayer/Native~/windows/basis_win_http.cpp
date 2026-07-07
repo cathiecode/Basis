@@ -5,6 +5,7 @@
 #include <winhttp.h>
 #include <string.h>
 #include <stdlib.h>
+#include <strsafe.h>
 
 #pragma comment(lib, "winhttp.lib")
 
@@ -23,7 +24,7 @@ static wchar_t* to_w(const char* s) {
     return w;
 }
 
-extern "C" void* basis_win_http_open(const char* url) {
+extern "C" void* basis_win_http_open_ranged(const char* url, int range) {
     if (!url) return NULL;
     win_http_t* h = (win_http_t*)calloc(1, sizeof(win_http_t));
     if (!h) return NULL;
@@ -62,7 +63,17 @@ extern "C" void* basis_win_http_open(const char* url) {
     DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     WinHttpSetOption(h->request, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
 
-    if (!WinHttpSendRequest(h->request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+    WCHAR headerBuffer[1024];
+    size_t cbHeaderBuffer = 1024 * sizeof(TCHAR);
+    int hasHeader = 0;
+    if (range > 0) {
+		HRESULT hr = StringCbPrintfW(headerBuffer, cbHeaderBuffer, L"Range: bytes=%d-", range);
+        if (hr == S_OK) {
+            hasHeader = 1;
+        }
+    }
+
+    if (!WinHttpSendRequest(h->request, hasHeader ? headerBuffer : WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(h->request, NULL)) {
         WinHttpCloseHandle(h->request); WinHttpCloseHandle(h->connect); WinHttpCloseHandle(h->session);
@@ -94,6 +105,10 @@ extern "C" void* basis_win_http_open(const char* url) {
         h->seekable = (haveLen && clen > 0 && haveRanges && _wcsicmp(ranges, L"bytes") == 0) ? 1 : 0;
     }
     return h;
+}
+
+extern "C" void* basis_win_http_open(const char* url) {
+	return basis_win_http_open_ranged(url, 0);
 }
 
 extern "C" int basis_win_http_is_seekable(void* ctx) {

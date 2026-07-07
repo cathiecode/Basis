@@ -284,7 +284,7 @@ static void deliver_au(depkt_t* d) {
     int key = d->video->codec == BASIS_CODEC_H265 ? basis_h265_is_keyframe(d->au, d->au_len)
                                                   : basis_h264_is_keyframe(d->au, d->au_len);
     int64_t pts = rtp_ts_to_us(d->au_ts, d->video->clock);
-    d->sink->on_video_au(d->sink->user, d->au, d->au_len, pts, key);
+    d->sink->on_video_au(d->sink->user, d->au, d->au_len, pts, key, 0);
     d->au_len = 0;
 }
 
@@ -405,7 +405,7 @@ static void depkt_audio(depkt_t* d, const uint8_t* rtp, int len) {
         if (off + sz > plen) sz = plen - off;
         if (sz <= 0) break;
         int64_t pts = rtp_ts_to_us((int64_t)ts, d->audio->clock ? d->audio->clock : 48000);
-        d->sink->on_audio_frame(d->sink->user, p + off, sz, pts);
+        d->sink->on_audio_frame(d->sink->user, p + off, sz, pts, 0);
         off += sz;
     }
 }

@@ -50,7 +50,7 @@ typedef struct basis_media_sink {
     /* One coded video access unit in Annex B form (start-code separated NALUs),
      * with presentation timestamp in microseconds. key != 0 marks an IDR/keyframe. */
     void (*on_video_au)(void* user, const uint8_t* annexb, int len,
-                        int64_t pts_us, int key);
+                        int64_t pts_us, int key, int pts_broken);
 
     /* Called once when the audio codec/config is first known. For AAC, `asc` is
      * the AudioSpecificConfig (2+ bytes) when available. */
@@ -60,7 +60,7 @@ typedef struct basis_media_sink {
 
     /* One coded audio frame. For AAC this is a raw AAC frame (no ADTS header);
      * demuxers that produce ADTS strip it first. */
-    void (*on_audio_frame)(void* user, const uint8_t* data, int len, int64_t pts_us);
+    void (*on_audio_frame)(void* user, const uint8_t* data, int len, int64_t pts_us, int pts_broken);
 
     /* Lifecycle signals from the demuxer. */
     void (*on_state)(void* user, basis_media_state_t state);
