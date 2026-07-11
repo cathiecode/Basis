@@ -73,22 +73,42 @@ struct PcmRing {
     struct Chunk { int64_t pts; int floats; };
     Chunk chunks[CHUNKS] = {};
     int chead = 0, ccount = 0;
+    long trims = 0;  /* clock-gated trims fired (diagnostics) */
 
-    /* Serving is sequential and never blocks on future timestamps — the
-     * consumer's own prefetch owns short-term timing. The clock is only used
-     * to detect a stale head (connect burst, post-stall backlog): when the
-     * oldest queued audio falls further than TRIM_LATE behind the clock, the
-     * queue is trimmed so the head sits CONSUMER_LEAD ahead of it. The lead
-     * compensates the consumer-side pipeline (Unity streaming-clip prefetch +
-     * DSP output latency): samples handed over now become audible roughly that
-     * much later, so a future-biased head lands on the clock at the speaker. */
+    /* Serving is gated on media time: a sample is released when its PTS comes
+     * due against the serve target (presentation clock + the consumer's output
+     * latency, so alignment lands at the speaker). Surplus the mux delivered
+     * early waits in the ring instead of becoming output latency, and a source
+     * that delivers just-in-time banks a cushion behind the video hold instead
+     * of running dry. early_hold_us is serve hysteresis: chunks up to that
+     * far ahead of the target still release, so consumer pull batching is
+     * absorbed without gaps and steady-state serve stays sequential. The
+     * caller sizes it above the sink's pull depth — Unity's audio thread
+     * pulls several DSP blocks back-to-back, and a hysteresis smaller than
+     * that batch leaves the batch's last block with nothing due (a one-block
+     * silent pop on an otherwise healthy queue). A head further than
+     * TRIM_LATE overdue (connect burst, post-stall backlog, PTS jump) is
+     * trimmed to the target — re-anchoring on the discontinuity rather than
+     * discarding real-time delivery forever. */
     static const int64_t TRIM_LATE_US = 150000;
-    static const int64_t CONSUMER_LEAD_US = 380000;
 
     void init(int floats) { cap = floats; buf = (float*)malloc(sizeof(float) * cap); InitializeCriticalSection(&cs); }
     void destroy() { free(buf); buf = nullptr; DeleteCriticalSection(&cs); }
 
     int fill() const { return (tail - head + cap) % cap; }
+
+    /* PTS just past the newest queued sample — the audio delivery edge.
+     * INT64_MIN when empty. */
+    int64_t newest_pts() {
+        EnterCriticalSection(&cs);
+        int64_t r = INT64_MIN;
+        if (ccount > 0) {
+            Chunk& c = chunks[(chead + ccount - 1) % CHUNKS];
+            r = c.pts + (int64_t)(c.floats / (frame > 0 ? frame : 1)) * 1000000LL / (sr > 0 ? sr : 48000);
+        }
+        LeaveCriticalSection(&cs);
+        return r;
+    }
 
     /* Drops the oldest `n` floats (rounded down to whole frames) from the float
      * ring and the chunk metadata together. Caller holds cs. */
@@ -137,19 +157,21 @@ struct PcmRing {
         LeaveCriticalSection(&cs);
     }
 
-    /* now_us = INT64_MIN reads ungated (no presentation clock yet). */
-    int read(float* out, int n, int64_t now_us) {
+    /* target_us = INT64_MIN reads ungated (audio-only stream, no clock). */
+    int read(float* out, int n, int64_t target_us, int64_t early_hold_us) {
         EnterCriticalSection(&cs);
         int64_t srr = sr > 0 ? sr : 48000;
-        if (now_us != INT64_MIN && ccount > 0) {
-            int64_t late = now_us - chunks[chead].pts;
+        if (target_us != INT64_MIN && ccount > 0) {
+            int64_t late = target_us - chunks[chead].pts;
             if (late > TRIM_LATE_US) {
-                drop_oldest((int)((late + CONSUMER_LEAD_US) * srr / 1000000LL) * frame);
+                drop_oldest((int)(late * srr / 1000000LL) * frame);
+                trims++;
             }
         }
         int got = 0;
         while (got < n && ccount > 0) {
             Chunk& c = chunks[chead];
+            if (target_us != INT64_MIN && c.pts > target_us + early_hold_us) break;
             int take = c.floats < n - got ? c.floats : n - got;
             for (int i = 0; i < take; ++i) { out[got + i] = buf[head]; head = (head + 1) % cap; }
             got += take;
@@ -207,9 +229,11 @@ struct basis_decoder {
     /* present clock (render thread) */
     LARGE_INTEGER qpcFreq = {};
     bool clockStarted = false;
+    LONGLONG primeStartQpc = 0;          /* first render tick with a frame (VOD prime window) */
     LONGLONG wallStartQpc = 0;
     LONGLONG lastRenderQpc = 0;
     int64_t mediaStartUs = 0;
+    int64_t renderTickUs = 16667;        /* EMA of the render callback period (display refresh when vsync'd) */
     int64_t lastPresentedPts = INT64_MIN;
     /* Stable presentation position for get_position_us: unlike lastPresentedPts
      * it survives the resync sentinel resets, and unlike lastPtsUs (decode-side)
@@ -278,8 +302,15 @@ struct basis_decoder {
      * segment-cadence wobble of the live-edge lock (bursty transports advance
      * `newest` in jumps) averages out before the audio anchor reads it. The
      * audio thread reconstructs `now` as qpc_us + offset. INT64_MIN = clock
-     * not started (audio reads ungated). */
+     * not started (audio holds for the synchronised start when the stream has
+     * video; reads ungated on audio-only streams). */
     volatile LONGLONG audClockOffsetUs = INT64_MIN;
+
+    /* Managed sink output latency (µs), reported via set_audio_latency: with
+     * the per-DSP-block tap this is ~the DSP buffer. Biases the audio serve
+     * target forward so samples released now come due exactly when they reach
+     * the speaker. */
+    volatile LONG audLatencyUs = 60000;
 };
 
 /* ---- D3D / MF helpers --------------------------------------------------- */
@@ -401,6 +432,7 @@ static void release_shared_locked(basis_decoder* d) {
     d->d12OpenFail = 0;   /* new handle on the next build — don't carry the old retry count */
     d->writeSeq = 0;
     d->clockStarted = false;
+    d->primeStartQpc = 0;
     d->lastPresentedPts = INT64_MIN;
 }
 
@@ -800,7 +832,9 @@ extern "C" basis_decoder_t* basis_decoder_create(basis_media_engine_t* engine) {
     QueryPerformanceFrequency(&d->qpcFreq);
     QueryPerformanceCounter(&d->createQpc);
     for (int i = 0; i < basis_decoder::RING; ++i) d->ringPts[i] = INT64_MIN;
-    d->pcm.init(48000 * 2 * 4); /* ~4s stereo */
+    d->pcm.init(48000 * 8 * 4); /* ~4s at 8ch — the PTS-gated serve banks mux
+                                 * lead + the jitter cushion in the ring, so
+                                 * capacity must hold both at full width */
 
     if (!create_decode_device(d)) {
         basis_engine_set_error(engine, "failed to create DXVA D3D11 decode device");
@@ -1032,64 +1066,65 @@ extern "C" int basis_decoder_render_update(basis_decoder_t* d) {
     /* newest available PTS in the ring */
     int64_t newest = INT64_MIN;
     for (int i = 0; i < basis_decoder::RING; ++i) if (d->ringPts[i] > newest) newest = d->ringPts[i];
-    if (newest == INT64_MIN) { LeaveCriticalSection(&d->presentLock); return 0; }
+    /* Audio-first start (live): with no decodable video yet — a mid-GOP join
+     * waits for the next IDR, up to a full GOP — run the presentation clock
+     * from the audio delivery edge instead, so audio plays immediately and
+     * video joins the already-running clock when its first frame decodes
+     * (both tracks share a timeline, so joining needs no re-anchor). The
+     * audio edge stands in for `newest` below; the present loop no-ops on an
+     * empty frame ring. VOD keeps the primed, synchronised start, and an
+     * audio-only stream (video never configured) keeps its ungated serve —
+     * seeding a clock for it would silently convert that documented path
+     * into gated playback. */
+    int noVideoYet = (newest == INT64_MIN);
+    if (noVideoYet) {
+        if (!d->vconfigured || !d->aconfigured || basis_engine_is_paced(d->engine)) { LeaveCriticalSection(&d->presentLock); return 0; }
+        newest = d->pcm.newest_pts();
+        if (newest == INT64_MIN) { LeaveCriticalSection(&d->presentLock); return 0; }
+    }
 
-    /* Presentation clock, locked to the live decode edge. The wall clock (QPC)
-     * gives smooth, monotonic advance at real rate; a low-pass correction
-     * (~0.25s) pulls it toward `newest` (freshest decoded PTS) every render. This
-     * fixes the one-shot anchor's drift: that version let the clock run ahead of
-     * the frames actually arriving, so almost nothing was ever "due" (nodue spikes,
-     * present rate collapsed to ~60% of decode). The correction is fast enough to
-     * track bursty live sources without chasing single-frame jitter (the jitter
-     * buffer below absorbs those). Large gaps (startup, rebuffer, discontinuity)
-     * hard-resync. */
+    /* Presentation clock: wall-rate (QPC) advance, slewed toward the live decode
+     * edge with a capped correction rate — 50% during the first ~1.2s after an
+     * anchor (startup pipeline-fill converges quickly), ~2% after. The cap keeps
+     * the present cadence steady when the decode edge moves in bursts (muxed
+     * demux clumps, network jitter): burst error is absorbed by the jitter
+     * buffer instead of being chased, so frames keep crossing the present point
+     * at 1x rather than in slow/fast swings that hold a frame long and then
+     * skip one to catch up. The clock is also clamped at edge + buffer so a
+     * delivery stall can't run it ahead — presents freeze at the buffer edge
+     * and resume without a skip burst. Large gaps (startup, rebuffer,
+     * discontinuity) hard-resync. */
     int64_t freq = d->qpcFreq.QuadPart ? d->qpcFreq.QuadPart : 1;
     bool paced = basis_engine_is_paced(d->engine) != 0;
     int64_t nowMedia;
+    int64_t interval = d->frameIntervalUs > 0 ? d->frameIntervalUs : 16666;
 
-    if (paced) {
-        /* Paced (VOD) clock: a SMOOTH wall clock, gently low-passed toward the decode
-         * edge, presenting a fixed buffer behind it. The wall base gives steady,
-         * monotonic advance so the present point crosses one frame per frame-interval
-         * and every frame is shown (slaving nowMedia directly to `newest` instead makes
-         * it jump in the decoder's output bursts, and "present newest due" then skips
-         * the frames in between — full 1x position but a low visible framerate). The
-         * low-pass also absorbs the startup pipeline-fill offset so the clock settles
-         * ~buffer behind the edge rather than a whole ring behind it.
-         *
-         * This reuses the live clock's wall+low-pass smoothing but tuned for VOD: a
-         * fixed small buffer (no 460ms floor / dynamic sizing) and the audio gate
-         * published directly (no 2s EMA). Delivery is throttled to ~1x upstream, so the
-         * edge never leaps and the hard-resync below only fires on a real discontinuity
-         * (loop/seek/long stall), never the per-segment wobble that destabilises live. */
-        const int64_t PACED_BUFFER_US = 250000;
-        if (!d->clockStarted) {
-            d->clockStarted = true;
-            d->wallStartQpc = nowq.QuadPart;
-            d->lastRenderQpc = nowq.QuadPart;
-            d->mediaStartUs = newest;
-            d->lastPresentedPts = INT64_MIN;
+    /* Paced hold: with audio, the jitter cushion both streams play behind —
+     * the audio serve is gated to the same clock, so the video hold is also
+     * the audio bank that absorbs delivery burst/starve cycles. Capped to the
+     * ring's frame span so the decoder can't lap the presenter. */
+    int64_t pacedBuf = d->aconfigured ? 460000 : 250000;
+    {
+        int64_t ringSpanCap = (int64_t)(basis_decoder::RING - 6) * interval;
+        if (pacedBuf > ringSpanCap) pacedBuf = ringSpanCap;
+    }
+
+    /* VOD prime: hold presentation until the ring has banked a hold's worth
+     * of frames (3s fallback for sources that can't fill it), so a start
+     * against struggling delivery buffers first instead of presenting the
+     * first frame, starving, and churning through resyncs. Live starts at
+     * the edge immediately — its fast-start ramp owns that experience. */
+    if (paced && !d->clockStarted) {
+        if (!d->primeStartQpc) d->primeStartQpc = nowq.QuadPart;
+        int held = 0;
+        for (int i = 0; i < basis_decoder::RING; ++i) if (d->ringPts[i] != INT64_MIN) held++;
+        int64_t waitedUs = (nowq.QuadPart - d->primeStartQpc) * 1000000LL / freq;
+        if ((int64_t)held * interval < pacedBuf + 2 * interval && waitedUs < 3000000) {
+            LeaveCriticalSection(&d->presentLock);
+            return 0;
         }
-        int64_t dtUs = (nowq.QuadPart - d->lastRenderQpc) * 1000000LL / freq;
-        d->lastRenderQpc = nowq.QuadPart;
-        if (dtUs < 0) dtUs = 0; else if (dtUs > 1000000) dtUs = 1000000;
-        int64_t clk = d->mediaStartUs + (nowq.QuadPart - d->wallStartQpc) * 1000000LL / freq;
-        int64_t err = newest - clk;
-        if (err > 1000000 || err < -1000000) {        /* discontinuity / long stall: resync */
-            d->wallStartQpc = nowq.QuadPart;
-            d->mediaStartUs = newest;
-            d->lastPresentedPts = INT64_MIN;
-            clk = newest;
-        } else {
-            int64_t corr = err * dtUs / 250000;        /* ~0.25s lock toward the edge */
-            d->mediaStartUs += corr;
-            clk += corr;
-        }
-        nowMedia = clk - PACED_BUFFER_US;
-        d->dbg_lagms = (LONG)((newest - nowMedia) / 1000);
-        int64_t qpcUs = (nowq.QuadPart - d->createQpc.QuadPart) * 1000000LL / freq;
-        InterlockedExchange64(&d->audClockOffsetUs, nowMedia - qpcUs);
-    } else {
+    }
+
     if (!d->clockStarted) {
         d->clockStarted = true;
         d->wallStartQpc = nowq.QuadPart;
@@ -1100,19 +1135,71 @@ extern "C" int basis_decoder_render_update(basis_decoder_t* d) {
     int64_t dtUs = (nowq.QuadPart - d->lastRenderQpc) * 1000000LL / freq;
     d->lastRenderQpc = nowq.QuadPart;
     if (dtUs < 0) dtUs = 0; else if (dtUs > 1000000) dtUs = 1000000;
+    if (dtUs > 1000 && dtUs < 100000) d->renderTickUs += (dtUs - d->renderTickUs) / 8;
+    int64_t wallElapsed = (int64_t)((nowq.QuadPart - d->wallStartQpc) * 1000000LL / freq);
 
-    int64_t liveClock = d->mediaStartUs + (int64_t)((nowq.QuadPart - d->wallStartQpc) * 1000000LL / freq);
+    if (paced) {
+        /* Paced (VOD) clock: same wall-rate slew, tuned for VOD — a fixed
+         * buffer (no dynamic sizing) and the audio gate published directly
+         * (no 2s EMA). Delivery is throttled to ~1x upstream, so the edge
+         * never leaps and the hard-resync below only fires on a real
+         * discontinuity (loop/seek), never the per-segment wobble that
+         * destabilises live. */
+        int64_t clk = d->mediaStartUs + wallElapsed;
+        int64_t err = newest - clk;
+        /* Positive error up to the ring span is normal here — startup pipeline
+         * fill and post-stall delivery catch-up both push the edge ahead of
+         * the clock in bulk — and VOD has nowhere it needs to hurry back to,
+         * so it is slewed away at the capped rate rather than snapped or
+         * chased (a snap skips seconds of content; a fast chase plays visibly
+         * sped-up). Resync only when the writer is about to lap the ring
+         * (a stall so long that holding 1x would present overwritten slots)
+         * or on a backward jump (loop seam). */
+        int64_t posLimit = (int64_t)(basis_decoder::RING - 4) * interval;
+        if (posLimit < 1000000) posLimit = 1000000;
+        if (err > posLimit || err < -1000000) {
+            d->wallStartQpc = nowq.QuadPart;
+            d->mediaStartUs = newest;
+            d->lastPresentedPts = INT64_MIN;
+            clk = newest;
+            wallElapsed = 0;
+        } else {
+            int64_t corr = err * dtUs / 250000;        /* ~0.25s lock toward the edge */
+            int64_t cap = dtUs / 50;
+            if (corr > cap) corr = cap; else if (corr < -cap) corr = -cap;
+            d->mediaStartUs += corr;
+            clk += corr;
+        }
+        /* Stall guard: clamp at edge + buffer, the point past which nothing is
+         * due anyway, so a delivery stall can't run the clock ahead of the
+         * frames (resume would then dump the backlog in a skip burst). */
+        int64_t edgeMax = newest + pacedBuf;
+        if (clk > edgeMax) { d->mediaStartUs -= clk - edgeMax; clk = edgeMax; }
+        nowMedia = clk - pacedBuf;
+        d->dbg_lagms = (LONG)((newest - nowMedia) / 1000);
+        int64_t qpcUs = (nowq.QuadPart - d->createQpc.QuadPart) * 1000000LL / freq;
+        InterlockedExchange64(&d->audClockOffsetUs, nowMedia - qpcUs);
+    } else {
+    int64_t liveClock = d->mediaStartUs + wallElapsed;
     int64_t err = newest - liveClock;            /* >0: clock behind the live edge */
     if (err > 700000 || err < -700000) {
         d->wallStartQpc = nowq.QuadPart;
         d->mediaStartUs = newest;
         d->lastPresentedPts = INT64_MIN;
         liveClock = newest;
+        wallElapsed = 0;
     } else {
         int64_t corr = err * dtUs / 250000;      /* TAU ~0.25s lock toward live */
+        int64_t cap = (wallElapsed < 1200000) ? dtUs / 2 : dtUs / 50;
+        if (corr > cap) corr = cap; else if (corr < -cap) corr = -cap;
         d->mediaStartUs += corr;
         liveClock += corr;
     }
+    /* Stall guard: clamp at edge + buffer, the point past which nothing is due
+     * anyway, so a delivery stall can't run the clock ahead of the frames
+     * (resume would then dump the backlog in a skip burst). */
+    int64_t edgeMax = newest + d->bufferUs;
+    if (liveClock > edgeMax) { d->mediaStartUs -= liveClock - edgeMax; liveClock = edgeMax; }
 
     /* Jitter buffer: present this far behind the live edge. Capped to the ring's
      * frame span so the decoder can't lap the presenter — a fixed-ms buffer would
@@ -1120,7 +1207,6 @@ extern "C" int basis_decoder_render_update(basis_decoder_t* d) {
      * frame period (e.g. 120ms is fine at 60fps but clamps near 100ms at 250fps).
      * Dynamic mode grows fast on underrun risk and shrinks symmetrically when
      * over-buffered, with a 200ms hysteresis to avoid grow/shrink fighting. */
-    int64_t interval = d->frameIntervalUs > 0 ? d->frameIntervalUs : 16666;
     int64_t maxBuf = (int64_t)(basis_decoder::RING - 6) * interval;
     if (maxBuf < 60000) maxBuf = 60000;
     int64_t buf = d->bufferUs;
@@ -1129,21 +1215,26 @@ extern "C" int basis_decoder_render_update(basis_decoder_t* d) {
         if (fill < 2 * interval) buf += interval;
         else if (fill > buf + 200000) buf -= 10000;
     }
-    /* With audio configured, the buffer must cover the audio consumer's
-     * pipeline depth (streaming-clip prefetch + DSP latency, ~400ms): audio
-     * cannot be released from ahead of the live decode edge, so video must
-     * present at least that far behind it for the two to land together. */
+    /* With audio configured, the buffer is the shared jitter cushion: the
+     * audio serve is gated to this same clock, so presenting this far behind
+     * the live edge is what banks enough audio in the ring to ride out
+     * delivery burst/starve cycles (audio cannot be released from ahead of
+     * the decode edge). */
     int64_t minBuf = d->aconfigured ? 460000 : 40000;
     if (buf < minBuf) buf = minBuf;
     if (buf > maxBuf) buf = maxBuf;
     d->bufferUs = (LONG)buf;
 
-    /* Fast start: ramp the effective cushion from ~0 up to the target over the
-     * first ~1.2s, so the first decoded frame is presented almost immediately
-     * instead of waiting a full buffer behind live, then settle into the full
-     * buffer. wallElapsed resets on a hard resync, so a rebuffer re-primes too. */
-    int64_t wallElapsed = (int64_t)((nowq.QuadPart - d->wallStartQpc) * 1000000LL / freq);
-    int64_t effBuf = (wallElapsed < 1200000) ? (buf * wallElapsed / 1200000) : buf;
+    /* Fast start (video-only): ramp the effective cushion from ~0 up to the
+     * target over the first ~1.2s, so the first decoded frame is presented
+     * almost immediately, then settle into the full buffer. With audio the
+     * start is synchronised on the full buffer instead — the ramp advances
+     * the clock at less than 1x, which would force the PTS-gated audio serve
+     * to under-fill every block (a crackly first second); holding both
+     * streams to the same fixed timeline costs ~half a second of start-up
+     * and buys a clean, in-sync first frame. wallElapsed resets on a hard
+     * resync, so a rebuffer re-primes the video-only ramp too. */
+    int64_t effBuf = (!d->aconfigured && wallElapsed < 1200000) ? (buf * wallElapsed / 1200000) : buf;
     nowMedia = liveClock - effBuf;
     d->dbg_lagms = (LONG)((newest - nowMedia) / 1000);
 
@@ -1165,12 +1256,22 @@ extern "C" int basis_decoder_render_update(basis_decoder_t* d) {
     /* recover from non-monotonic/bogus PTS (lastPresentedPts stuck above the ring) */
     if (d->lastPresentedPts != INT64_MIN && d->lastPresentedPts > newest) d->lastPresentedPts = INT64_MIN;
 
-    /* Present the latest frame that is due (PTS <= now) and newer than the last shown. */
+    /* Present the latest frame that is due and newer than the last shown. The
+     * due check looks ahead half a render tick so a frame lands on the tick
+     * nearest its due time, not the tick after it: due times drift through the
+     * tick phase whenever the source rate doesn't divide the refresh rate
+     * (23.976fps against 60Hz), and always latching a full tick late turns
+     * that drift into an extra-tick hold followed by a visible skip. Capped at
+     * half the source frame period so a high-rate source can't be shown a
+     * whole frame early. */
+    int64_t lookahead = d->renderTickUs / 2;
+    if (lookahead > interval / 2) lookahead = interval / 2;
+    int64_t dueBy = nowMedia + lookahead;
     int best = -1; int64_t bestPts = d->lastPresentedPts;
     for (int i = 0; i < basis_decoder::RING; ++i) {
         int64_t p = d->ringPts[i];
         if (p == INT64_MIN) continue;
-        if (p > bestPts && p <= nowMedia) { best = i; bestPts = p; }
+        if (p > bestPts && p <= dueBy) { best = i; bestPts = p; }
     }
     if (best < 0) { InterlockedIncrement(&d->dbg_nodue); LeaveCriticalSection(&d->presentLock); return 0; }
 
@@ -1293,17 +1394,27 @@ extern "C" int basis_decoder_get_audio_format(basis_decoder_t* d, int* r, int* c
 extern "C" int basis_decoder_read_audio(basis_decoder_t* d, float* out, int max_floats) {
     if (!d) return 0;
     if (basis_engine_is_paused(d->engine)) return 0;
-    /* Reconstruct the presentation clock from the published offset so audio
-     * release is paced to the timeline video presents on. No offset yet (no
-     * video frame presented, or an audio-only stream) reads ungated. */
-    int64_t now = INT64_MIN;
+    /* Reconstruct the presentation clock from the published offset and serve
+     * against it, biased forward by the sink's output latency so release-now
+     * lands on the clock at the speaker. Before the clock exists, a stream
+     * with video holds audio — on live that is only until the next render
+     * tick bootstraps the clock from the audio edge (audio-first start; on
+     * VOD, until the prime releases), so playout can never free-run on a
+     * timeline the clock won't match. Audio-only streams read ungated. */
+    int64_t target = INT64_MIN;
     LONGLONG off = InterlockedCompareExchange64(&d->audClockOffsetUs, 0, 0);
     if (off != INT64_MIN) {
         LARGE_INTEGER q; QueryPerformanceCounter(&q);
         int64_t freq = d->qpcFreq.QuadPart ? d->qpcFreq.QuadPart : 1;
-        now = (q.QuadPart - d->createQpc.QuadPart) * 1000000LL / freq + off;
+        target = (q.QuadPart - d->createQpc.QuadPart) * 1000000LL / freq + off + d->audLatencyUs;
+    } else if (d->vconfigured) {
+        return 0;
     }
-    int n = d->pcm.read(out, max_floats, now);
+    /* Hysteresis must exceed the sink's pull depth (it drains several DSP
+     * blocks back-to-back); the reported output latency is that depth plus
+     * headroom, so size the hold from it. */
+    int64_t hold = 60000 + (int64_t)d->audLatencyUs;
+    int n = d->pcm.read(out, max_floats, target, hold);
     if (n > 0 && d->ach > 0) InterlockedAdd64(&d->audioSamplesRead, (LONGLONG)(n / d->ach));
     return n;
 }
@@ -1314,6 +1425,12 @@ extern "C" void basis_decoder_set_buffer(basis_decoder_t* d, int mode, int buffe
     if (buffer_ms > 0) d->bufferUs = (LONG)(buffer_ms * 1000);
 }
 
+extern "C" void basis_decoder_set_audio_latency(basis_decoder_t* d, int latency_us) {
+    if (!d) return;
+    if (latency_us < 0) latency_us = 0; else if (latency_us > 500000) latency_us = 500000;
+    InterlockedExchange(&d->audLatencyUs, (LONG)latency_us);
+}
+
 extern "C" void basis_decoder_set_output_texture(basis_decoder_t* d, void* native_texture, int w, int h) {
     /* Windows uses D3D11/12 CreateExternalTexture (no Mali crash there), so the
      * AccessTexture path is not needed. Accept the call for ABI uniformity. */
@@ -1322,9 +1439,27 @@ extern "C" void basis_decoder_set_output_texture(basis_decoder_t* d, void* nativ
 
 extern "C" int basis_decoder_get_debug(basis_decoder_t* d, char* buf, int size) {
     if (!d || !buf || size <= 0) return 0;
+    /* vq = ring frames newer than the presented one; aq = audio queued (ms);
+     * atrim = clock-gated trims fired; alat = the sink output latency the
+     * serve target is biased by. Same keys as the Android backend so the
+     * diagnostics CSV columns line up across platforms. */
+    int vq = 0;
+    int64_t presented = InterlockedCompareExchange64(&d->presentedPosUs, 0, 0);
+    EnterCriticalSection(&d->presentLock);
+    for (int i = 0; i < basis_decoder::RING; ++i)
+        if (d->ringPts[i] != INT64_MIN && d->ringPts[i] > presented) vq++;
+    LeaveCriticalSection(&d->presentLock);
+    EnterCriticalSection(&d->pcm.cs);
+    int aFill = d->pcm.fill();
+    int aFrame = d->pcm.frame > 0 ? d->pcm.frame : 2;
+    int aSr = d->pcm.sr > 0 ? d->pcm.sr : 48000;
+    long aTrims = d->pcm.trims;
+    LeaveCriticalSection(&d->pcm.cs);
+    int aq = (int)((int64_t)(aFill / aFrame) * 1000 / aSr);
     return snprintf(buf, (size_t)size,
-                    "blit=%ld copy=%ld render=%ld nodue=%ld acq=%ld lag=%ldms buf=%ldms mode=%d ttff=%ldms | acfg=%d aout=%ld asr=%d",
+                    "blit=%ld copy=%ld render=%ld nodue=%ld acq=%ld lag=%ldms buf=%ldms mode=%d vq=%d aq=%dms atrim=%ld alat=%ldms ttff=%ldms | acfg=%d aout=%ld asr=%d",
                     (long)d->dbg_blit, (long)d->dbg_copy, (long)d->dbg_render, (long)d->dbg_nodue, (long)d->dbg_acqfail,
-                    (long)d->dbg_lagms, (long)(d->bufferUs / 1000), (int)d->bufferMode, (long)d->ttffMs,
+                    (long)d->dbg_lagms, (long)(d->bufferUs / 1000), (int)d->bufferMode, vq, aq, aTrims,
+                    (long)(d->audLatencyUs / 1000), (long)d->ttffMs,
                     d->aconfigured ? 1 : 0, (long)d->dbg_aout, d->asr);
 }
