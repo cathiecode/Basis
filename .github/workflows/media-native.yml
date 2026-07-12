@@ -53,6 +53,10 @@ jobs:
         with:
           name: librist-win-x64
           path: ${{ env.NATIVE_DIR }}/third_party/win-x64/rist.lib
+      - uses: actions/upload-artifact@v5
+        with:
+          name: librist-headers-win-x64
+          path: ${{ env.NATIVE_DIR }}/third_party/include/**/*.h
 
   android-arm64:
     runs-on: ubuntu-latest   # Android NDK is preinstalled ($ANDROID_NDK_ROOT)
@@ -69,3 +73,7 @@ jobs:
         with:
           name: librist-android-arm64
           path: ${{ env.NATIVE_DIR }}/third_party/android-arm64/librist.a
+      - uses: actions/upload-artifact@v5
+        with:
+          name: librist-headers-android-arm64
+          path: ${{ env.NATIVE_DIR }}/third_party/include/**/*.h
