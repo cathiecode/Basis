@@ -20,6 +20,7 @@
 #include "protocol/basis_rtmp.h"
 #include "protocol/basis_ts.h"
 #include "protocol/basis_mp4.h"
+#include "protocol/basis_wav.h"
 #include "protocol/basis_http.h"
 #include "protocol/basis_hls.h"
 #include "protocol/basis_rist.h"
@@ -166,6 +167,11 @@ struct basis_media_engine {
     basis_caption_ctx_t* captions;
     int video_hevc;
 
+    /* Set on the first on_video_format announce. Every demuxer announces its
+     * track formats before payload, so audio frames arriving with this still
+     * clear mean the source has no video track (audio-only). */
+    int video_format_seen;
+
     /* diagnostics (demux thread writes, main thread reads; minor races OK) */
     volatile long video_au_count;
     volatile long audio_frame_count;
@@ -258,6 +264,7 @@ static void pace_gate(basis_media_engine_t* e, int64_t pts_us) {
 static void sink_video_format(void* user, basis_codec_t codec, const uint8_t* ed, int ed_len, int w, int h) {
     basis_media_engine_t* e = (basis_media_engine_t*)user;
     e->video_hevc = (codec == BASIS_CODEC_H265);
+    e->video_format_seen = 1;
     mutex_lock(&e->submit_lock);
     basis_decoder_set_video_format(e->decoder, codec, ed, ed_len, w, h);
     mutex_unlock(&e->submit_lock);
@@ -298,6 +305,22 @@ static void sink_audio_frame(void* user, const uint8_t* data, int len, int64_t p
     mutex_lock(&e->submit_lock);
     basis_decoder_submit_audio(e->decoder, data, len, pts);
     mutex_unlock(&e->submit_lock);
+    /* Audio-only sources never run sink_video_au's PLAYING flip; once audio
+     * frames are flowing on a stream that announced no video track, it is
+     * playing — unless the decoder rejected the format at announce, in which
+     * case the whole source is unplayable and silence would just look like a
+     * hang: surface a hard error instead. (Muxed sources keep the fail-silent
+     * audio contract — video still plays.) Split-stream (url_audio set) always
+     * has a video leg, whose format may announce after this leg's first
+     * frames — skip it here. */
+    if ((e->state == BASIS_MEDIA_STATE_CONNECTING || e->state == BASIS_MEDIA_STATE_BUFFERING) &&
+        !e->video_format_seen && !e->url_audio[0] && e->audio_frame_count >= 4) {
+        int r = 0, ch = 0;
+        if (basis_decoder_get_audio_format(e->decoder, &r, &ch) == 0)
+            basis_engine_set_state(e, BASIS_MEDIA_STATE_PLAYING);
+        else
+            basis_engine_set_error(e, "audio-only source: audio format not supported by this platform's decoder");
+    }
 }
 static void sink_state(void* user, basis_media_state_t s) { basis_engine_set_state((basis_media_engine_t*)user, s); }
 static void sink_error(void* user, const char* m) { basis_engine_set_error((basis_media_engine_t*)user, m); }
@@ -381,15 +404,30 @@ static void install_audio_sink(basis_media_engine_t* e) {
 
 /* ---- demux thread ------------------------------------------------------- */
 
+static int char_eq_ci(char a, char b) {
+    if (a >= 'A' && a <= 'Z') a += 32;
+    if (b >= 'A' && b <= 'Z') b += 32;
+    return a == b;
+}
+
+/* Case-insensitive substring search (strcasestr is not portable). */
+static int contains_ci(const char* hay, const char* needle) {
+    size_t ln = strlen(needle);
+    if (!ln) return 1;
+    for (; *hay; ++hay) {
+        size_t i = 0;
+        while (i < ln && hay[i] && char_eq_ci(hay[i], needle[i])) i++;
+        if (i == ln) return 1;
+    }
+    return 0;
+}
+
 static int ends_with_ci(const char* s, const char* suffix) {
     size_t ls = strlen(s), lf = strlen(suffix);
     if (lf > ls) return 0;
     const char* p = s + (ls - lf);
     for (size_t i = 0; i < lf; ++i) {
-        char a = p[i], b = suffix[i];
-        if (a >= 'A' && a <= 'Z') a += 32;
-        if (b >= 'A' && b <= 'Z') b += 32;
-        if (a != b) return 0;
+        if (!char_eq_ci(p[i], suffix[i])) return 0;
     }
     return 1;
 }
@@ -602,13 +640,26 @@ static int http_reseek(void* ctx, int64_t abs_offset) {
 
 /* HLS / LL-HLS: the URL is a playlist, not a continuous byte stream. The HLS
  * source fetches+parses the M3U8, stitches segments (and LL-HLS parts) into one
- * byte stream, and the existing TS/fMP4 demuxers consume it. Windows fetches via
- * WinHTTP; Android/Quest support is planned. */
+ * byte stream, and the existing TS/fMP4 demuxers consume it. Playlist and
+ * segment fetches ride the platform HTTP byte source: WinHTTP on Windows, the
+ * JNI HttpsURLConnection bridge on Android. */
+#if defined(__ANDROID__)
+/* Binds the provider's open(url) to basis_jni_https_open's (url, timeout).
+ * 60s read timeout: LL-HLS blocking playlist reloads hold the response open
+ * for up to a few target durations, well past a connect-scale timeout. */
+static void* hls_jni_https_open(const char* url) { return basis_jni_https_open(url, 60000); }
+#endif
 static void run_hls(demux_ctx_t* c) {
+#if defined(_WIN32) || defined(__ANDROID__)
 #if defined(_WIN32)
     basis_http_provider_t provider = {
         basis_win_http_open, basis_win_http_read, basis_win_http_close
     };
+#else
+    basis_http_provider_t provider = {
+        hls_jni_https_open, basis_jni_https_read, basis_jni_https_close
+    };
+#endif
     int is_fmp4 = 0;
     void* hls = basis_hls_open(c->url, &provider, c->sink->is_running, c->sink->user, &is_fmp4);
     if (!hls) {
@@ -649,24 +700,31 @@ static void run_hls(demux_ctx_t* c) {
     mutex_unlock(&c->e->lock);
     basis_hls_close(hls);
 #else
-    c->sink->on_error(c->sink->user, "HLS playback currently requires the Windows backend.");
+    c->sink->on_error(c->sink->user, "HLS playback requires the Windows or Android backend.");
 #endif
 }
 
 static void run_http_like(demux_ctx_t* c) {
-    /* Android: the OS extractor can demux the URL itself (TLS included). Primary
-     * leg only — an audio-only leg must feed the shared decoder's audio path, not
-     * hand a whole muxed file to the OS extractor. */
-    if (c->allow_os_demux && basis_decoder_try_open_url(c->e->decoder, c->url)) {
-        c->sink->on_state(c->sink->user, BASIS_MEDIA_STATE_BUFFERING);
-        while (c->e->running) sleep_ms(20);
+    /* HLS playlists are not a single continuous stream — hand off to the HLS
+     * source before the OS-extractor attempt (which can't stitch segments) and
+     * the plain TS/fMP4 byte-source path. (.m3u8 may carry a query.) */
+    if (contains_ci(c->parts->path, ".m3u8")) {
+        run_hls(c);
         return;
     }
 
-    /* HLS playlists are not a single continuous stream — hand off to the HLS
-     * source before the plain TS/fMP4 byte-source path. (.m3u8 may carry a query.) */
-    if (strstr(c->parts->path, ".m3u8")) {
-        run_hls(c);
+    /* Android: the OS extractor can demux the URL itself (TLS included). Primary
+     * leg only — an audio-only leg must feed the shared decoder's audio path, not
+     * hand a whole muxed file to the OS extractor. m2ts is also kept away from
+     * it: that container exists here to carry HDMV LPCM (stream_type 0x80),
+     * which the extractor doesn't surface — it would play the video with the
+     * audio silently missing, where the portable TS demuxer + LPCM bypass play
+     * both. */
+    int os_demux = c->allow_os_demux &&
+                   !ends_with_ci(c->parts->path, ".m2ts") && !ends_with_ci(c->parts->path, ".mts");
+    if (os_demux && basis_decoder_try_open_url(c->e->decoder, c->url)) {
+        c->sink->on_state(c->sink->user, BASIS_MEDIA_STATE_BUFFERING);
+        while (c->e->running) sleep_ms(20);
         return;
     }
 
@@ -702,12 +760,19 @@ static void run_http_like(demux_ctx_t* c) {
         return;
     }
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__ANDROID__)
     /* Auto delivery (hint 0): a finite, byte-range-seekable HTTP body (known
-     * Content-Length + Accept-Ranges) is on-demand and arrives faster than real time,
-     * so pace it; an open-ended response is live. Set before the read-ahead gate and
-     * the first AU, so pacing is in force from the start. A forced hint skips this. */
-    if (c->e->paced_hint == 0 && basis_win_http_is_seekable(src))
+     * Content-Length + Accept-Ranges, or a 206 probe answer) is on-demand and
+     * arrives faster than real time, so pace it; an open-ended response is
+     * live. Set before the read-ahead gate and the first AU, so pacing is in
+     * force from the start. A forced hint skips this. Without the detection a
+     * VOD file plays at delivery speed — synchronised fast-forward. */
+#if defined(_WIN32)
+    int http_seekable = basis_win_http_is_seekable(src);
+#else
+    int http_seekable = basis_jni_https_is_seekable(src);
+#endif
+    if (c->e->paced_hint == 0 && http_seekable)
         c->e->paced = 1;
     c->e->pace_delivery = c->e->paced; /* VOD over HTTP paces delivery; open-ended live doesn't */
 #endif
@@ -729,9 +794,12 @@ static void run_http_like(demux_ctx_t* c) {
     prefix_src_t ps = { head, head_len, 0, rd, src };
 
     int is_mp4 = looks_like_mp4(head, head_len);
+    int is_wav = head_len >= 12 && memcmp(head, "RIFF", 4) == 0 && memcmp(head + 8, "WAVE", 4) == 0;
     int is_ts  = (head_len >= 1 && head[0] == 0x47);
-    if (!is_mp4 && !is_ts)
+    if (!is_mp4 && !is_wav && !is_ts) {
         is_mp4 = ends_with_ci(c->parts->path, ".mp4") || ends_with_ci(c->parts->path, ".m4s");
+        is_wav = ends_with_ci(c->parts->path, ".wav");
+    }
 
     /* Paced (VOD): drain the network into a read-ahead ring on a reader thread and
      * demux from the ring at the paced rate, so bursty CDN delivery doesn't starve
@@ -770,6 +838,8 @@ static void run_http_like(demux_ctx_t* c) {
 
     if (is_mp4)
         basis_mp4_run(c->sink, demux_read, demux_ctx, reseek, reseek_ctx);
+    else if (is_wav)
+        basis_wav_run(c->sink, demux_read, demux_ctx);
     else
         basis_ts_run(c->sink, demux_read, demux_ctx); /* default to MPEG-TS */
 

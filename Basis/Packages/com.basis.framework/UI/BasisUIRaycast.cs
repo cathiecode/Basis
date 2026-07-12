@@ -11,7 +11,6 @@ using UnityEngine.AddressableAssets;
 using UnityEngine.EventSystems;
 using UnityEngine.ResourceManagement.AsyncOperations;
 using UnityEngine.UI;
-using UnityEngine.UIElements;
 using static BasisHeightDriver;
 
 namespace Basis.Scripts.UI
@@ -352,8 +351,9 @@ namespace Basis.Scripts.UI
                     CachedLinerRenderState = true;
                 }
                 float endOffset = BasisPlayerInteract.AvatarScaledRange(0.01f);
-                LineRenderer.SetPosition(0, BasisPointRaycaster.ray.origin);
-                LineRenderer.SetPosition(1, point + normal * endOffset);
+                Vector3 lineEnd = point + normal * endOffset;
+                LineRenderer.SetPosition(0, BasisPlayerInteract.RayVisualStart(BasisPointRaycaster.ray.origin, lineEnd));
+                LineRenderer.SetPosition(1, lineEnd);
             }
 
             if (HasRedicalRenderer)
@@ -459,8 +459,8 @@ namespace Basis.Scripts.UI
                 // canvas" at 0.01 avatar scale (field report: "the distance from the canvas").
                 float endOffset = BasisPlayerInteract.AvatarScaledRange(0.01f);
 
-                Vector3 start = BasisPointRaycaster.ray.origin;
                 Vector3 end = GetVisualSurfacePoint() + PhysicHit.normal * endOffset;
+                Vector3 start = BasisPlayerInteract.RayVisualStart(BasisPointRaycaster.ray.origin, end);
 
                 LineRenderer.SetPosition(0, start);
                 LineRenderer.SetPosition(1, end);

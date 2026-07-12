@@ -43,6 +43,14 @@
       "value": "How many times per second your avatar pose is sent to peers."
     },
     {
+      "key": "settings.general.networking.p2pVoiceBitrateOverride.tooltip",
+      "value": "Use a custom voice bitrate while a direct connection is active."
+    },
+    {
+      "key": "settings.general.networking.p2pVoiceBitrate.tooltip",
+      "value": "Higher = better voice quality and more bandwidth."
+    },
+    {
       "key": "settings.audio.masterVolume.tooltip",
       "value": "Overall loudness of all sound in the app."
     },
@@ -1567,6 +1575,14 @@
       "value": "How much extra voice data is sent to recover from packet loss."
     },
     {
+      "key": "settings.admin.opusBitrate.override.tooltip",
+      "value": "Force a voice bitrate on every player's encoder."
+    },
+    {
+      "key": "settings.admin.opusBitrate.tooltip",
+      "value": "Voice bitrate every player transmits with while the override is on."
+    },
+    {
       "key": "settings.admin.maxMicrophoneRange.tooltip",
       "value": "Cap how far any player's voice can transmit, in metres."
     },
@@ -2115,10 +2131,6 @@
       "value": "Calibrating"
     },
     {
-      "key": "calibration.pullTriggers",
-      "value": "T-Pose, then pull both triggers"
-    },
-    {
       "key": "calibration.clickToConfirm",
       "value": "Click again to calibrate"
     },
@@ -2427,6 +2439,70 @@
       "value": "Always render this player's avatar, even when distance, the max visible avatar cap, or the view cone filter would normally replace it with the loading avatar. Blocking and the performance filter still apply."
     },
     {
+      "key": "menu.individualPlayer.voiceRecording",
+      "value": "Voice Recording"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.description",
+      "value": "Record or re-route this player's voice. They are asked for permission and can revoke it at any time."
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.start",
+      "value": "Record Voice"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.start.description",
+      "value": "Ask this player for permission, then record their voice to a clip on your device."
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.stop",
+      "value": "Stop Recording"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.requesting",
+      "value": "Requesting…"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.policy",
+      "value": "Let them record my voice"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.policy.description",
+      "value": "Whether this player is allowed to record your voice. \"Ask each time\" prompts you on every request."
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.policy.ask",
+      "value": "Ask each time"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.policy.allow",
+      "value": "Always allow"
+    },
+    {
+      "key": "menu.individualPlayer.voiceRecording.policy.deny",
+      "value": "Always deny"
+    },
+    {
+      "key": "menu.voiceRecording.consent.title",
+      "value": "Voice Recording Request"
+    },
+    {
+      "key": "menu.voiceRecording.consent.body",
+      "value": "{0} wants to record your voice. They will be able to capture and re-play it while you allow this. Allow?"
+    },
+    {
+      "key": "menu.voiceRecording.consent.body.route",
+      "value": "A world in this instance (via {0}) wants to play your voice from an object so people nearby hear it come from there. Allow?"
+    },
+    {
+      "key": "menu.voiceRecording.consent.allow",
+      "value": "Allow"
+    },
+    {
+      "key": "menu.voiceRecording.consent.deny",
+      "value": "Deny"
+    },
+    {
       "key": "menu.individualPlayer.enableInteractions",
       "value": "Enable Interactions"
     },
@@ -2541,6 +2617,18 @@
     {
       "key": "menu.individualPlayer.directConnection.failed",
       "value": "<color=#ff5252>Direct Connection Failed</color>"
+    },
+    {
+      "key": "menu.individualPlayer.directConnection.partial",
+      "value": "Direct Connection: <color=#ff9100>Partial</color> <size=55%>(using server)</size>"
+    },
+    {
+      "key": "menu.individualPlayer.directConnection.partial.description",
+      "value": "The direct link degraded or one side couldn't connect. Voice and avatar are going through the server for now — tap Try Again to re-establish the direct link."
+    },
+    {
+      "key": "menu.individualPlayer.directConnection.tryAgain",
+      "value": "Try Again"
     },
     {
       "key": "menu.individualPlayer.directConnection.playerDisconnected",
@@ -3551,6 +3639,14 @@
       "value": "Ignore VR auto-hold on pickups, so you must keep holding the grab button to carry them."
     },
     {
+      "key": "settings.general.uiHaptics",
+      "value": "UI Haptics"
+    },
+    {
+      "key": "settings.general.uiHaptics.tooltip",
+      "value": "Vibrate the controller when the pointer hovers over and clicks menu elements."
+    },
+    {
       "key": "settings.general.disableVRFingerTouch",
       "value": "Disable VR Finger Touch"
     },
@@ -3775,6 +3871,18 @@
       "value": "Updates per second to direct peers - capped by your framerate."
     },
     {
+      "key": "settings.general.networking.p2pVoiceBitrateOverride",
+      "value": "Override Voice Bitrate"
+    },
+    {
+      "key": "settings.general.networking.p2pVoiceBitrate",
+      "value": "Voice Bitrate"
+    },
+    {
+      "key": "settings.general.networking.p2pVoiceBitrate.description",
+      "value": "Voice bitrate (bps) used while a direct connection is active. Server overrides still win."
+    },
+    {
       "key": "settings.general.networking.p2pAvatarRate.fpsWarning",
       "value": "Running at ~{0} FPS, below the selected {1} Hz. Avatar sync can't exceed your framerate - pick a rate near it."
     },
@@ -3889,6 +3997,58 @@
     {
       "key": "settings.audio.propVolume",
       "value": "Prop Volume"
+    },
+    {
+      "key": "settings.audio.sounds.title",
+      "value": "Interface Sounds"
+    },
+    {
+      "key": "settings.audio.sounds.hover",
+      "value": "Hover Sound"
+    },
+    {
+      "key": "settings.audio.sounds.hover.tooltip",
+      "value": "Play a soft tick when the pointer passes over a menu element."
+    },
+    {
+      "key": "settings.audio.sounds.press",
+      "value": "Click Sound"
+    },
+    {
+      "key": "settings.audio.sounds.press.tooltip",
+      "value": "Play a click when you activate a menu element."
+    },
+    {
+      "key": "settings.audio.sounds.grab",
+      "value": "Pickup Sound"
+    },
+    {
+      "key": "settings.audio.sounds.grab.tooltip",
+      "value": "Play a sound when you pick an object up. Off by default."
+    },
+    {
+      "key": "settings.audio.sounds.chat",
+      "value": "Chat Message Sound"
+    },
+    {
+      "key": "settings.audio.sounds.chat.tooltip",
+      "value": "Play a soft notification when another player sends a text message."
+    },
+    {
+      "key": "settings.audio.sounds.microphone",
+      "value": "Microphone Mute Sound"
+    },
+    {
+      "key": "settings.audio.sounds.microphone.tooltip",
+      "value": "Play a sound when you mute or unmute your microphone."
+    },
+    {
+      "key": "settings.audio.sounds.camera",
+      "value": "Camera Sounds"
+    },
+    {
+      "key": "settings.audio.sounds.camera.tooltip",
+      "value": "Play the shutter and countdown ticks when a photo is taken."
     },
     {
       "key": "settings.microphone.group.title",
@@ -5456,7 +5616,7 @@
     },
     {
       "key": "settings.bodyTracking.smoothingStrength.title",
-      "value": "work"
+      "value": "Smoothing Strength"
     },
     {
       "key": "settings.bodyTracking.smoothingStrength.description",
@@ -6399,12 +6559,16 @@
       "value": "Lowest severity that is allowed through BasisDebug. All emits logs, warnings, and errors. Warnings & Errors hides plain logs. Errors Only hides logs and warnings."
     },
     {
-      "key": "settings.developer.sections.title",
-      "value": "Developer Sections"
+      "key": "settings.developer.options.title",
+      "value": "Developer Options"
     },
     {
-      "key": "settings.developer.sections.description",
-      "value": "Toggle which developer sections are visible below."
+      "key": "settings.developer.alwaysShowCalibration",
+      "value": "Always Show Calibrate Button"
+    },
+    {
+      "key": "settings.developer.alwaysShowCalibration.tooltip",
+      "value": "Show the Calibrate button in every mode, including desktop. Normally it only appears in VR, or in desktop when full body tracking is on and a real body tracker is connected. Calibrating on desktop still recaptures your height and rescales the avatar."
     },
     {
       "key": "settings.developer.buildInfo",
@@ -7741,6 +7905,14 @@
     {
       "key": "settings.admin.opusFecLoss",
       "value": "Opus FEC loss %"
+    },
+    {
+      "key": "settings.admin.opusBitrate.override",
+      "value": "Override Voice Bitrate"
+    },
+    {
+      "key": "settings.admin.opusBitrate",
+      "value": "Voice Bitrate (bps)"
     },
     {
       "key": "settings.admin.maxMicrophoneRange",
