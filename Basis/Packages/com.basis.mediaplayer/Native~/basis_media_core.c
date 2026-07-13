@@ -125,6 +125,7 @@ struct basis_media_engine {
     basis_mutex_t submit_lock;
     basis_media_state_t state;
     char error[512];
+    char transport[64];   /* scheme by default; negotiated detail via on_transport */
 
     basis_media_sink_t sink;
 
@@ -324,6 +325,14 @@ static void sink_audio_frame(void* user, const uint8_t* data, int len, int64_t p
 }
 static void sink_state(void* user, basis_media_state_t s) { basis_engine_set_state((basis_media_engine_t*)user, s); }
 static void sink_error(void* user, const char* m) { basis_engine_set_error((basis_media_engine_t*)user, m); }
+static void sink_transport(void* user, const char* t) {
+    basis_media_engine_t* e = (basis_media_engine_t*)user;
+    if (!e || !t) return;
+    mutex_lock(&e->lock);
+    strncpy(e->transport, t, sizeof(e->transport) - 1);
+    e->transport[sizeof(e->transport) - 1] = 0;
+    mutex_unlock(&e->lock);
+}
 static void sink_eos(void* user) { basis_engine_set_state((basis_media_engine_t*)user, BASIS_MEDIA_STATE_ENDED); }
 static void sink_duration(void* user, int64_t us) { basis_media_engine_t* e = (basis_media_engine_t*)user; if (us > 0) e->duration_us = us; }
 /* A raised error is fatal to the current demux run: the reconnect loop already
@@ -370,6 +379,7 @@ static void install_sink(basis_media_engine_t* e) {
     e->sink.on_error = sink_error;
     e->sink.on_end_of_stream = sink_eos;
     e->sink.on_duration = sink_duration;
+    e->sink.on_transport = sink_transport;
     e->sink.take_seek = sink_take_seek;
     e->sink.is_running = sink_is_running;
 }
@@ -604,27 +614,31 @@ static DWORD WINAPI reader_entry(LPVOID p) { reader_body((reader_args_t*)p); ret
 static void* reader_entry(void* p) { reader_body((reader_args_t*)p); return NULL; }
 #endif
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__ANDROID__)
 /* Byte-source reseek for the HTTP VOD path (handed to the MP4 demuxer). Parks
  * the read-ahead reader, swaps the response for a ranged one, flushes buffered
- * bytes and the replayed sniff prefix, and resumes. Runs on the demux thread. */
+ * bytes and the replayed sniff prefix, and resumes. Runs on the demux thread.
+ * The abort/reseek primitives are platform-supplied (WinHTTP or the Android JNI
+ * source) so the park/flush choreography lives in one place. */
 typedef struct {
     void* http;
     byte_ring_t* ring;      /* NULL when the demuxer reads the source directly */
     prefix_src_t* ps;
     volatile int* running;
+    void (*abort_fn)(void*);
+    int  (*reseek_fn)(void*, long long);
 } http_seek_src_t;
 
 static int http_reseek(void* ctx, int64_t abs_offset) {
     http_seek_src_t* s = (http_seek_src_t*)ctx;
     if (s->ring) {
         s->ring->reseek_park = 1;
-        basis_win_http_abort(s->http);   /* unblock a read the reader is parked in */
+        s->abort_fn(s->http);            /* unblock a read the reader is parked in */
         while (!s->ring->reader_parked && *s->running) sleep_ms(1);
     } else {
-        basis_win_http_abort(s->http);   /* demux thread is the only reader */
+        s->abort_fn(s->http);            /* demux thread is the only reader */
     }
-    int rc = basis_win_http_reseek(s->http, abs_offset);
+    int rc = s->reseek_fn(s->http, (long long)abs_offset);
     s->ps->prefix_pos = s->ps->prefix_len;   /* sniffed offset-0 bytes must not replay */
     if (s->ring) {
         mutex_lock(&s->ring->lock);
@@ -829,8 +843,16 @@ static void run_http_like(demux_ctx_t* c) {
     basis_reseek_fn reseek = NULL;
     void* reseek_ctx = NULL;
 #if defined(_WIN32)
-    http_seek_src_t seek_src = { src, use_readahead ? &ring : NULL, &ps, &c->e->running };
+    http_seek_src_t seek_src = { src, use_readahead ? &ring : NULL, &ps, &c->e->running,
+                                 basis_win_http_abort, basis_win_http_reseek };
     if (c->e->paced && basis_win_http_can_reseek(src)) {
+        reseek = http_reseek;
+        reseek_ctx = &seek_src;
+    }
+#elif defined(__ANDROID__)
+    http_seek_src_t seek_src = { src, use_readahead ? &ring : NULL, &ps, &c->e->running,
+                                 basis_jni_https_abort, basis_jni_https_reseek };
+    if (c->e->paced && basis_jni_https_can_reseek(src)) {
         reseek = http_reseek;
         reseek_ctx = &seek_src;
     }
@@ -1076,6 +1098,8 @@ static basis_media_engine_t* open_impl(const char* url, const char* audio_url, i
     mutex_init(&e->lock);
     mutex_init(&e->submit_lock);
     e->state = BASIS_MEDIA_STATE_IDLE;
+    /* Default until a protocol reports negotiated detail (RTSP does). */
+    strncpy(e->transport, e->parts.scheme, sizeof(e->transport) - 1);
 
     /* Optional: a NULL context just means captions are unavailable (scan/poll no-op). */
     e->captions = basis_caption_create();
@@ -1239,6 +1263,17 @@ BASIS_API int BASIS_CALL basis_media_get_last_error(basis_media_engine_t* e, cha
     int n = (int)strlen(e->error);
     if (n >= buf_size) n = buf_size - 1;
     memcpy(buf, e->error, (size_t)n);
+    buf[n] = 0;
+    mutex_unlock(&e->lock);
+    return n;
+}
+
+BASIS_API int BASIS_CALL basis_media_get_transport(basis_media_engine_t* e, char* buf, int buf_size) {
+    if (!e || !buf || buf_size <= 0) return 0;
+    mutex_lock(&e->lock);
+    int n = (int)strlen(e->transport);
+    if (n >= buf_size) n = buf_size - 1;
+    memcpy(buf, e->transport, (size_t)n);
     buf[n] = 0;
     mutex_unlock(&e->lock);
     return n;
