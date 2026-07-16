@@ -1277,6 +1277,7 @@ w20, w54;
                     break;
             }
 
+            // NOTE: This code was disabled because Animation-aware spine presolve of Catherine's fork does not work with Crouch Body Offset.
             // hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up);
             targetPositionHips.Set(stream, hipsTargetPos);
 
@@ -1286,10 +1287,11 @@ w20, w54;
             // that reshaped a tracked pelvis was built and deliberately removed for exactly this reason). The
             // hip-bob/sway synthesis in BasisLocalRigDriver is gated on the same flag, for the same reason:
             // do not invent pelvis motion on top of a tracker.
-            if (!hasHipsTracker.Get(stream))
-            {
-                hipDesired = ApplyHipHinge(stream, headTargetPos, hipsTargetPos, hipDesired, up);
-            }
+            // NOTE: This code was disabled because Animation-aware spine presolve of Catherine's fork does not work with Hip Hinge.
+            // if (!hasHipsTracker.Get(stream))
+            // {
+            //    hipDesired = ApplyHipHinge(stream, headTargetPos, hipsTargetPos, hipDesired, up);
+            // }
 
             // Apply hips driver if valid
             if (HandleHips.IsValid(stream))
