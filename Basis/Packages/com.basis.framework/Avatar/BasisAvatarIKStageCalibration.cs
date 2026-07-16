@@ -115,6 +115,44 @@ namespace Basis.Scripts.Avatar
         /// If Any trackers are actively connected to the IK system
         /// </summary>
         public static bool HasFBIKTrackers = false;
+
+        /// <summary>
+        /// Do trackers actually pose the LEGS?
+        ///
+        /// HasFBIKTrackers is a WHOLE-BODY flag -- it is true for a chest, shoulder, elbow or hips tracker just as
+        /// readily as for a foot. Asking it a LEG question gives the wrong answer, and the failure is silent and
+        /// severe: the animator suppresses the walk cycle "because we're in FBT", while leg IK simultaneously
+        /// disables itself during locomotion (so the animation can take over) -- and the legs end up with NO driver
+        /// at all. They freeze mid-stride.
+        ///
+        /// That went unnoticed for as long as the only things producing chest/shoulder/elbow trackers were real FBT
+        /// rigs, which carry leg trackers too -- so the suppression happened to be right, for the wrong reason.
+        /// MediaPipe spawns chest/shoulder/elbow trackers with no leg trackers anywhere, which is what exposed it.
+        ///
+        /// A leg question gets a leg answer. Read live so it self-heals on tracker dropout/reconnect.
+        /// </summary>
+        public static bool HasLegFBIKTrackers =>
+               IsRoleTracked(BasisLocalBoneDriver.LeftFootControl)
+            || IsRoleTracked(BasisLocalBoneDriver.RightFootControl)
+            || IsRoleTracked(BasisLocalBoneDriver.LeftLowerLegControl)
+            || IsRoleTracked(BasisLocalBoneDriver.RightLowerLegControl)
+            || IsRoleTracked(BasisLocalBoneDriver.LeftUpperLegControl)
+            || IsRoleTracked(BasisLocalBoneDriver.RightUpperLegControl);
+
+        /// <summary>
+        /// Is the PELVIS specifically tracker-driven?
+        ///
+        /// Distinct from HasLegFBIKTrackers on purpose: a hip tracker moves the leg ROOT but does not pose the legs,
+        /// so it should not silence the walk cycle. It DOES make the pelvis authoritative, so anything that
+        /// synthesises pelvis motion (the landing hip-dip, gait bob/sway/pelvis-rotation) must stand down or it
+        /// fights the user's real body.
+        /// </summary>
+        public static bool HasHipsFBIKTracker => IsRoleTracked(BasisLocalBoneDriver.HipsControl);
+
+        private static bool IsRoleTracked(BasisLocalBoneControl control)
+        {
+            return control != null && control.HasTracked == BasisHasTracked.HasTracker;
+        }
         /// <summary>
         /// Builds a tracker→role assignment from the player's T-pose constellation alone.
         /// The avatar is no longer the source of truth for "where should this tracker be";
@@ -221,6 +259,8 @@ namespace Basis.Scripts.Avatar
                 // master toggle is off; the toggle path rebuilds when it flips on.
                 BasisLocalPlayer.Instance.LocalBoneDriver.RebuildCalibrationSpheres();
 
+                BasisContinuousCalibration.CaptureBaseline();
+
                 OnFullBodyCalibrated?.Invoke();
             }
             finally
@@ -277,12 +317,26 @@ namespace Basis.Scripts.Avatar
         private static Quaternion s_refHead, s_refHips, s_refChest, s_refLeftFoot, s_refRightFoot,
             s_refLeftToe, s_refRightToe, s_refLeftShoulder, s_refRightShoulder;
 
-        // Scale-free head anchor captured at calibration (unscaled device space). Together with each
-        // input's CalibratedUnscaled* snapshot this lets ReprojectTrackerOffsetsForCurrentAvatar rebuild
-        // the POSITION inverse offsets for any avatar/DeviceScale — the position analog of s_ref* above.
+        // Scale-free head anchor captured at ritual calibration (unscaled device space). The per-tracker
+        // geometry pairing lives on each input (BasisInput.CalibratedUnscaledHead*, captured atomically
+        // with its tracker snapshot); this global copy records "a ritual calibration exists" and is the
+        // standing-height reference for BasisContinuousCalibration's gates.
         public static bool HasCalibrationHeadSnapshot;
         private static Vector3 s_calibHeadUnscaledPos;
         private static Quaternion s_calibHeadUnscaledRot = Quaternion.identity;
+
+        /// <summary>
+        /// The scale-free head anchor of the last ritual calibration — the reference for "standing in
+        /// roughly the calibration pose". Per-tracker snapshot edits must be expressed in that tracker's
+        /// OWN capture frame (BasisInput.CalibratedUnscaledHead*), which equals this frame for trackers
+        /// captured during the ritual.
+        /// </summary>
+        public static bool TryGetCalibrationHeadSnapshot(out Vector3 unscaledPosition, out Quaternion unscaledRotation)
+        {
+            unscaledPosition = s_calibHeadUnscaledPos;
+            unscaledRotation = s_calibHeadUnscaledRot;
+            return HasCalibrationHeadSnapshot;
+        }
 
         /// <summary>
         /// Re-derives every calibrated FBT tracker's POSITION inverse offset for the CURRENT avatar and
@@ -291,16 +345,14 @@ namespace Basis.Scripts.Avatar
         /// offsets). BasisHeightDriver calls this whenever the height/scale pipeline re-resolves
         /// (avatar swap, scale slider, OSC override), so FBT keeps fitting without redoing the T-pose.
         /// The player's live pose is irrelevant: only the stored calibration geometry and the current
-        /// avatar's T-pose bind (TposeLocalScaled) are used. The offset ROTATION is untouched — it maps
-        /// tracker rotation to the bone-sim body frame, which is avatar- and scale-independent. No-op
-        /// until a calibration has captured a head snapshot.
+        /// avatar's T-pose bind (TposeLocalScaled) are used. Each tracker rebuilds against the head
+        /// anchor it was captured with (BasisInput.CalibratedUnscaledHead*), so a mid-session recapture
+        /// keeps its own frame instead of inheriting the ritual one. The offset ROTATION is untouched —
+        /// it maps tracker rotation to the bone-sim body frame, which is avatar- and scale-independent.
+        /// No-op for trackers without a snapshot.
         /// </summary>
         public static void ReprojectTrackerOffsetsForCurrentAvatar()
         {
-            if (!HasCalibrationHeadSnapshot)
-            {
-                return;
-            }
             BasisLocalPlayer player = BasisLocalPlayer.Instance;
             if (player == null || player.LocalBoneDriver == null || BasisLocalBoneDriver.HeadControl == null)
             {
@@ -344,7 +396,7 @@ namespace Basis.Scripts.Avatar
 
                 BasisCalibrationMath.ReprojectInverseOffsetPosition(
                     input.CalibratedUnscaledPosition, input.CalibratedUnscaledRotation,
-                    s_calibHeadUnscaledPos, s_calibHeadUnscaledRot,
+                    input.CalibratedUnscaledHeadPosition, input.CalibratedUnscaledHeadRotation,
                     BasisHeightDriver.DeviceScale, BasisInput.OffsetCoords.position, BasisInput.OffsetCoords.rotation,
                     headTpose, boneTpose,
                     out Vector3 inverseOffsetPosition);
@@ -522,7 +574,18 @@ namespace Basis.Scripts.Avatar
             // player should be looking straight ahead, so the projection is well defined.
             Vector3 hmdFwdHoriz = hmdUnscaledRot * Vector3.forward;
             hmdFwdHoriz.y = 0f;
-            if (hmdFwdHoriz.sqrMagnitude < 1e-4f) hmdFwdHoriz = BasisLocalPlayer.Instance.transform.forward;
+            if (hmdFwdHoriz.sqrMagnitude < 1e-4f)
+            {
+                // Near-vertical gaze (looking down at the trackers is the common calibration pose):
+                // recover the facing from the head's up axis, which tips toward the body's forward as
+                // the head pitches down (and away from it pitching up). Must stay in the unscaled
+                // playspace frame — the player transform's forward is world-space and disagrees after
+                // any snap-turn/teleport, flipping LateralRatio signs (left/right role swaps).
+                Vector3 headUpHoriz = hmdUnscaledRot * Vector3.up;
+                headUpHoriz.y = 0f;
+                hmdFwdHoriz = (hmdUnscaledRot * Vector3.forward).y < 0f ? headUpHoriz : -headUpHoriz;
+                if (hmdFwdHoriz.sqrMagnitude < 1e-4f) hmdFwdHoriz = Vector3.forward;
+            }
             hmdFwdHoriz.Normalize();
 
             Quaternion bodyRot = Quaternion.LookRotation(hmdFwdHoriz, Vector3.up);
@@ -1241,8 +1304,24 @@ namespace Basis.Scripts.Avatar
                 }
             }
 
-            // Choose push magnitudes (tweakable)
-            float hs = BasisHeightDriver.ScaledToMatchValue;
+            // Push magnitudes are world metres, so they must scale with the avatar's RENDERED size.
+            // ScaledToMatchValue is only the authored->target ratio (1.0 for any unscaled avatar, and
+            // inversely proportional to the authored size when custom scale is on), so authored units
+            // leaked into the push: a 0.5m-authored avatar scaled to 1.6m got a ~33cm knee hint.
+            float calibrationScaleY = 1f;
+            BasisLocalAvatarDriver hintAvatarDriver = BasisLocalPlayer.Instance != null ? BasisLocalPlayer.Instance.LocalAvatarDriver : null;
+            if (hintAvatarDriver != null && hintAvatarDriver.ScaleAvatarModification != null)
+            {
+                calibrationScaleY = hintAvatarDriver.ScaleAvatarModification.DuringCalibrationScale.y;
+            }
+            if (float.IsNaN(calibrationScaleY) || float.IsInfinity(calibrationScaleY) || calibrationScaleY <= 0f)
+            {
+                calibrationScaleY = 1f;
+            }
+            float renderedEyeHeight = calibrationScaleY * BasisHeightDriver.AvatarEyeHeight * BasisHeightDriver.AppliedUpScale;
+            float hs = (float.IsNaN(renderedEyeHeight) || float.IsInfinity(renderedEyeHeight) || renderedEyeHeight <= 0f)
+                ? 1f
+                : renderedEyeHeight / BasisHeightDriver.FallbackHeightInMeters;
             float kneePush = 0.10f * hs;
             float headPush = 0.08f * hs;
 

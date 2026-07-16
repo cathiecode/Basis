@@ -8,6 +8,7 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Animations.Rigging;   // BasisPelvisPostureModel
 
 /// <summary>
 /// Virtual spine solver for local avatars. It blends tracker-driven cues (head/neck)
@@ -65,6 +66,7 @@ public class BasisLocalVirtualSpineDriver
     /// <summary>Standing hips local Y = rest neck Y − total spine length: the rigid model's hips height
     /// when the head is at rest. Spine compression measures the head drop relative to this.</summary>
     private float _standingHipsLocalY;
+    private float _standingHeadLocalY;
 
     /// <summary>Set whenever cached lengths need to be recomputed (scale or TPose changed).</summary>
     private bool _lengthsDirty = true;
@@ -81,14 +83,30 @@ public class BasisLocalVirtualSpineDriver
 
     // Hybrid hips XZ model — replaces the former HipsXZFollowBlend lerp with an anatomy-aware
     // counterbalance + foot-pendulum. See ComputeRealisticHipsXZBurst for details.
-    /// <summary>Cutoff (Hz) for the head-position low-pass that defines the body's "baseline" XZ.
-    /// ~1 Hz means quick head moves (leans) leave the baseline behind so hips counter-balance,
-    /// while sustained translations (walking) drag the baseline along so hips follow.</summary>
-    private const float HeadBaselineHz = 1.0f;
+
+    /// <summary>How far the head may get from the support base without the user having stepped, as a
+    /// fraction of their standing head height. Inside it the head is leaning and the support base holds;
+    /// beyond it the user must have stepped, so the base follows.</summary>
+    private const float StanceRadiusFrac = 0.12f;
+
+    /// <summary>Rate (s⁻¹) the support base follows the head once the head is a full stance radius outside
+    /// it. Stiff on purpose: a soft pull lags the head through a step and then creeps into the leftover
+    /// error after it stops, which is the drift this replaces.</summary>
+    private const float HeadBaselinePullRate = 200f;
+
+    /// <summary>Low-pass frequency for Catherine's animation-relative pelvis anchor.</summary>
+    private const float AnimationHipsBaselineHz = 1.0f;
+
     /// <summary>How much hips track the head's deviation from baseline. 0 = pure counterbalance
     /// (hips never move from baseline), 1 = legacy "follow head fully". 0.25 keeps a small forward
     /// translation while still reading as a real spine bend.</summary>
     private const float CounterbalanceFollowFrac = 0.25f;
+    /// <summary>Lateral (body-right) counterpart to <see cref="CounterbalanceFollowFrac"/>. A sideways head
+    /// shift is a WEIGHT SHIFT, not a bend, so the pelvis follows most of the way to stay stacked over the
+    /// feet. Following it at the low sagittal rate is what left the hips lagging ~75% behind a left/right
+    /// move and skewed the torso into a phantom rotation (headset-only, no foot roles). Set equal to
+    /// CounterbalanceFollowFrac to restore the former isotropic behaviour exactly.</summary>
+    private const float CounterbalanceLateralFollowFrac = 0.8f;
     /// <summary>When both feet are tracked, hips sit at feet-midpoint XZ + this fraction toward
     /// the head. Approximates an inverted-pendulum lean — small because legs are nearly vertical
     /// even under significant torso lean.</summary>
@@ -135,6 +153,7 @@ public class BasisLocalVirtualSpineDriver
         if (_solveState.IsCreated)
         {
             SpineSolveState s = _solveState[0];
+            s.HeadBaselineInitialized = 0;
             s.HipsBaselineInitialized = 0;
             _solveState[0] = s;
         }
@@ -157,7 +176,7 @@ public class BasisLocalVirtualSpineDriver
 
         if (_lengthsDirty)
         {
-            RecomputeSegmentLengths(neck, chest, spine, hips);
+            RecomputeSegmentLengths(head, neck, chest, spine, hips);
             _lengthsDirty = false;
         }
 
@@ -230,6 +249,8 @@ public class BasisLocalVirtualSpineDriver
             TSpine = _tSpine,
 
             StandingHipsLocalY = _standingHipsLocalY,
+            StandingHeadLocalY = _standingHeadLocalY,
+            PostureModel = (byte)(Basis.BasisUI.BasisSettingsDefaults.VSpinePostureModel.RawValue ? 1 : 0),
             HipsCompressionStrength = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue,
             HipsMaxDropMeters = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale,
         };
@@ -264,8 +285,9 @@ public class BasisLocalVirtualSpineDriver
         return c.TargetIndex >= 0 ? c.Owner.Controls[c.TargetIndex] : c;
     }
 
-    private void RecomputeSegmentLengths(BasisLocalBoneControl neck, BasisLocalBoneControl chest, BasisLocalBoneControl spine, BasisLocalBoneControl hips)
+    private void RecomputeSegmentLengths(BasisLocalBoneControl head, BasisLocalBoneControl neck, BasisLocalBoneControl chest, BasisLocalBoneControl spine, BasisLocalBoneControl hips)
     {
+        float3 pHead = head.TposeLocalScaled.position;
         float3 pNeck = neck.TposeLocalScaled.position;
         float3 pChest = chest.TposeLocalScaled.position;
         float3 pSpine = spine.TposeLocalScaled.position;
@@ -279,6 +301,9 @@ public class BasisLocalVirtualSpineDriver
         _tSpine = math.saturate((_lenNeckToChest + _lenChestToSpine) / _lenTotal);
         // Rigid-model hips Y at rest (neck at rest height): drop below this drives spine compression.
         _standingHipsLocalY = pNeck.y - _lenTotal;
+        // The posture model normalises by the user's own standing HEAD height, which is what makes it
+        // scale-free. Guarded: a rig that puts the head at the origin would otherwise divide by zero.
+        _standingHeadLocalY = math.max(pHead.y, 1e-3f);
     }
 
     /// <summary>Per-frame solver inputs packed on the main thread (settings, cues, calibration).</summary>
@@ -333,6 +358,10 @@ public class BasisLocalVirtualSpineDriver
         public float TSpine;
 
         public float StandingHipsLocalY;
+        public float StandingHeadLocalY;
+        // 1 = the fitted pelvis posture model (BasisPelvisPostureModel), 0 = the legacy exponential
+        // saturation. A toggle and not a slider: these are two different laws, not two ends of one.
+        public byte PostureModel;
         public float HipsCompressionStrength;
         public float HipsMaxDropMeters;
     }
@@ -340,6 +369,11 @@ public class BasisLocalVirtualSpineDriver
     /// <summary>Persistent spine solver state carried across frames (low-pass + yaw deadzone).</summary>
     public struct SpineSolveState
     {
+        // Upstream support-base state used by the posture-aware legacy path.
+        public float3 HeadBaselineXZ;
+        public byte HeadBaselineInitialized;
+
+        // Animation-aware support state used by Catherine's graph pre-solve path.
         public float3 HipsBaselineXZ;
         public byte HipsBaselineInitialized;
 
@@ -510,10 +544,12 @@ public class BasisLocalVirtualSpineDriver
             float biasScale = P.HipsForwardBias * P.Scale;
 
             float3 headPosWorld = head.OutgoingPosition;
-            float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref s, headPosWorld, 1.0f, dt, P.LeftFootPos, P.RightFootPos, P.LeftFootTracked != 0, P.RightFootTracked != 0);
+            float3 desiredHipsXZ = ComputeRealisticHipsXZBurst(ref s, headPosWorld, dt, P.StandingHeadLocalY, in torsoYawTarget, P.LeftFootPos, P.RightFootPos, P.LeftFootTracked != 0, P.RightFootTracked != 0, out float3 supportXZ);
 
             ComputeHipsPosition(
                 in neckPosWorld,
+                in headPosWorld,
+                in supportXZ,
                 in worldUp,
                 P.LenTotal,
                 in torsoYawTarget,
@@ -522,6 +558,8 @@ public class BasisLocalVirtualSpineDriver
                 freeze,
                 in tposeHips,
                 P.StandingHipsLocalY,
+                P.StandingHeadLocalY,
+                P.PostureModel != 0,
                 P.HipsCompressionStrength,
                 P.HipsMaxDropMeters,
                 out float3 hipsPos);
@@ -654,7 +692,9 @@ public class BasisLocalVirtualSpineDriver
         }
 
         float targetFollow = s.TorsoYawBroken != 0 ? 1f : 0f;
-        s.TorsoFollow = math.lerp(s.TorsoFollow, targetFollow, math.saturate(dt * math.max(0f, blendSpeed)));
+        // Framerate-independent, for the same reason as SmoothSlerpBurst: this blend gates how fast the
+        // torso catches up to a broken yaw anchor, and it must not run at a different speed per headset.
+        s.TorsoFollow = math.lerp(s.TorsoFollow, targetFollow, FramerateIndependentAlpha(blendSpeed, dt));
 
         // Re-center only once the blend has fully engaged, so swapping the anchor can't jump the
         // blended target and bring back the click this easing removes.
@@ -670,29 +710,41 @@ public class BasisLocalVirtualSpineDriver
 
     /// <summary>
     /// Anatomy-aware hips XZ. Two layers:
-    ///   (1) Counterbalance: a low-pass head-XZ baseline approximates the user's body center.
-    ///       Hips sit at baseline + a small fraction of the head's deviation, so quick leans
-    ///       counter-balance (hips stay back) while sustained translations (walking) drag the
-    ///       baseline along and the hips follow.
+    ///   (1) Counterbalance: a leashed head-XZ baseline estimates the user's support base (where they are
+    ///       standing). Hips sit at baseline + an axis-dependent fraction of the head's deviation: little of
+    ///       a FORWARD lean (a bend counter-balances — hips stay back and hold there) but most of a SIDEWAYS
+    ///       shift (a weight shift stays stacked over the feet), while stepping drags the base along and the
+    ///       hips follow.
     ///   (2) Foot pendulum: if both feet are tracked, override with feet-midpoint + a small lean
-    ///       toward the head — closer to a real inverted-pendulum stance.
+    ///       toward the head — closer to a real inverted-pendulum stance. With roles on the feet the
+    ///       support base is known outright, so no estimate is used.
     /// </summary>
-    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 animatedHipsPosWorld, float noSmoothingBlendAlpha, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
+    // `supportXZ` is the SUPPORT BASE -- where the user is standing. It is already computed here (it is what
+    // the pelvis is lerped away from), so it is handed back rather than recomputed: the posture model measures
+    // the head's forward LEAN against it, and two copies of that definition is exactly the kind of quiet
+    // disagreement that has bitten this codebase before.
+    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 headPosWorld, float dt, float standingHeadY, in quaternion torsoYaw, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked, out float3 supportXZ)
     {
-        float3 animatedHipsPosXZ = new float3(animatedHipsPosWorld.x, 0f, animatedHipsPosWorld.z);
+        float3 headXZ = new float3(headPosWorld.x, 0f, headPosWorld.z);
 
-        if (s.HipsBaselineInitialized == 0)
+        if (s.HeadBaselineInitialized == 0)
         {
-            s.HipsBaselineXZ = animatedHipsPosXZ;
-            s.HipsBaselineInitialized = 1;
+            s.HeadBaselineXZ = headXZ;
+            s.HeadBaselineInitialized = 1;
         }
         else
         {
-            // Frame-rate-coherent low-pass: alpha = 1 - exp(-2π·hz·dt).
+            // The support base only moves when the user STEPS, so the discriminator is spatial, not
+            // temporal: a lean and a step are indistinguishable in head-XZ-over-time (both move the head
+            // and leave it there), but a lean cannot reach past a stance radius. The pull scales with the
+            // SQUARED exceedance so tracker jitter across the boundary cannot ratchet the base outward.
             float safeDt = math.max(dt, 1e-6f);
-            float alpha = 1f - math.exp(-2f * math.PI * HeadBaselineHz * safeDt);
-            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, alpha);
-            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, noSmoothingBlendAlpha);
+            float radius = math.max(StanceRadiusFrac * standingHeadY, 1e-3f);
+
+            float3 offset = headXZ - s.HeadBaselineXZ;
+            float over = math.max(0f, math.length(offset) - radius) / radius;
+            float alpha = 1f - math.exp(-HeadBaselinePullRate * over * over * safeDt);
+            s.HeadBaselineXZ = math.lerp(s.HeadBaselineXZ, headXZ, alpha);
         }
 
         if (leftFootTracked && rightFootTracked)
@@ -701,10 +753,31 @@ public class BasisLocalVirtualSpineDriver
                 (leftFootPos.x + rightFootPos.x) * 0.5f,
                 0f,
                 (leftFootPos.z + rightFootPos.z) * 0.5f);
-            return math.lerp(feetMidXZ, animatedHipsPosXZ, FootPendulumLeanFrac);
+            supportXZ = feetMidXZ;
+            return math.lerp(feetMidXZ, headXZ, FootPendulumLeanFrac);
         }
 
-        return math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, CounterbalanceFollowFrac);
+        // No feet with roles: the leashed head baseline IS the standing spot — the best support base
+        // available when nothing is measuring the feet.
+        supportXZ = s.HeadBaselineXZ;
+
+        // Anisotropic follow. Split the head's horizontal deviation from the standing spot along the torso's
+        // OWN facing and follow each axis at its own rate:
+        //   • forward/back is a BEND — the pelvis counterbalances and barely moves, so it follows at
+        //     CounterbalanceFollowFrac (the leash's original, corpus-checked purpose).
+        //   • left/right is a WEIGHT SHIFT — a real pelvis stays stacked over the feet, so it follows most of
+        //     the way (CounterbalanceLateralFollowFrac). Following it at the sagittal rate is what left the
+        //     hips lagging ~75% behind a side-to-side move and skewed the torso into a phantom rotation.
+        // With the two fracs equal this is bit-identical to the former lerp(baseline, headXZ, frac): fwd and
+        // right are an orthonormal basis of the XZ plane, so the split reconstructs the same offset exactly.
+        float3 dev = headXZ - s.HeadBaselineXZ;
+        float3 fwd = math.mul(torsoYaw, new float3(0f, 0f, 1f));
+        float3 right = math.mul(torsoYaw, new float3(1f, 0f, 0f));
+        float devFwd = math.dot(dev, fwd);
+        float devRight = math.dot(dev, right);
+        return s.HeadBaselineXZ
+             + fwd * (devFwd * CounterbalanceFollowFrac)
+             + right * (devRight * CounterbalanceLateralFollowFrac);
     }
 
     // Adds a configurable fraction of head pitch and roll on top of a yaw-only base rotation.
@@ -837,14 +910,104 @@ public class BasisLocalVirtualSpineDriver
         result = math.slerp(result, target, noSmoothingAlpha);
     }
 
-    [BurstCompile]
-    internal static void ExtractYawBurst(in quaternion rotation, out quaternion result)
+    // Catherine graph pre-solve variant. Its anchor follows the animated pelvis instead of the
+    // head so prone/supine animations and non-upright body frames do not feed back into world Y.
+    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 animatedHipsPosWorld, float noSmoothingBlendAlpha, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
     {
-        float3 f = math.mul(rotation, new float3(0f, 0f, 1f));
-        f.y = 0f;
-        if (math.lengthsq(f) < 1e-12f) f = new float3(0f, 0f, 1f);
-        f = math.normalize(f);
-        result = quaternion.LookRotationSafe(f, new float3(0f, 1f, 0f));
+        float3 animatedHipsPosXZ = new float3(animatedHipsPosWorld.x, 0f, animatedHipsPosWorld.z);
+        if (s.HipsBaselineInitialized == 0)
+        {
+            s.HipsBaselineXZ = animatedHipsPosXZ;
+            s.HipsBaselineInitialized = 1;
+        }
+        else
+        {
+            float safeDt = math.max(dt, 1e-6f);
+            float alpha = 1f - math.exp(-2f * math.PI * AnimationHipsBaselineHz * safeDt);
+            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, alpha);
+            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, noSmoothingBlendAlpha);
+        }
+
+        if (leftFootTracked && rightFootTracked)
+        {
+            float3 feetMidXZ = new float3(
+                (leftFootPos.x + rightFootPos.x) * 0.5f,
+                0f,
+                (leftFootPos.z + rightFootPos.z) * 0.5f);
+            return math.lerp(feetMidXZ, animatedHipsPosXZ, FootPendulumLeanFrac);
+        }
+
+        return math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, CounterbalanceFollowFrac);
+    }
+
+    /// <summary>
+    /// The framerate at which the *RotationSpeed settings were tuned, and the rate whose behaviour
+    /// FramerateIndependentAlpha reproduces exactly. Changing this re-tunes every user's spine.
+    /// </summary>
+    private const float SmoothingReferenceFps = 90f;
+
+    /// <summary>
+    /// Converts a legacy "speed" (which the old code used as a per-frame lerp fraction: alpha = dt*speed)
+    /// into a framerate-independent alpha with the same time constant at ANY dt.
+    ///
+    /// The old form was `alpha = saturate(dt * speed)`, and its time constant was a function of the
+    /// user's GPU. Smaller dt gives a smaller alpha gives a SLOWER filter, so the fingerprint was
+    /// perverse: a 144 Hz headset got ~60% MORE neck lag than a 72 Hz one (18 ms vs 11 ms at 1 Hz) from
+    /// the very same setting. And `saturate` clamps once dt*speed >= 1, so at the default
+    /// NeckRotationSpeed of 40 the smoothing VANISHED below 40 fps -- the neck snapped every frame,
+    /// exactly when the framerate was bad enough to need smoothing most (standalone under load, desktop).
+    ///
+    /// The speeds are user-facing sliders with persisted values, so the number's MEANING is preserved
+    /// rather than redefined: it is still read as "the per-frame fraction at the reference rate", then
+    /// converted to the true exponential rate that reproduces it. This is therefore a bit-for-bit no-op
+    /// at SmoothingReferenceFps and a correction at every other framerate -- nobody's tuning changes, it
+    /// just stops depending on their hardware. Same discipline as the foot-IK scale fix: exactly a no-op
+    /// at the reference, proportional everywhere else.
+    ///
+    /// Gated by BasisBlendSpeedTests.
+    /// </summary>
+    public static float FramerateIndependentAlpha(float speed, float dt)
+    {
+        float alphaAtRef = math.saturate(math.max(0f, speed) / SmoothingReferenceFps);
+        // The legacy form snapped outright at and above the reference rate; preserve that endpoint
+        // rather than dividing by zero on the way to it.
+        if (alphaAtRef >= 0.999f) return 1f;
+        if (alphaAtRef <= 0f) return 0f;
+        float rate = -SmoothingReferenceFps * math.log(1f - alphaAtRef);
+        return 1f - math.exp(-rate * math.max(0f, dt));
+    }
+
+    [BurstCompile]
+    private static void SmoothSlerpBurst(in quaternion current, in quaternion target, float speed, float dt, out quaternion result)
+    {
+        result = math.slerp(current, target, FramerateIndependentAlpha(speed, dt));
+    }
+
+    // Yaw about world up, as the TWIST half of a swing-twist decomposition.
+    //
+    // Do NOT "simplify" this back to flattening head-forward into the horizontal plane and taking its
+    // azimuth. Forward carries no azimuth at all once the gaze is vertical, and the azimuth's gain is
+    // 1/cos(gazePitch) -- 4.7x at 80 degrees of look-down, 180x at 90 -- so sweeping the head across the
+    // middle of the chest whipped the entire torso around (this yaw is what hips/spine/chest are aimed
+    // by). Same defect at the look-up pole. The old 1e-12 guard was orders of magnitude too small to fire;
+    // the damage is done long before the projection is literally zero.
+    //
+    // The twist has no projection to collapse. It is EXACTLY the old azimuth for any roll-free head
+    // rotation, so ordinary look-around -- which is what every spine tuning was set against -- is
+    // unchanged, and it stays continuous and bounded through both poles. Its own singularity is a
+    // 180-degree pitch (upside down, facing backwards), which a head cannot reach.
+    [BurstCompile]
+    public static void ExtractYawBurst(in quaternion rotation, out quaternion result)
+    {
+        float4 q = rotation.value;
+        float lenSq = q.y * q.y + q.w * q.w;
+        if (lenSq < 1e-12f)
+        {
+            result = quaternion.identity;
+            return;
+        }
+        float inv = math.rsqrt(lenSq);
+        result = new quaternion(0f, q.y * inv, 0f, q.w * inv);
     }
 
     [BurstCompile]
@@ -862,7 +1025,9 @@ public class BasisLocalVirtualSpineDriver
     [BurstCompile]
     internal static void ComputeHipsPosition(
         in float3 neckPos,
-        in float3 spineUp,
+        in float3 headPos,
+        in float3 supportXZ,
+        in float3 worldUp,
         float lenTotal,
         in quaternion torsoYaw,
         float biasScale,
@@ -870,13 +1035,15 @@ public class BasisLocalVirtualSpineDriver
         bool freezeToTpose,
         in float3 tposeHips,
         float standingHipsLocalY,
+        float standingHeadLocalY,
+        bool usePostureModel,
         float compressionStrength,
         float maxDrop,
         out float3 result)
     {
         // Match original semantics: when frozen, bias direction is world-aligned (identity yaw),
         // not head yaw. Position base swaps to TPose but forward bias is still applied.
-        float3 hipsBase = freezeToTpose ? tposeHips : neckPos - spineUp * lenTotal;
+        float3 hipsBase = freezeToTpose ? tposeHips : neckPos - worldUp * lenTotal;
         quaternion biasYaw = freezeToTpose ? quaternion.identity : torsoYaw;
         float3 forwardBias = math.mul(biasYaw, new float3(0f, 0f, 1f)) * biasScale;
 
@@ -887,18 +1054,54 @@ public class BasisLocalVirtualSpineDriver
             return;
         }
 
-        // Spine compression: the rigid model sinks the pelvis by the full head drop (neck − lenTotal),
-        // so leaning to touch toes or sitting buries the hips and the leg IK folds the knees. Saturate
-        // the downward travel toward maxDrop so the spine shortens (chest scrunches) and the pelvis
-        // holds near standing height. drop ≤ 0 (head at/above standing) leaves the rigid pose untouched.
-        float drop = standingHipsLocalY - hipsBase.y;
-        if (drop > 0f && compressionStrength > 0f && maxDrop > 1e-4f)
-        {
-            float softDrop = maxDrop * (1f - math.exp(-drop / maxDrop));
-            hipsBase.y = standingHipsLocalY - math.lerp(drop, softDrop, math.saturate(compressionStrength));
-        }
+        // `hipsBase.y` is the RIGID pelvis: a fixed spine-length below the neck. It is also the FLOOR of
+        // what follows -- the pelvis may sit above it (the spine compresses, which is what a folding spine
+        // does) but never below it, because that would mean the spine has STRETCHED.
+        float rigidY = hipsBase.y;
+        float headDrop = standingHeadLocalY - headPos.y;
 
-        // Y from neck-minus-spine-length (now compressed), XZ from the realistic model, plus pelvic bias.
+        if (usePostureModel && standingHeadLocalY > 1e-3f && headDrop > 0f)
+        {
+            // ------------------------------------------------------------------------------------------
+            // THE PELVIS POSTURE MODEL. A low head is TWO different bodies -- a waist-bend (pelvis stays
+            // high, spine folds) and a squat (pelvis rides the head down) -- and the old law below could
+            // not tell them apart, because it only ever looked at HEIGHT. Fitted to 44 CMU clips, the real
+            // coupling is 0.02-0.14 for the first and 0.78-0.99 for the second: not a spread, two
+            // behaviours. The discriminator is FORWARD LEAN, and this is where it finally gets used.
+            //
+            // Everything is normalised by the user's own standing head height, so it is scale-free.
+            // ------------------------------------------------------------------------------------------
+            float3 headXZ = new float3(headPos.x, 0f, headPos.z);
+            float lean = math.length(headXZ - new float3(supportXZ.x, 0f, supportXZ.z));
+
+            float d = headDrop / standingHeadLocalY;
+            float f = lean / standingHeadLocalY;
+
+            float pelvisDrop = BasisPelvisPostureModel.PelvisDrop(d, f) * standingHeadLocalY;
+
+            // The pelvis may rise above the rigid pose (spine compresses) but never sink below it (spine
+            // cannot stretch). On a squat the model lands ON the rigid pose, which is the whole point --
+            // that is the case the old saturation was wrongly holding 32.8 cm up.
+            hipsBase.y = math.max(standingHipsLocalY - pelvisDrop, rigidY);
+        }
+        else if (!usePostureModel)
+        {
+            // LEGACY: a single exponential saturation of the pelvis's downward travel. Right-ish for a
+            // waist-bend (which is why it was added -- the rigid model buried the pelvis and folded the
+            // knees), badly wrong for a squat. Kept behind the VSpinePostureModel toggle so the change is
+            // one switch to A/B in a headset, and one switch to revert.
+            float drop = standingHipsLocalY - rigidY;
+            if (drop > 0f && compressionStrength > 0f && maxDrop > 1e-4f)
+            {
+                float softDrop = maxDrop * (1f - math.exp(-drop / maxDrop));
+                hipsBase.y = standingHipsLocalY - math.lerp(drop, softDrop, math.saturate(compressionStrength));
+            }
+        }
+        // headDrop <= 0 (head at or above standing height -- tiptoes, a jump) leaves the RIGID pose
+        // untouched under either law: the pelvis rises with the neck, exactly as it always has.
+
+        // Y from the posture law, XZ from the realistic model (deliberately UNCHANGED -- a fit of the
+        // horizontal pelvis lost to this constant out-of-sample, so it does not ship), plus pelvic bias.
         result = new float3(desiredHipsXZ.x, hipsBase.y, desiredHipsXZ.z) + forwardBias;
     }
 
@@ -980,7 +1183,7 @@ public class BasisLocalVirtualSpineDriver
     }
 
     [BurstCompile]
-    internal static void YawDegrees(in quaternion yawOnly, out float result)
+    public static void YawDegrees(in quaternion yawOnly, out float result)
     {
         float3 f = math.mul(yawOnly, new float3(0f, 0f, 1f));
         result = math.degrees(math.atan2(f.x, f.z));

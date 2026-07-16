@@ -2,10 +2,12 @@
 
 Live and on-demand video — and audio-only media — for Basis, decoded with the
 **operating-system hardware codecs** and presented **zero-copy** into a Unity texture. No transcode server, no
-VP9, no `UnityEngine.Video.MediaPlayer`.
+bundled codec libraries, no `UnityEngine.Video.MediaPlayer`.
 
-- **Windows (PC / VR)** — Media Foundation H.264/H.265 + AAC on a DXVA D3D11
+- **Windows (PC / VR)** — Media Foundation H.264/H.265/VP9/AV1 + AAC on a DXVA D3D11
   device; NV12 → BGRA via the D3D11 video processor into a texture Unity samples.
+  (VP9 and AV1 need their Store extensions and a GPU with hardware decode —
+  `basis_media_probe_video_codec` answers for both legs.)
   Works on **D3D11** (primary) and **D3D12** (shared-handle interop).
 - **Android (Quest)** — `AMediaCodec`/`AMediaExtractor`; decoded frames arrive as
   `AHardwareBuffer`s imported into **Vulkan** as a `VkImage` Unity samples.
@@ -14,16 +16,22 @@ VP9, no `UnityEngine.Video.MediaPlayer`.
 
 | Scheme | Use | Example |
 |---|---|---|
-| `rtspt://` | PC/VR low latency (RTP interleaved over TCP) | `rtspt://stream.vrcdn.live/live/vrcdn` |
+| `rtsp://`  | PC/VR low latency — UDP first, TCP-interleaved fallback | `rtsp://stream.vrcdn.live/live/vrcdn` |
+| `rtspt://` | PC/VR low latency, TCP-interleaved pinned (legacy; prefer `rtsp://` unless a host needs forced TCP) | `rtspt://stream.vrcdn.live/live/vrcdn` |
 | `rtmp://`  | RTMP pull | `rtmp://stream.vrcdn.live/live/vrcdn` |
 | `rist://`  | RIST live ingest (UDP, loss recovery + optional AES) | `rist://stream.example:5000?secret=KEY&aes-type=128` |
-| `https://…​.mp4` | fragmented MP4 over HTTPS | `https://stream.vrcdn.live/live/vrcdn.live.mp4` |
+| `https://…​.mp4` | MP4 over HTTPS — fragmented (live) or progressive VOD (faststart or trailing moov, seekable) | `https://stream.vrcdn.live/live/vrcdn.live.mp4` |
 | `https://…​.ts`  | MPEG-TS over HTTPS (Quest) | `https://stream.vrcdn.live/live/vrcdn.live.ts` |
 | `https://…​.m3u8` | HLS / Low-Latency HLS | `https://stream.example/live/index.m3u8` |
 | `https://….wav` | WAV audio (integer PCM, mono up to 7.1) | `https://stream.example/audio/track.wav` |
+| `https://….webm` | WebM VP9/AV1 video-only VOD (YouTube's >1080p carriage; Cues-indexed files seek) | `https://stream.example/vod/clip.webm` |
 
-The protocol/demux core (RTSP/RTP, RTMP/FLV, MPEG-TS, fMP4, RIFF/WAV) is portable C;
-the OS backends only decode + present.
+The protocol/demux core (RTSP/RTP, RTMP/FLV, MPEG-TS, fMP4, WebM, RIFF/WAV) is portable C,
+picking demuxers by content sniff so extensionless CDN URLs (googlevideo and friends)
+route correctly. On Android, eligible http(s) URLs are first offered to the OS extractor
+(`AMediaExtractor`, which demuxes as well as decodes); anything it declines falls back to
+the portable demux path. Windows always demuxes portably and only decodes + presents
+natively.
 
 ### HLS / Low-Latency HLS
 
@@ -53,6 +61,15 @@ RIST is **opt-in at build time** — the default plugin links only OS frameworks
 Build with `-DBASIS_WITH_RIST=ON` against prebuilt librist (see *Building the
 native plugin* below).
 
+### RTSP transport
+
+`rtsp://` negotiates its transport: it attempts **UDP** (RTP/AVP) first and falls back to
+**RTP interleaved over the TCP** control channel on refusal, a socket error, or a no-data
+timer — and remembers a host that fails UDP so later loads go straight to TCP. `rtspt://`
+skips the probe and **pins TCP-interleaved**, for hosts or networks where UDP never works.
+The settled transport is logged once per load and exposed on
+`BasisMediaPlayer.CurrentTransport`.
+
 ## Live vs on-demand
 
 Every source is either **live** (presented at the live edge, lowest latency) or
@@ -81,6 +98,21 @@ The live jitter buffer is tunable via `BasisMediaPlayer.BufferMilliseconds` /
 `BufferMode` (Fixed, or auto-tuning Dynamic — lower = less latency, higher = smoother).
 On-demand currently presents on a fixed internal buffer; `BufferMilliseconds` applies
 to the live path only.
+
+## Seeking
+
+Sources that report a duration (`BasisMediaPlayer.Duration > 0` — a progressive MP4, a WAV, a
+finished TS-segment HLS VOD playlist) are seekable. A duration is necessary but not on its own
+a guarantee: a source whose transport can't reposition still refuses the seek. `Seek(TimeSpan
+position)` requests an **absolute** seek; the demuxer repositions at the next sample (or
+segment) boundary and resumes from the preceding keyframe, so playback lands **at or shortly
+before** the target — watch `Position`, and `OnSeekCompleted` fires once it settles. `TrySeekBack(TimeSpan)` is a relative rewind. Seeking a live or unindexed
+source throws `NotSupportedException`.
+
+```csharp
+if (player.Duration > TimeSpan.Zero)
+    player.Seek(TimeSpan.FromSeconds(30));
+```
 
 ## Split-stream (separate video + audio)
 
@@ -229,7 +261,7 @@ internal static class MyResolverInstaller
 ```csharp
 var player = gameObject.AddComponent<BasisMediaPlayer>();
 gameObject.AddComponent<BasisVideoMaterialOutput>().TargetRenderer = quadRenderer;
-player.LoadUrl("rtspt://stream.vrcdn.live/live/vrcdn"); // auto-plays
+player.LoadUrl("rtsp://stream.vrcdn.live/live/vrcdn"); // auto-plays
 ```
 
 Or drop the `Prefabs/MediaPlayerStreaming` prefab in a scene and set the URL on
@@ -269,14 +301,12 @@ shared load tight, the owner broadcasts a page URL up front so peers resolve it 
 rather than only after the owner is playing, and re-loading a URL (even the same one)
 restarts every client together.
 
-> **On-demand position sync is start-together, not catch-up.** Clients stay aligned by
-> beginning the same source at the same time; there is no continuous re-syncing of an
-> on-demand playhead. A client that joins late, or whose load lands later, starts from the
-> beginning and will not match an already-running playhead until the next shared (re)load.
-> This is a current limitation of the native decode backend, which exposes no absolute or
-> forward seek (only relative rewind), so a behind client cannot be advanced to catch up.
-> Live streams are unaffected — they converge to the live edge. Direct, seekable sources do
-> apply position/pause on load.
+> **On-demand clients drift-correct by seeking.** The owner broadcasts its playhead, and a
+> client whose position drifts more than `DriftSeekThresholdSeconds` (default 2 s) seeks to
+> catch up; set it to 0 to disable. Catch-up needs a **seekable** source — a client on a live
+> or unindexed stream can't be advanced, so those converge to the live edge instead. A late
+> joiner starts the shared source and is pulled into alignment on the next position broadcast;
+> an owner seek propagates to the room.
 
 ## Building the native plugin
 
@@ -314,4 +344,19 @@ After building, set the plugin's platform/CPU in the Unity import settings and t
 - **RTMP** — handshake/AMF is minimal (simple handshake, no Digest auth, no rtmps).
   RTSPT and MPEG-TS are the primary, more-complete paths.
 - **HEVC on Windows** needs the system HEVC decoder MFT (HEVC Video Extensions).
+- **VP9 on Windows** needs the Store "VP9 Video Extensions" **and** a GPU with
+  hardware VP9 (2016-era or newer). Without hardware decode the source errors
+  clearly rather than falling back to CPU decode. 8-bit SDR only — a 10-bit
+  (profile 2) file surfaces a decoder error, not tone-mapped HDR.
+- **AV1 on Windows** needs the Store "AV1 Video Extension" **and** a GPU with
+  hardware AV1 (RTX 30-series / RX 6000 / Arc or newer) — on older GPUs the
+  extension's internal software decoder is rejected, the probe answers 0 and
+  the resolver keeps serving VP9/avc1 instead. On Quest, AV1 is hardware on
+  Quest 3 (XR2 Gen 2); Quest 2 has no AV1 decoder and errors cleanly on a
+  direct `av01` URL. 8-bit Main profile SDR only, as with VP9. MP4/fMP4 and
+  WebM carriage only (no AV1-in-TS or RTSP/RTMP).
+- **WebM** — video-only VP9/AV1 (the YouTube >1080p shape); WebM audio tracks
+  are skipped and a WebM with no supported video track refuses cleanly. Seek
+  needs a Cues index and a range-capable host; cueless/streamed WebM plays
+  forward-only with no reported duration.
 - **WAV** — 16/24-bit integer PCM only (no float or 20-bit), 1–8 channels, 8–96 kHz.

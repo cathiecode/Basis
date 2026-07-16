@@ -1,5 +1,5 @@
 /*
- * basis_mp4.c — MP4 demuxer -> H.264/H.265 + AAC. Handles both MP4 shapes:
+ * basis_mp4.c — MP4 demuxer -> H.264/H.265/VP9/AV1 + AAC. Handles both MP4 shapes:
  *
  *   fragmented (fMP4/CMAF): init segment (moov) then moof+mdat fragments —
  *     live streams, DASH/adaptive legs, HLS fMP4 segments. Each moof's
@@ -12,7 +12,8 @@
  *     already streamed past — that shape gets a clear error instead.
  *
  * Both shapes parse moov for track config (codec, timescale, avcC/hvcC ->
- * Annex B extradata, esds -> AAC ASC) and emit tracks interleaved in decode
+ * Annex B extradata, av1C -> configOBUs, esds -> AAC ASC) and emit tracks
+ * interleaved in decode
  * order (fragments) or the muxer's file order (progressive).
  *
  * Common-case assumptions (sufficient for VRCDN-style fMP4 and web-optimised
@@ -25,6 +26,7 @@
 #include "basis_mp4.h"
 #include "basis_bitstream.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -81,6 +83,10 @@ typedef struct {
     int is_video;
     basis_codec_t codec;
     int timescale;
+    int width, height;        /* VisualSampleEntry fixed fields (codecs without
+                               * in-band parameter sets announce these) */
+    int vide_handler;         /* mdia/hdlr said 'vide' (for the unsupported-codec error) */
+    uint32_t stsd_fourcc;     /* first unrecognised stsd entry type, 0 if none */
     uint8_t extradata[2048];
     int extradata_len;
     int nal_len_size;
@@ -132,6 +138,9 @@ typedef struct {
     int ntracks;
     int movie_timescale;    /* from mvhd; units of elst segment durations */
     int64_t movie_duration; /* from mvhd, movie-timescale ticks; 0 when absent */
+
+    uint32_t unsupported_video_fourcc; /* stsd type of a dropped 'vide' track, 0 if none */
+    int      saw_unsupported_video;
 
     int64_t pos;          /* absolute stream offset consumed so far */
     int     mdat_skipped; /* media data streamed past before any index arrived */
@@ -269,6 +278,65 @@ static const mp4_sidx_ref_t* sidx_find_ref(const mp4_sidx_index_t* idx, int64_t 
 
 /* ---- moov parsing ------------------------------------------------------- */
 
+/* Reads an MP4 expandable descriptor length (7 bits/byte, high bit continues,
+ * max 4 bytes) at *j, advancing *j past it, into *out. Returns 1 on a length
+ * that terminates within 4 bytes and within el; 0 if the payload runs out
+ * (truncated) or a fourth byte still has its continuation bit set (malformed). */
+static int esds_desc_len(const uint8_t* p, int el, int* j, uint32_t* out) {
+    uint32_t v = 0;
+    for (int n = 0; n < 4; ++n) {
+        if (*j >= el) return 0;                       /* truncated */
+        int b = p[(*j)++];
+        v = (v << 7) | (uint32_t)(b & 0x7F);
+        if (!(b & 0x80)) { *out = v; return 1; }      /* terminating byte */
+    }
+    return 0;                                          /* unterminated after 4 bytes */
+}
+
+/* Reads nb bits (nb <= 24, MSB-first) from buf at *pos, advancing *pos. Returns
+ * the value, or -1 and sets *pos < 0 if the read runs past the buffer. */
+static int asc_read_bits(const uint8_t* buf, int len, int* pos, int nb) {
+    if (*pos < 0) return -1;
+    int v = 0;
+    for (int i = 0; i < nb; ++i) {
+        int b = *pos + i;
+        if (b >= len * 8) { *pos = -1; return -1; }
+        v = (v << 1) | ((buf[b >> 3] >> (7 - (b & 7))) & 1);
+    }
+    *pos += nb;
+    return v;
+}
+
+/* Extracts the AudioSpecificConfig from an esds payload (after the box's 4-byte
+ * version/flags) by walking the descriptor tree: ES_Descriptor (0x03) ->
+ * DecoderConfigDescriptor (0x04) -> DecoderSpecificInfo (0x05). Returns the ASC
+ * length (>=2) or 0. A flat scan for the 0x05 tag byte false-matches a 0x05
+ * inside the DecoderConfig's bufferSizeDB/bitrate fields (e.g. maxBitrate
+ * 0x000534xx), reads a bogus length and drops the config — so the tree must be
+ * walked by tag+length. */
+static int esds_extract_asc(const uint8_t* ep, int el, uint8_t* asc, int cap) {
+    int j = 0;
+    uint32_t len;
+    if (j >= el || ep[j++] != 0x03) return 0;                 /* ES_Descriptor */
+    if (!esds_desc_len(ep, el, &j, &len) || len > (uint32_t)(el - j)) return 0;
+    int es_end = j + (int)len;                                /* the ES descriptor bounds its children */
+    if (j + 3 > es_end) return 0;
+    int flags = ep[j + 2]; j += 3;                            /* ES_ID(2) + flags(1) */
+    if (flags & 0x80) j += 2;                                 /* streamDependenceFlag */
+    if (flags & 0x40) { if (j >= es_end) return 0; j += 1 + ep[j]; } /* URL_flag */
+    if (flags & 0x20) j += 2;                                 /* OCRstreamFlag */
+    if (j >= es_end || ep[j++] != 0x04) return 0;             /* DecoderConfigDescriptor */
+    if (!esds_desc_len(ep, es_end, &j, &len) || len < 13 || len > (uint32_t)(es_end - j)) return 0;
+    int dec_end = j + (int)len;                               /* DecoderConfig bounds the ASC */
+    j += 13;                                                  /* objType+streamType+bufSize(3)+maxBR(4)+avgBR(4) */
+    if (j >= dec_end || ep[j++] != 0x05) return 0;            /* DecoderSpecificInfo */
+    uint32_t dlen;
+    if (!esds_desc_len(ep, dec_end, &j, &dlen)) return 0;
+    if (dlen < 2 || (int)dlen > cap || (int)dlen > dec_end - j) return 0;
+    memcpy(asc, ep + j, dlen);
+    return (int)dlen;
+}
+
 static void parse_stsd(mp4_track_t* t, const uint8_t* p, int len) {
     /* stsd: version/flags(4) entry_count(4) then sample entries */
     if (len < 8) return;
@@ -283,6 +351,12 @@ static void parse_stsd(mp4_track_t* t, const uint8_t* p, int len) {
         if (etype == 0x61766331 /*avc1*/ || etype == 0x68766331 /*hvc1*/ || etype == 0x68657631 /*hev1*/) {
             t->is_video = 1;
             t->codec = (etype == 0x61766331) ? BASIS_CODEC_H264 : BASIS_CODEC_H265;
+            /* VisualSampleEntry fixed fields. H.264 refines these from the SPS at
+             * announce; H.265 has no SPS reader, so without this it announces 0x0. */
+            if (esize >= 36) {
+                t->width = rd16(ent + 32);
+                t->height = rd16(ent + 34);
+            }
             /* visual sample entry header is 78 bytes, then child boxes (avcC/hvcC) */
             int co = 8 + 78;
             while (co + 8 <= esize) {
@@ -294,6 +368,38 @@ static void parse_stsd(mp4_track_t* t, const uint8_t* p, int len) {
                     int got = basis_avcc_extradata_to_annexb(ent + co + 8, csz - 8,
                                 t->codec == BASIS_CODEC_H265, t->extradata, sizeof(t->extradata), &nls);
                     if (got > 0) { t->extradata_len = got; t->nal_len_size = nls; }
+                }
+                co += csz;
+            }
+        } else if (etype == 0x76703039 /*vp09*/) {
+            t->is_video = 1;
+            t->codec = BASIS_CODEC_VP9;
+            /* VisualSampleEntry fixed fields; vpcC carries nothing the decoder
+             * needs at init (VP9 has no out-of-band config), so no extradata. */
+            if (esize >= 36) {
+                t->width = rd16(ent + 32);
+                t->height = rd16(ent + 34);
+            }
+        } else if (etype == 0x61763031 /*av01*/) {
+            t->is_video = 1;
+            t->codec = BASIS_CODEC_AV1;
+            if (esize >= 36) {
+                t->width = rd16(ent + 32);
+                t->height = rd16(ent + 34);
+            }
+            /* av1C: 4 record-header bytes (marker/version, profile/level packing,
+             * flags/presentation-delay), then configOBUs. Store only the
+             * configOBUs — the header bytes are not valid OBU syntax and the
+             * decode backends want a feedable OBU blob. */
+            int co = 8 + 78;
+            while (co + 8 <= esize) {
+                int csz = (int)rd32(ent + co);
+                uint32_t ct = rd32(ent + co + 4);
+                if (csz < 8 || csz > esize - co) break;
+                if (ct == 0x61763143 /*av1C*/ && csz > 12 &&
+                    csz - 12 <= (int)sizeof(t->extradata)) {
+                    memcpy(t->extradata, ent + co + 12, (size_t)(csz - 12));
+                    t->extradata_len = csz - 12;
                 }
                 co += csz;
             }
@@ -309,33 +415,34 @@ static void parse_stsd(mp4_track_t* t, const uint8_t* p, int len) {
                 uint32_t ct = rd32(ent + co + 4);
                 if (csz < 8 || csz > esize - co) break;
                 if (ct == 0x65736473 /*esds*/ && csz >= 12) {
-                    /* find DecoderSpecificInfo (tag 0x05) inside esds */
+                    /* esds payload after the box's 4-byte version/flags */
                     const uint8_t* ep = ent + co + 12; int el = csz - 12;
-                    for (int i = 0; i + 2 < el; ++i) {
-                        if (ep[i] == 0x05) {
-                            /* descriptor length: 7 bits/byte, high bit continues. Accumulate
-                             * unsigned and cap at the legal four length bytes so a run of
-                             * continuation bytes can't overflow. Need >= 2 config bytes (the
-                             * AudioObjectType/sampleRateIndex fields read just below), and the
-                             * payload must fit both the buffer and the remaining descriptor. */
-                            int j = i + 1, nbytes = 0, b;
-                            uint32_t dlen = 0;
-                            do { b = ep[j++]; dlen = (dlen << 7) | (uint32_t)(b & 0x7F); }
-                            while ((b & 0x80) && j < el && ++nbytes < 4);
-                            if (dlen >= 2 && dlen <= sizeof(t->asc) && j <= el - (int)dlen) {
-                                memcpy(t->asc, ep + j, dlen); t->asc_len = (int)dlen;
-                                int aot = (t->asc[0] >> 3) & 0x1F;
-                                int sri = ((t->asc[0] & 7) << 1) | (t->asc[1] >> 7);
-                                t->obj = aot;
-                                if (!t->sr) t->sr = basis_aac_sample_rate_from_index(sri);
-                                if (!t->ch) t->ch = basis_aac_channels_from_config((t->asc[1] >> 3) & 0xF);
-                            }
-                            break;
+                    int n = esds_extract_asc(ep, el, t->asc, (int)sizeof(t->asc));
+                    if (n >= 2) {
+                        /* Walk the ASC bit fields so the escape forms parse
+                         * correctly: audioObjectType 31 carries 6 extra bits
+                         * (AOT = 32 + value), and samplingFrequencyIndex 15 a
+                         * 24-bit explicit rate, both of which shift the
+                         * channelConfiguration that follows. */
+                        int bit = 0;
+                        int aot = asc_read_bits(t->asc, n, &bit, 5);
+                        if (aot == 31) aot = 32 + asc_read_bits(t->asc, n, &bit, 6);
+                        int sri = asc_read_bits(t->asc, n, &bit, 4);
+                        int sr = sri == 15 ? asc_read_bits(t->asc, n, &bit, 24)
+                                           : basis_aac_sample_rate_from_index(sri);
+                        int chcfg = asc_read_bits(t->asc, n, &bit, 4);
+                        if (bit >= 0) {   /* every field fit inside the ASC */
+                            t->asc_len = n;   /* only publish a fully-parsed config */
+                            t->obj = aot;
+                            if (!t->sr && sr > 0) t->sr = sr;
+                            if (!t->ch) t->ch = basis_aac_channels_from_config(chcfg);
                         }
                     }
                 }
                 co += csz;
             }
+        } else if (!t->stsd_fourcc) {
+            t->stsd_fourcc = etype;   /* names the codec in the unsupported error */
         }
         off += esize;
     }
@@ -403,19 +510,34 @@ static void parse_chunk_offsets(mp4_ctab_t* c, const uint8_t* p, int len, int is
 
 static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len);
 
+/* Tracks are selected by role — the first supported video track and the first
+ * supported audio track, wherever they sit in the moov. A fixed first-two-traks
+ * cut would leave a valid file ordered audio,audio,video silently video-less. */
 static void parse_trak(mp4_t* m, const uint8_t* p, int len) {
-    if (m->ntracks >= 2) return;
-    mp4_track_t* t = &m->tracks[m->ntracks];
-    memset(t, 0, sizeof(*t));
-    t->nal_len_size = 4;
-    t->timescale = 90000;
-    parse_box_tree(m, t, p, len);
-    if (t->codec != BASIS_CODEC_NONE) m->ntracks++;
-    else {
-        free(t->ctab.sizes); free(t->ctab.stts); free(t->ctab.ctts);
-        free(t->ctab.stsc); free(t->ctab.chunk_offsets); free(t->ctab.stss);
-        memset(&t->ctab, 0, sizeof(t->ctab));
+    mp4_track_t t;
+    memset(&t, 0, sizeof(t));
+    t.nal_len_size = 4;
+    t.timescale = 90000;
+    parse_box_tree(m, &t, p, len);
+
+    int have_video = 0, have_audio = 0;
+    for (int i = 0; i < m->ntracks; ++i) {
+        if (m->tracks[i].is_video) have_video = 1;
+        else have_audio = 1;
     }
+    if (t.codec != BASIS_CODEC_NONE && (t.is_video ? !have_video : !have_audio)) {
+        m->tracks[m->ntracks++] = t;
+        return;
+    }
+
+    /* a dropped unsupported video-handler track is remembered so the post-moov
+     * check can fail loudly instead of playing silently without video */
+    if (t.vide_handler && t.codec == BASIS_CODEC_NONE && !m->saw_unsupported_video) {
+        m->saw_unsupported_video = 1;
+        m->unsupported_video_fourcc = t.stsd_fourcc;
+    }
+    free(t.ctab.sizes); free(t.ctab.stts); free(t.ctab.ctts);
+    free(t.ctab.stsc); free(t.ctab.chunk_offsets); free(t.ctab.stss);
 }
 
 static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len) {
@@ -445,6 +567,9 @@ static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len) 
                 }
                 break;
             case 0x656c7374: if (t) parse_elst(t, body, blen); break;    /* elst */
+            case 0x68646c72: /* hdlr: version/flags(4) pre_defined(4) handler_type(4) */
+                if (t && blen >= 12 && rd32(body + 8) == 0x76696465 /*vide*/) t->vide_handler = 1;
+                break;
             case 0x6d646864: /* mdhd: version(1) flags(3) ... timescale */
                 if (t && blen >= 4) { int ver = body[0]; int tsoff = ver == 1 ? 4 + 8 + 8 : 4 + 4 + 4; if (tsoff + 4 <= blen) t->timescale = (int)rd32(body + tsoff); }
                 break;
@@ -480,7 +605,7 @@ static void announce_tracks(mp4_t* m) {
         mp4_track_t* t = &m->tracks[i];
         if (t->announced) continue;
         if (t->is_video) {
-            int w = 0, h = 0;
+            int w = t->width, h = t->height;
             if (t->codec == BASIS_CODEC_H264 && t->extradata_len) {
                 int pos=0,no,nl;
                 while ((pos=basis_annexb_next(t->extradata,t->extradata_len,pos,&no,&nl))>=0)
@@ -870,17 +995,31 @@ static int consume_progressive(mp4_t* m, int64_t mdat_end) {
                 key = c->stss_i < c->stss_count && c->stss[c->stss_i] == c->next + 1;
                 if (key) c->stss_i++;
             }
-            int nls = rt->nal_len_size ? rt->nal_len_size : 4;
-            int outcap = basis_avcc_annexb_cap((int)ssize, nls);
-            s = (mp4_pend_t*)malloc(sizeof(*s) + (size_t)outcap);
-            if (s) {
-                int n = basis_avcc_to_annexb(buf, (int)ssize, nls, s->data, outcap);
-                if (n > 0) {
-                    if (c->stss == NULL)
-                        key = rt->codec == BASIS_CODEC_H265 ? basis_h265_is_keyframe(s->data, n) : basis_h264_is_keyframe(s->data, n);
-                    s->size = n;
-                    s->key = key;
-                } else { free(s); s = NULL; }
+            if (rt->codec == BASIS_CODEC_VP9 || rt->codec == BASIS_CODEC_AV1) {
+                /* raw sample exactly as stored (VP9 superframes and AV1 temporal
+                 * units stay whole) */
+                s = (mp4_pend_t*)malloc(sizeof(*s) + ssize);
+                if (s) {
+                    memcpy(s->data, buf, ssize);
+                    s->size = (int)ssize;
+                    if (c->stss) s->key = key;
+                    else s->key = rt->codec == BASIS_CODEC_AV1
+                        ? basis_av1_is_keyframe(buf, (int)ssize)
+                        : basis_vp9_is_keyframe(buf, (int)ssize);
+                }
+            } else {
+                int nls = rt->nal_len_size ? rt->nal_len_size : 4;
+                int outcap = basis_avcc_annexb_cap((int)ssize, nls);
+                s = (mp4_pend_t*)malloc(sizeof(*s) + (size_t)outcap);
+                if (s) {
+                    int n = basis_avcc_to_annexb(buf, (int)ssize, nls, s->data, outcap);
+                    if (n > 0) {
+                        if (c->stss == NULL)
+                            key = rt->codec == BASIS_CODEC_H265 ? basis_h265_is_keyframe(s->data, n) : basis_h264_is_keyframe(s->data, n);
+                        s->size = n;
+                        s->key = key;
+                    } else { free(s); s = NULL; }
+                }
             }
         } else {
             s = (mp4_pend_t*)malloc(sizeof(*s) + ssize);
@@ -1054,7 +1193,14 @@ static void consume_mdat(mp4_t* m, const uint8_t* data, int len) {
         }
         int64_t pts_us = ticks_to_us(add_i64_sat(dts[k], f->ctos[i]), t->timescale);
 
-        if (t->is_video) {
+        if (t->is_video && (t->codec == BASIS_CODEC_VP9 || t->codec == BASIS_CODEC_AV1)) {
+            /* raw sample exactly as stored (VP9 superframes and AV1 temporal
+             * units stay whole) */
+            int key = t->codec == BASIS_CODEC_AV1
+                ? basis_av1_is_keyframe(data + pos[k], (int)ssize)
+                : basis_vp9_is_keyframe(data + pos[k], (int)ssize);
+            m->sink->on_video_au(m->sink->user, data + pos[k], (int)ssize, pts_us, best_us, key);
+        } else if (t->is_video) {
             int nls = t->nal_len_size ? t->nal_len_size : 4;
             int cap = basis_avcc_annexb_cap((int)ssize, nls);
             uint8_t* out = (uint8_t*)malloc((size_t)cap);
@@ -1143,6 +1289,26 @@ int basis_mp4_run(basis_media_sink_t* sink, basis_read_fn read, void* ctx,
                             "MP4 uses a compact (stz2) sample-size table, which isn't supported; remux (ffmpeg -c copy) to rewrite the sample tables");
                         break;
                     }
+                /* A video track whose codec we can't decode, with no supported
+                 * video track beside it: error naming the codec rather than
+                 * playing the audio track alone under a black screen. */
+                if (m.saw_unsupported_video) {
+                    int have_video = 0;
+                    for (int i = 0; i < m.ntracks; ++i)
+                        if (m.tracks[i].is_video) have_video = 1;
+                    if (!have_video) {
+                        char msg[128];
+                        char cc[5] = "????";
+                        for (int i = 0; i < 4; ++i) {
+                            char ch = (char)(m.unsupported_video_fourcc >> (24 - 8 * i));
+                            if (ch >= 0x20 && ch < 0x7F) cc[i] = ch;
+                        }
+                        snprintf(msg, sizeof(msg),
+                                 "video codec '%s' is not supported (supported: H.264, H.265, VP9, AV1)",
+                                 m.unsupported_video_fourcc ? cc : "unknown");
+                        sink->on_error(sink->user, msg);
+                    }
+                }
                 if (m.mdat_skipped && classic_ready(&m)) {
                     /* Trailing-moov progressive: the media streamed past before its
                      * index arrived. On a range-capable source (reseek wired) the

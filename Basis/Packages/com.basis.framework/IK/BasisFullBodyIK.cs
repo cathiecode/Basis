@@ -194,6 +194,10 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] public Vector3 PositionHead;
         [SyncSceneToStream, SerializeField] public Quaternion RotationHead;
         [SyncSceneToStream, SerializeField] public Vector3 ChestPosition;
+        // The chest bone's ACTUAL position, WITHOUT the chest-as-head-hint bias that ChestPosition carries
+        // (that bias pushes ~8cm 'up in chest frame' to steer the head solve -- see BasisAvatarIKStageCalibration).
+        // The chest IK target must pin to the real chest, not the hinted one, or it hauls the torso up = a lean.
+        [SyncSceneToStream, SerializeField] public Vector3 ChestPositionRaw;
         [SyncSceneToStream, SerializeField] public Quaternion ChestRotation;
         [SyncSceneToStream, SerializeField] public Quaternion m_CalibratedRotationHead;
 
@@ -203,7 +207,6 @@ namespace UnityEngine.Animations.Rigging
 
         [SyncSceneToStream, SerializeField] public Quaternion LeftShoulderRotation;
         [SyncSceneToStream, SerializeField] public Quaternion RightShoulderRotation;
-        [SyncSceneToStream, SerializeField] public Quaternion m_CalibratedRotationNeck;
 
         // Hips
         [SyncSceneToStream, SerializeField] public Vector3 PositionHips;
@@ -214,20 +217,16 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] public Vector3 LeftFootPosition;
         [SyncSceneToStream, SerializeField] public Quaternion LeftFootRotation;
         [SyncSceneToStream, SerializeField] public Vector3 PositionLeftLowerLeg;
-        [SyncSceneToStream, SerializeField] public Quaternion RotationLeftLowerLeg;
         [SyncSceneToStream, SerializeField] public Quaternion M_CalibrationLeftFootRotation;
 
         // Right Leg
         [SyncSceneToStream, SerializeField] public Vector3 RightFootPosition;
         [SyncSceneToStream, SerializeField] public Quaternion RightFootRotation;
         [SyncSceneToStream, SerializeField] public Vector3 PositionRightLowerLeg;
-        [SyncSceneToStream, SerializeField] public Quaternion RotationRightLowerLeg;
         [SyncSceneToStream, SerializeField] public Quaternion M_CalibrationRightFootRotation;
 
         // Toes
-        [SyncSceneToStream, SerializeField] public Vector3 OutGoingLeftToePosition;
         [SyncSceneToStream, SerializeField] public Quaternion OutGoingLeftToeRotation;
-        [SyncSceneToStream, SerializeField] public Vector3 OutGoingRightToePosition;
         [SyncSceneToStream, SerializeField] public Quaternion OutGoingRightToeRotation;
 
         // Left Hand
@@ -245,14 +244,12 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] public Quaternion m_CalibratedRotationRightHand;
 
         // Misc
-        [SyncSceneToStream, SerializeField] public Vector3 SpineBendNormal;
         [SyncSceneToStream, SerializeField] public Vector3 PlayerUp;
 
         [SyncSceneToStream, SerializeField] public Vector3 KneeBendPrefLeft;
         [SyncSceneToStream, SerializeField] public Vector3 KneeBendPrefRight;
 
         [SyncSceneToStream, SerializeField] public float m_HandSkin;
-        [SyncSceneToStream, SerializeField] public bool m_UseHandCapsule;
         [SyncSceneToStream, SerializeField, Min(0f)] public float m_HandRadius;
         [SyncSceneToStream, SerializeField, Min(0f)] public float m_ChestRadius;
         [SyncSceneToStream, SerializeField, Min(0f)] public float m_CollisionSkin;
@@ -282,8 +279,10 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] bool m_LeftLowerLegHintIsTracker;
         [SyncSceneToStream, SerializeField] bool m_RightLowerLegHintIsTracker;
 
-        [SyncSceneToStream, SerializeField] bool m_EnabledLeftHand;
-        [SyncSceneToStream, SerializeField] bool m_EnabledRightHand;
+        // Hand IK weight (0..1), not a toggle: the webcam fades the hands in and out as tracking comes and
+        // goes, and a hard on/off pops the arm. Mirrors the legs, which have been fractional all along.
+        [SyncSceneToStream, SerializeField] float m_EnabledLeftHand;
+        [SyncSceneToStream, SerializeField] float m_EnabledRightHand;
 
         [SyncSceneToStream, SerializeField] bool m_HintRightHandEnabled;
         [SyncSceneToStream, SerializeField] bool m_HintLeftHandEnabled;
@@ -297,13 +296,11 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] public float m_MaxBendDeg;
         [SyncSceneToStream, SerializeField] public float m_MinFactor;
         [SyncSceneToStream, SerializeField] public float m_MaxFactor;
-        [SyncSceneToStream, SerializeField] public float m_StruggleStart;
-        [SyncSceneToStream, SerializeField] public float m_StruggleEnd;
         [SyncSceneToStream, SerializeField] public float m_MaxChestDeltaDeg;
-        [SyncSceneToStream, SerializeField] public float m_MaxHipDeltaDeg;
 
         // Shoulder pre-solve: raises/protracts shoulders based on hand target
         [SyncSceneToStream, SerializeField] bool m_ShoulderSolveEnabled;
+        [SyncSceneToStream, SerializeField] bool m_ShoulderShrugEnabled;
         [SyncSceneToStream, SerializeField, Range(0f, 1f)] float m_ShoulderElevationFactor;
         [SyncSceneToStream, SerializeField, Range(0f, 1f)] float m_ShoulderProtractionFactor;
 
@@ -324,20 +321,6 @@ namespace UnityEngine.Animations.Rigging
         // is consumed by DistributeSpineBend, so quick head turns leave the body momentarily behind.
         [SyncSceneToStream, SerializeField, Min(0f)] float m_ChestSpringHz;
         [SyncSceneToStream, SerializeField, Min(0f)] float m_ChestSpringDamping;
-        // Hip-frame follow spring: critically-damped angular spring (rotational analogue of the chest spring)
-        // on the hips rotation that feeds the no-elbow-tracker bend frame (ArmBendFrame), so hip jitter/sway
-        // doesn't wobble the DERIVED elbow pole -- "more spring around the hip" for users without elbow
-        // trackers. Lower Hz = more decoupling/lag; damping 1 = critically damped (no overshoot); 0 disables.
-        [SyncSceneToStream, SerializeField, Min(0f)] float m_HipFrameSpringHz;
-        [SyncSceneToStream, SerializeField, Min(0f)] float m_HipFrameSpringDamping;
-        // Chicken-wing elbow flare (no elbow tracker): turning the controllers inward pushes the derived elbow
-        // OUT toward the half-T-pose mark and HARD-CLAMPS it there, so it never crosses the halfway line to
-        // straight-out-to-the-side nor wings up. MaxDeg is that cap (the swivel off straight-down); InwardGain
-        // is the signed roll->flare sensitivity (negative flips the roll direction, 0 disables); FullRollDeg is
-        // the controller roll that counts as a full chicken-wing. See BasisElbowFlareCore.
-        [SyncSceneToStream, SerializeField, Min(0f)] float m_ElbowFlareMaxDeg;
-        [SyncSceneToStream, SerializeField, Range(-3f, 3f)] float m_ElbowFlareInwardGain;
-        [SyncSceneToStream, SerializeField, Min(1f)] float m_ElbowFlareFullRollDeg;
         // Asymmetric flexion clamps: humans flex forward much further than they extend backward.
         // Applied to the per-axis spine + upperChest contributions after distribution.
         [SyncSceneToStream, SerializeField, Min(0f)] float m_SpineMaxForwardDeg;
@@ -346,6 +329,14 @@ namespace UnityEngine.Animations.Rigging
         // Squish coupling: scales per-axis bend weights by the head-to-hips compression ratio so
         // the spine folds more when crouched and straightens when reaching up. 0 disables.
         [SyncSceneToStream, SerializeField, Range(0f, 2f)] float m_SpineSquishBoost;
+        // How much the chest FOLLOWS the gaze (no chest tracker). 0 = rigid (the look-down-stability fix,
+        // chest never folds on a pure look-down); 1 = full follow (the old phantom-lean). A small value is
+        // 'a little real spine': the chest folds a touch when you look down, which reads better on desktop.
+        [SyncSceneToStream, SerializeField, Range(0f, 1f)] float m_SpineGazeFollow;
+        // How much EXTRA forward neck curve to add on a look-down (no chest tracker). Same idea as the
+        // chest gaze-follow, but the neck's lordosis runs AFTER the head-placing CCD, so this is a
+        // cosmetic post-solve curve -- it nudges the head BONE a touch (the camera rides the HMD target).
+        [SyncSceneToStream, SerializeField, Range(0f, 1f)] float m_NeckGazeFollow;
         [SyncSceneToStream, SerializeField, Range(0f, 2f)] float m_MoveBodyBackWhenCrouching;
         // Elbow/knee swing smoothing: max swing speed (deg/s) around the root→tip axis. Lower =
         // smoother (more lag) so a torso-collision change eases in; 0 disables. See ApplySwingContinuity.
@@ -367,6 +358,11 @@ namespace UnityEngine.Animations.Rigging
         [SyncSceneToStream, SerializeField] bool m_AnatShoulderSlide;
         [SyncSceneToStream, SerializeField] bool m_AnatCervicalLordosis;
         [SyncSceneToStream, SerializeField] bool m_AnatPelvicTwistRouting;
+        // The anatomical range-of-motion envelope on every solved vertebra. Default ON: what it replaces
+        // is not a safe fallback, it is a measured error (BasisSpineAnatomy).
+        [SyncSceneToStream, SerializeField] bool m_SpineAnatomicalRom;
+        // The chest as a secondary IK target (SolveChestTarget). Default ON.
+        [SyncSceneToStream, SerializeField] bool m_ChestIKTarget;
         // Low-pass the knee swivel (leg roll about the hip->foot axis) on the no-foot-tracker path so a
         // near-straight standing leg doesn't twist with hips-yaw jitter. Off => identical to before.
         [SyncSceneToStream, SerializeField] bool m_LegSwivelSmoothing;
@@ -438,8 +434,8 @@ namespace UnityEngine.Animations.Rigging
         public string TargetPositionPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionHead));
         public string TargetRotationPropertyHead => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RotationHead));
         public string PropertyChestPosition => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(ChestPosition));
+        public string PropertyChestPositionRaw => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(ChestPositionRaw));
         public string PropertyChestRotation => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(ChestRotation));
-        public string BendNormalHeadProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(SpineBendNormal));
         public string PlayerUpProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PlayerUp));
         public string KneeBendPrefLeftProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(KneeBendPrefLeft));
         public string KneeBendPrefRightProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(KneeBendPrefRight));
@@ -448,13 +444,11 @@ namespace UnityEngine.Animations.Rigging
         public string TargetPositionPropertyLeftLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(LeftFootPosition));
         public string TargetRotationPropertyLeftLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(LeftFootRotation));
         public string HintPositionPropertyLeftLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionLeftLowerLeg));
-        public string HintRotationPropertyLeftLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RotationLeftLowerLeg));
         public string EnabledPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RightLowerLegEnabled));
         public string HintWeightBoolPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HintRightLowerLegEnabled));
         public string TargetPositionPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RightFootPosition));
         public string TargetRotationPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RightFootRotation));
         public string HintPositionPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionRightLowerLeg));
-        public string HintRotationPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(RotationRightLowerLeg));
         public string HintIsTrackerBoolPropertyLeftLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_LeftLowerLegHintIsTracker));
         public string HintIsTrackerBoolPropertyRightLowerLeg => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RightLowerLegHintIsTracker));
         public string TargetPositionPropertyHips => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionHips));
@@ -472,9 +466,7 @@ namespace UnityEngine.Animations.Rigging
         public string OffsetRotationPropertyRightHand => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_CalibratedRotationRightHand));
         public string LeftToeEnabledProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_LeftToeEnabled));
         public string RightToeEnabledProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_RightToeEnabled));
-        public string LeftDrivenTargetPosProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(OutGoingLeftToePosition));
         public string LeftDrivenTargetRotProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(OutGoingLeftToeRotation));
-        public string RightDrivenTargetPosProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(OutGoingRightToePosition));
         public string RightDrivenTargetRotProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(OutGoingRightToeRotation));
         public string HintWeightBoolPropertyLeftHand => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HintLeftHandEnabled));
         public string TargetPositionPropertyLeftHand => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(PositionLeftHand));
@@ -493,7 +485,6 @@ namespace UnityEngine.Animations.Rigging
         public string CollisionsEnabledBoolProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_CollisionsEnabled));
         public string HandRadiusFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HandRadius));
         public string HandSkinFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HandSkin));
-        public string UseHandCapsuleBoolProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_UseHandCapsule));
         public string ProtectElbowBoolProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ProtectElbow));
         public string CollideTrackedElbowBoolProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_CollideTrackedElbow));
         public string EnabledLeftShoulderProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_enabledLeftShoulder));
@@ -504,9 +495,6 @@ namespace UnityEngine.Animations.Rigging
         public string MaxBendDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MaxBendDeg));
         public string MinFactorFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MinFactor));
         public string MaxFactorFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MaxFactor));
-        public string StruggleStartFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_StruggleStart));
-        public string StruggleEndFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_StruggleEnd));
-        public string MaxHipDeltaPropertyDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MaxHipDeltaDeg));
         public string MaxChestDeltaPropertyDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MaxChestDeltaDeg));
         public bool WeightChest { get => m_HintHeadEnabled; set => m_HintHeadEnabled = value; }
         public bool EnabledSpineIK { get => m_SpineIKEnabled; set => m_SpineIKEnabled = value; }
@@ -522,14 +510,13 @@ namespace UnityEngine.Animations.Rigging
         public bool LeftToeEnabled { get => m_LeftToeEnabled; set => m_LeftToeEnabled = value; }
         public bool RightToeEnabled { get => m_RightToeEnabled; set => m_RightToeEnabled = value; }
         public bool HintWeightLeftHand { get => m_HintLeftHandEnabled; set => m_HintLeftHandEnabled = value; }
-        public bool EnabledLeftHand { get => m_EnabledLeftHand; set => m_EnabledLeftHand = value; }
-        public bool EnabledRightHand { get => m_EnabledRightHand; set => m_EnabledRightHand = value; }
+        public float EnabledLeftHand { get => m_EnabledLeftHand; set => m_EnabledLeftHand = value; }
+        public float EnabledRightHand { get => m_EnabledRightHand; set => m_EnabledRightHand = value; }
         public bool ProtectElbow { get => m_ProtectElbow; set => m_ProtectElbow = value; }
         public bool CollideTrackedElbow { get => m_CollideTrackedElbow; set => m_CollideTrackedElbow = value; }
         public bool HintWeightRightHand { get => m_HintRightHandEnabled; set => m_HintRightHandEnabled = value; }
         public float HandRadius { get => m_HandRadius; set => m_HandRadius = value; }
         public float HandSkin { get => m_HandSkin; set => m_HandSkin = value; }
-        public bool UseHandCapsule { get => m_UseHandCapsule; set => m_UseHandCapsule = value; }
         public float ChestRadius { get => m_ChestRadius; set => m_ChestRadius = value; }
         public float CollisionSkin { get => m_CollisionSkin; set => m_CollisionSkin = value; }
         public bool CollisionsEnabled { get => m_CollisionsEnabled; set => m_CollisionsEnabled = value; }
@@ -538,14 +525,13 @@ namespace UnityEngine.Animations.Rigging
         public float MaxBendDeg { get => m_MaxBendDeg; set => m_MaxBendDeg = value; }
         public float MinFactor { get => m_MinFactor; set => m_MinFactor = value; }
         public float MaxFactor { get => m_MaxFactor; set => m_MaxFactor = value; }
-        public float StruggleStart { get => m_StruggleStart; set => m_StruggleStart = value; }
-        public float StruggleEnd { get => m_StruggleEnd; set => m_StruggleEnd = value; }
         public float MaxChestDelta { get => m_MaxChestDeltaDeg; set => m_MaxChestDeltaDeg = value; }
-        public float MaxHipDelta { get => m_MaxHipDeltaDeg; set => m_MaxHipDeltaDeg = value; }
         public bool ShoulderSolveEnabled { get => m_ShoulderSolveEnabled; set => m_ShoulderSolveEnabled = value; }
+        public bool ShoulderShrugEnabled { get => m_ShoulderShrugEnabled; set => m_ShoulderShrugEnabled = value; }
         public float ShoulderElevationFactor { get => m_ShoulderElevationFactor; set => m_ShoulderElevationFactor = value; }
         public float ShoulderProtractionFactor { get => m_ShoulderProtractionFactor; set => m_ShoulderProtractionFactor = value; }
         public string ShoulderSolveEnabledProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ShoulderSolveEnabled));
+        public string ShoulderShrugEnabledProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ShoulderShrugEnabled));
         public string ShoulderElevationFactorProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ShoulderElevationFactor));
         public string ShoulderProtractionFactorProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ShoulderProtractionFactor));
         public float SpineBendPitch { get => m_SpineBendPitch; set => m_SpineBendPitch = value; }
@@ -558,15 +544,12 @@ namespace UnityEngine.Animations.Rigging
         public float HipHingeMaxAddDeg { get => m_HipHingeMaxAddDeg; set => m_HipHingeMaxAddDeg = value; }
         public float ChestSpringHz { get => m_ChestSpringHz; set => m_ChestSpringHz = value; }
         public float ChestSpringDamping { get => m_ChestSpringDamping; set => m_ChestSpringDamping = value; }
-        public float HipFrameSpringHz { get => m_HipFrameSpringHz; set => m_HipFrameSpringHz = value; }
-        public float HipFrameSpringDamping { get => m_HipFrameSpringDamping; set => m_HipFrameSpringDamping = value; }
-        public float ElbowFlareMaxDeg { get => m_ElbowFlareMaxDeg; set => m_ElbowFlareMaxDeg = value; }
-        public float ElbowFlareInwardGain { get => m_ElbowFlareInwardGain; set => m_ElbowFlareInwardGain = value; }
-        public float ElbowFlareFullRollDeg { get => m_ElbowFlareFullRollDeg; set => m_ElbowFlareFullRollDeg = value; }
         public float SpineMaxForwardDeg { get => m_SpineMaxForwardDeg; set => m_SpineMaxForwardDeg = value; }
         public float SpineMaxBackwardDeg { get => m_SpineMaxBackwardDeg; set => m_SpineMaxBackwardDeg = value; }
         public float SpineMaxLateralDeg { get => m_SpineMaxLateralDeg; set => m_SpineMaxLateralDeg = value; }
         public float SpineSquishBoost { get => m_SpineSquishBoost; set => m_SpineSquishBoost = value; }
+        public float SpineGazeFollow { get => m_SpineGazeFollow; set => m_SpineGazeFollow = value; }
+        public float NeckGazeFollow { get => m_NeckGazeFollow; set => m_NeckGazeFollow = value; }
         public float MoveBodyBackWhenCrouching { get => m_MoveBodyBackWhenCrouching; set => m_MoveBodyBackWhenCrouching = value; }
         public float SwingSmoothRateDeg { get => m_SwingSmoothRateDeg; set => m_SwingSmoothRateDeg = value; }
         public float ChestArmSwingFactor { get => m_ChestArmSwingFactor; set => m_ChestArmSwingFactor = value; }
@@ -577,6 +560,8 @@ namespace UnityEngine.Animations.Rigging
         public bool AnatShoulderSlide { get => m_AnatShoulderSlide; set => m_AnatShoulderSlide = value; }
         public bool AnatCervicalLordosis { get => m_AnatCervicalLordosis; set => m_AnatCervicalLordosis = value; }
         public bool AnatPelvicTwistRouting { get => m_AnatPelvicTwistRouting; set => m_AnatPelvicTwistRouting = value; }
+        public bool SpineAnatomicalRom { get => m_SpineAnatomicalRom; set => m_SpineAnatomicalRom = value; }
+        public bool ChestIKTarget { get => m_ChestIKTarget; set => m_ChestIKTarget = value; }
         public bool LegSwivelSmoothing { get => m_LegSwivelSmoothing; set => m_LegSwivelSmoothing = value; }
         public string SpineBendPitchFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineBendPitch));
         public string SpineBendYawFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineBendYaw));
@@ -588,15 +573,12 @@ namespace UnityEngine.Animations.Rigging
         public string HipHingeMaxAddDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HipHingeMaxAddDeg));
         public string ChestSpringHzFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ChestSpringHz));
         public string ChestSpringDampingFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ChestSpringDamping));
-        public string HipFrameSpringHzFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HipFrameSpringHz));
-        public string HipFrameSpringDampingFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_HipFrameSpringDamping));
-        public string ElbowFlareMaxDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ElbowFlareMaxDeg));
-        public string ElbowFlareInwardGainFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ElbowFlareInwardGain));
-        public string ElbowFlareFullRollDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ElbowFlareFullRollDeg));
         public string SpineMaxForwardDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineMaxForwardDeg));
         public string SpineMaxBackwardDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineMaxBackwardDeg));
         public string SpineMaxLateralDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineMaxLateralDeg));
         public string SpineSquishBoostFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineSquishBoost));
+        public string SpineGazeFollowFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineGazeFollow));
+        public string NeckGazeFollowFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_NeckGazeFollow));
         public string MoveBodyBackWhenCrouchingFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_MoveBodyBackWhenCrouching));
         public string SwingSmoothRateDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SwingSmoothRateDeg));
         public string ChestArmSwingFactorFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ChestArmSwingFactor));
@@ -607,6 +589,8 @@ namespace UnityEngine.Animations.Rigging
         public string AnatShoulderSlideProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_AnatShoulderSlide));
         public string AnatCervicalLordosisProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_AnatCervicalLordosis));
         public string AnatPelvicTwistRoutingProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_AnatPelvicTwistRouting));
+        public string SpineAnatomicalRomProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_SpineAnatomicalRom));
+        public string ChestIKTargetProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_ChestIKTarget));
         public string LegSwivelSmoothingProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_LegSwivelSmoothing));
         public float LordosisPitchGainDeg { get => m_LordosisPitchGainDeg; set => m_LordosisPitchGainDeg = value; }
         public string LordosisPitchGainDegFloatProperty => ConstraintsUtils.ConstructConstraintDataPropertyName(nameof(m_LordosisPitchGainDeg));
@@ -683,14 +667,13 @@ namespace UnityEngine.Animations.Rigging
             m_HasHipsTracker = false;
             m_LeftLowerLegEnabled = m_RightLowerLegEnabled = 1f;
             m_LeftLowerLegHintIsTracker = m_RightLowerLegHintIsTracker = false;
-            m_IKLockMode = (float)BasisIKLockMode.LockHips;
+            m_IKLockMode = (float)BasisIKLockMode.LockHead;
 
             m_HintLeftHandEnabled = m_HintRightHandEnabled = true;
-            m_EnabledLeftHand = m_EnabledRightHand = true;
+            m_EnabledLeftHand = m_EnabledRightHand = 1f;
             m_CalibratedRotationHead = M_CalibrationLeftFootRotation = M_CalibrationRightFootRotation = Quaternion.identity;
             m_CalibratedRotationLeftHand = m_CalibratedRotationRightHand = Quaternion.identity;
 
-            SpineBendNormal = Vector3.up;
             PlayerUp = Vector3.up;
 
             PositionHips = Vector3.zero;
@@ -701,7 +684,6 @@ namespace UnityEngine.Animations.Rigging
             m_LeftToe = null;
             m_RightToe = null;
 
-            OutGoingLeftToePosition = OutGoingRightToePosition = Vector3.zero;
             OutGoingLeftToeRotation = OutGoingRightToeRotation = Quaternion.identity;
             m_LeftToeEnabled = false;
             m_RightToeEnabled = false;
@@ -713,11 +695,11 @@ namespace UnityEngine.Animations.Rigging
             m_CollisionsEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKCollisionsEnabled.RawValue;
             m_HandRadius = Basis.BasisUI.BasisSettingsDefaults.FBIKHandRadius.RawValue;
             m_HandSkin = Basis.BasisUI.BasisSettingsDefaults.FBIKHandSkin.RawValue;
-            m_UseHandCapsule = Basis.BasisUI.BasisSettingsDefaults.FBIKUseHandCapsule.RawValue;
             m_ProtectElbow = Basis.BasisUI.BasisSettingsDefaults.FBIKProtectElbow.RawValue;
             m_CollideTrackedElbow = Basis.BasisUI.BasisSettingsDefaults.FBIKCollideTrackedElbow.RawValue;
 
             m_ShoulderSolveEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKShoulderSolveEnabled.RawValue;
+            m_ShoulderShrugEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKShoulderShrug.RawValue;
             m_ShoulderElevationFactor = Basis.BasisUI.BasisSettingsDefaults.FBIKShoulderElevation.RawValue;
             m_ShoulderProtractionFactor = Basis.BasisUI.BasisSettingsDefaults.FBIKShoulderProtraction.RawValue;
 
@@ -727,19 +709,16 @@ namespace UnityEngine.Animations.Rigging
             m_UpperChestBendPitch = 0.25f;
             m_UpperChestBendYaw = 0.30f;
             m_UpperChestBendRoll = 0.20f;
-            m_HipHingeStartDeg = 30f;
-            m_HipHingeMaxAddDeg = 15f;
+            m_HipHingeStartDeg = 40f;
+            m_HipHingeMaxAddDeg = 52f;
             m_ChestSpringHz = 12f;
             m_ChestSpringDamping = 1f;
-            m_HipFrameSpringHz = 8f;
-            m_HipFrameSpringDamping = 1f;
-            m_ElbowFlareMaxDeg = 45f;
-            m_ElbowFlareInwardGain = 1f;
-            m_ElbowFlareFullRollDeg = 70f;
             m_SpineMaxForwardDeg = 60f;
             m_SpineMaxBackwardDeg = 25f;
             m_SpineMaxLateralDeg = 25f;
             m_SpineSquishBoost = 0.5f;
+            m_SpineGazeFollow = 0.25f;
+            m_NeckGazeFollow = 0.3f;
             m_MoveBodyBackWhenCrouching = 1f;
             m_SwingSmoothRateDeg = 720f;
             m_ChestArmSwingFactor = 0.3f;
@@ -751,6 +730,8 @@ namespace UnityEngine.Animations.Rigging
             m_AnatShoulderSlide = false;
             m_AnatCervicalLordosis = false;
             m_AnatPelvicTwistRouting = false;
+            m_SpineAnatomicalRom = false;
+            m_ChestIKTarget = false;
             m_LegSwivelSmoothing = true;
             m_LordosisPitchGainDeg = 8f;
             m_LordosisBaseDeg = 5f;
@@ -958,6 +939,7 @@ namespace UnityEngine.Animations.Rigging
             m_Data.ProtectElbow = m_Data.ProtectElbow;
             m_Data.CollideTrackedElbow = m_Data.CollideTrackedElbow;
             m_Data.ShoulderSolveEnabled = m_Data.ShoulderSolveEnabled;
+            m_Data.ShoulderShrugEnabled = m_Data.ShoulderShrugEnabled;
             m_Data.IKLockMode = m_Data.IKLockMode;
         }
     }
@@ -968,13 +950,6 @@ namespace UnityEngine.Animations.Rigging
         const float k_Epsilon = 1e-5f; // or 0.00001f
         const float k_MinMag = 1e-6f;// or 0.000001f
         const float k_SqrEpsilon = 1e-8f;// or 0.00000001f
-        // How aggressively the post-solve collision push slerps the elbow toward the
-        // natural-side angle on its swing circle. 1.0 = snap fully each frame
-        // (visually abrupt when penetration appears); lower values soften the
-        // transition at the cost of partial penetration. Penetration depth itself
-        // still gates whether a swing happens at all, so 0.5 doesn't mean
-        // "always 50% inside" — only "ease in by 50% of the remaining angle".
-        const float k_ElbowCollisionBlend = 0.5f;
         // Scapulohumeral coupling: the shoulder girdle follows this share of the humeral swing
         // (real scapula contributes ~1/3 of total elevation); the per-axis Elevation/Protraction
         // settings trim it. Clamp the applied girdle rotation below the GateShoulder ceiling.
@@ -996,11 +971,10 @@ namespace UnityEngine.Animations.Rigging
   HandleLeftUpperArmTwist, HandleLeftLowerArmTwist,
   HandleRightUpperArmTwist, HandleRightLowerArmTwist;
 
-        public Vector3Property targetPositionHead, TargetChestPosition, bendNormalHead, playerUp, KneeBendPrefLeft, KneeBendPrefRight,
+        public Vector3Property targetPositionHead, TargetChestPosition, TargetChestPositionRaw, playerUp, KneeBendPrefLeft, KneeBendPrefRight,
 targetPositionLeftLowerLeg, hintPositionLeftLowerLeg,
 targetPositionRightLowerLeg, hintPositionRightLowerLeg,
 targetPositionHips,
-leftDrivenTargetPos, rightDrivenTargetPos,
 targetPositionLeftHand, hintPositionLeftHand,
 targetPositionRightHand, hintPositionRightHand,
 p0, p1, p2, p3, p4, p5, p6, p7, p8, p9,
@@ -1008,8 +982,8 @@ p10, p11, p12, p13, p14, p15, p16, p17, p18, p19,
 p20, p54;
 
         public Vector4Property targetRotationHead, targetChestRotation,
-targetRotationLeftLowerLeg, hintRotationLeftLowerLeg,
-targetRotationRightLowerLeg, hintRotationRightLowerLeg,
+targetRotationLeftLowerLeg,
+targetRotationRightLowerLeg,
 targetRotationHips, offsetRotationHips,
 offsetRotationHead, offsetRotationChest, offsetRotationLeftFoot, offsetRotationRightFoot,
 offsetRotationLeftToe, offsetRotationRightToe, offsetRotationLeftShoulder, offsetRotationRightShoulder,
@@ -1025,52 +999,78 @@ o0, o1, o2, o3, o4, o5, o6, o7, o8, o9,
 o10, o11, o12, o13, o14, o15, o16, o17, o18, o19,
 o20, o54;
 
-        // Arm bend lookup tables (HVR-IK inspired)
-        public NativeArray<Vector3> ArmBendLookupLeft;
-        public NativeArray<Vector3> ArmBendLookupRight;
-        public bool HasArmBendLookup;
-
+        // Swivel models: where the elbow/knee go for a user with no elbow/knee tracker.
+        //
+        // WHAT THIS REPLACED. An 11^3 trilinear lookup of bend VECTORS (BasisArmBendLookup), filled by six
+        // hand-authored lerps over invented factors and never fitted to anything, plus a "chicken-wing flare"
+        // (BasisElbowFlareCore) bolted on top. Measured against 20 CMU clips the table put the elbow 6.62% of an
+        // arm length from where the human's actually was, with 34 pops -- a single CONSTANT swivel angle that
+        // ignores the hand entirely scores 6.41%, so the table was worse than not looking. The leg had no model
+        // at all: a FIXED hips-right bend normal, which collapses precisely when the leg straightens, and
+        // standing IS a straight leg.
+        //
+        // ⚠ NO T-POSE IS BAKED HERE ANY MORE, AND THAT IS THE SCAR FROM SHIPPING ONE. The models briefly read
+        // the hand's/foot's ROTATION relative to a T-pose captured at job build. But BasisLocalAvatarDriver
+        // calls ResetAvatarAnimator() -- "Exit T-Pose" -- BEFORE BuildBuilder(), so that rest pose was not
+        // reliably a rest pose; in a headset the elbows sat up by the ears on almost every frame while the whole
+        // suite stayed green. The models now read POSITIONS ONLY. A limb's geometry is anatomy and it transfers;
+        // a bone's rotation is a modelling convention and it does not. See BasisArmSwivelModel.
         public Quaternion targetOffsetHead, targetOffsetChest, targetOffsetLeftToe,
             targetOffsetRightToe, targetOffsetLeftShoulder, targetOffsetRightShoulder, targetOffsetLeftFoot,
             targetOffsetRightFoot, targetOffsetLeftHand, targetOffsetRightHand;
 
         public FloatProperty
 enabledLeftLowerLeg, enabledRightLowerLeg,
-hintWeightLeftLowerLeg, hintWeightRightLowerLeg;
+hintWeightLeftLowerLeg, hintWeightRightLowerLeg,
+enabledLeftHand, enabledRightHand;
 
         public BoolProperty
 HasChestTracker, hasHipsTracker, enabledSpineIK,
             enabledLeftShoulder, enabledRightShoulder,
 
 leftToeEnabled, RightToeEnabled,
-hintWeightLeftHand, enabledLeftHand,
-hintWeightRightHand, enabledRightHand,
-useHandCapsule, protectElbow, collideTrackedElbow,
+hintWeightLeftHand,
+hintWeightRightHand,
+protectElbow, collideTrackedElbow,
 collisionsEnabled,
 w0, w1, w2, w3, w4, w5, w6, w7, w8, w9,
 w10, w11, w12, w13, w14, w15, w16, w17, w18, w19,
 w20, w54;
         public NativeArray<ReadWriteTransformHandle> ChainHeadToSpine;
+        // The anatomical envelope, PARALLEL TO ChainHeadToSpine so a chain index guards itself. The head
+        // (index 0) and the hips (the last) carry Valid=false frames -- the head is welded to the HMD and
+        // the hips are the anchor, so neither is a DOF the solver invents, and neither is guarded. Every
+        // other entry is a real vertebral segment with its own ROM. See BasisSpineAnatomy.
+        public NativeArray<BasisSpineRestFrame> ChainSpineRestFrames;
+        public NativeArray<BasisSpineRom> ChainSpineRoms;
         // optional tuning (can be constants or properties)
         public CacheIndex spineToleranceIdx;
         public CacheIndex spineMaxIterationsIdx;
         public AnimationJobCache spineCache;
         public Vector3 TposeLengthHeadToHips;
-        public FloatProperty handRadius, handSkin, chestRadius, collisionSkin, MinHeadSpineHeight, maxBendDeg, minFactor, maxFactor, struggleStart, struggleEnd, MaxHipDeltaProperty, MaxChestDeltaProperty;
+        // The spine's bend cue. `TposeHeadToNeckLocal` is the neck's offset from the head, IN THE HEAD'S OWN
+        // FRAME, so re-attaching it to a rotated head reconstructs where the neck must be -- and cancels the
+        // nod exactly (see DistributeSpineBend). `TposeLengthNeckToHips` is the matching rest span for the
+        // squish coupling, which now measures the SPINE's compression instead of the head's.
+        public Vector3 TposeHeadToNeckLocal;
+        public Vector3 TposeLengthNeckToHips;
+        public FloatProperty handRadius, handSkin, chestRadius, collisionSkin, MinHeadSpineHeight, maxBendDeg, minFactor, maxFactor, MaxChestDeltaProperty;
         public FloatProperty shoulderElevationFactor, shoulderProtractionFactor;
         public FloatProperty spineBendPitch, spineBendYaw, spineBendRoll;
         public FloatProperty upperChestBendPitch, upperChestBendYaw, upperChestBendRoll;
         public FloatProperty hipHingeStartDeg, hipHingeMaxAddDeg;
         public FloatProperty chestSpringHz, chestSpringDamping;
-        public FloatProperty hipFrameSpringHz, hipFrameSpringDamping;
-        public FloatProperty elbowFlareMaxDeg, elbowFlareInwardGain, elbowFlareFullRollDeg;
         public FloatProperty spineMaxForwardDeg, spineMaxBackwardDeg, spineMaxLateralDeg;
         public FloatProperty spineSquishBoost;
+        public FloatProperty spineGazeFollow;
+        public FloatProperty neckGazeFollow;
         public FloatProperty moveBodyBackWhenCrouching;
         public FloatProperty swingSmoothRateDeg;
         public FloatProperty chestArmSwingFactor, chestArmSwingMaxDeg;
         public FloatProperty lowerArmTwistFraction, upperArmTwistFraction;
         public BoolProperty anatDifferentialStiffness, anatShoulderSlide, anatCervicalLordosis, anatPelvicTwistRouting, legSwivelSmoothing;
+        public BoolProperty spineAnatomicalRom;
+        public BoolProperty chestIkTarget;
         public BoolProperty hintIsTrackerLeftLowerLeg, hintIsTrackerRightLowerLeg;
         public FloatProperty lordosisPitchGainDeg;
         public FloatProperty lordosisBaseDeg, lordosisNeckShare, lordosisMaxHeadPitchDeg;
@@ -1084,11 +1084,6 @@ w20, w54;
         // in CreateJob, disposed in Destroy. Initialised lazily on first frame to avoid spring kick.
         public NativeArray<Vector3> chestSpringState;
         public NativeArray<int> chestSpringInit;
-        // Persistent state for the hip-frame follow spring: [0] = spring-smoothed hips rotation and its
-        // world-space angular velocity. Allocated in CreateJob, disposed in Destroy, lazily seeded frame 1.
-        public NativeArray<Quaternion> hipFrameSpringRot;
-        public NativeArray<Vector3> hipFrameSpringVel;
-        public NativeArray<int> hipFrameSpringInit;
         // Swing continuity: persistent per-DOF state to rate-limit the mid-joint (elbow/knee) swing
         // around the root→tip axis, so a torso-collision change eases in instead of popping.
         // Slots: 0/1 = left/right elbow; 2/3 reserved for left/right knee.
@@ -1102,23 +1097,27 @@ w20, w54;
         public NativeArray<int> swingCollided;
         // Limiter latch per slot: -1 while a collision pop is still easing in, else the last settled tag.
         public NativeArray<int> swingSmoothState;
-        // Per-swing-slot OneEuro state for elbow-swivel OUTPUT smoothing (Raw.x = prev raw swivel deg,
-        // Raw.y = prev low-passed swivel velocity, Smooth.x = prev smoothed swivel): damps the elbow jitter
-        // the solve amplifies from tiny input noise, with the hand kept exactly on target.
-        public NativeArray<Vector3> armLookupRaw;
-        public NativeArray<Vector3> armLookupSmooth;
-        public NativeArray<int> armLookupInit;
-        // Per-leg OneEuro state (0=left, 1=right) for knee-swivel OUTPUT smoothing, mirroring armLookup*.
+        // Per-leg OneEuro state (0=left, 1=right) for knee-swivel OUTPUT smoothing.
+        //
+        // The ARM had one of these too, and it is GONE. It was damping the jitter the old bend LOOKUP fed the
+        // solve (0.126); the fitted swivel model that replaced the lookup is a polynomial -- smooth by
+        // construction -- and measures 0.042 jitter, LOWER than a real elbow tracker's 0.046, with zero pops.
+        // Filtering it was measured and it made every metric worse: err 2.12 -> 2.55, jitter 0.042 -> 0.060,
+        // pops 0 -> 1. See BasisMocapMotionQualityTests, hint source SwivelModelSmoothed, which exists purely
+        // to keep that answer honest if anyone is tempted to add the filter back.
         public NativeArray<Vector3> legSwivelRaw;
         public NativeArray<Vector3> legSwivelSmooth;
         public NativeArray<int> legSwivelInit;
         public FloatProperty ikLockMode;
         public BoolProperty shoulderSolveEnabled;
+        public BoolProperty shoulderShrugEnabled;
         // T-pose baked reference data for shoulder solve
         public Vector3 TposeLeftShoulderLocalDir, TposeRightShoulderLocalDir;
         public Quaternion TposeLeftShoulderRot, TposeRightShoulderRot;
         public Quaternion TposeChestRot;
         public float TposeShoulderToHandLeft, TposeShoulderToHandRight;
+        public float TposeClavicleLenLeft, TposeClavicleLenRight;
+        public float TposeShoulderToElbowLeft, TposeShoulderToElbowRight;
         public FloatProperty jobWeight { get; set; }
         public void ProcessRootMotion(AnimationStream stream) { }
         public void ProcessAnimation(AnimationStream stream)
@@ -1154,8 +1153,8 @@ w20, w54;
             // 2) Shoulder pre-solve: elevate/protract based on hand targets before arm IK
             if (shoulderSolveEnabled.Get(stream))
             {
-                SolveShoulder(stream, HandleLeftShoulder, enabledLeftShoulder, targetPositionLeftHand, hintPositionLeftHand, hintWeightLeftHand, TposeLeftShoulderLocalDir, TposeLeftShoulderRot, TposeChestRot, TposeShoulderToHandLeft, true);
-                SolveShoulder(stream, HandleRightShoulder, enabledRightShoulder, targetPositionRightHand, hintPositionRightHand, hintWeightRightHand, TposeRightShoulderLocalDir, TposeRightShoulderRot, TposeChestRot, TposeShoulderToHandRight, false);
+                SolveShoulder(stream, HandleLeftShoulder, enabledLeftShoulder, targetPositionLeftHand, hintPositionLeftHand, hintWeightLeftHand, TposeLeftShoulderLocalDir, TposeLeftShoulderRot, TposeChestRot, TposeShoulderToHandLeft, TposeClavicleLenLeft, TposeShoulderToElbowLeft, true);
+                SolveShoulder(stream, HandleRightShoulder, enabledRightShoulder, targetPositionRightHand, hintPositionRightHand, hintWeightRightHand, TposeRightShoulderLocalDir, TposeRightShoulderRot, TposeChestRot, TposeShoulderToHandRight, TposeClavicleLenRight, TposeShoulderToElbowRight, false);
             }
             else
             {
@@ -1168,27 +1167,23 @@ w20, w54;
             }
 
             // 3) Legs: two-bone IK with bend normal preference
-            SolveLegs(stream, enabledLeftLowerLeg, HandleLeftUpperLeg, HandleLeftLowerLeg, HandleLeftFoot, targetPositionLeftLowerLeg, targetRotationLeftLowerLeg, hintPositionLeftLowerLeg, hintRotationLeftLowerLeg, hintWeightLeftLowerLeg, targetOffsetLeftFoot, KneeBendPrefLeft, hintIsTrackerLeftLowerLeg, 0);
-            SolveLegs(stream, enabledRightLowerLeg, HandleRightUpperLeg, HandleRightLowerLeg, HandleRightFoot, targetPositionRightLowerLeg, targetRotationRightLowerLeg, hintPositionRightLowerLeg, hintRotationRightLowerLeg, hintWeightRightLowerLeg, targetOffsetRightFoot, KneeBendPrefRight, hintIsTrackerRightLowerLeg, 1);
-
-            // Smooth the hips rotation that feeds the no-elbow-tracker bend frame (ArmBendFrame) so hip
-            // jitter/sway doesn't wobble the derived elbows. Integrated once per frame, before the hands.
-            UpdateHipFrameSpring(stream);
+            SolveLegs(stream, enabledLeftLowerLeg, HandleLeftUpperLeg, HandleLeftLowerLeg, HandleLeftFoot, targetPositionLeftLowerLeg, targetRotationLeftLowerLeg, hintPositionLeftLowerLeg, hintWeightLeftLowerLeg, targetOffsetLeftFoot, KneeBendPrefLeft, hintIsTrackerLeftLowerLeg, 0);
+            SolveLegs(stream, enabledRightLowerLeg, HandleRightUpperLeg, HandleRightLowerLeg, HandleRightFoot, targetPositionRightLowerLeg, targetRotationRightLowerLeg, hintPositionRightLowerLeg, hintWeightRightLowerLeg, targetOffsetRightFoot, KneeBendPrefRight, hintIsTrackerRightLowerLeg, 1);
 
             // 4) Hands: two-bone IK with collision + elbow protection
-            SolveHand(stream, enabledLeftHand, HandleLeftUpperArm, HandleLeftLowerArm, HandleLeftHand, targetPositionLeftHand, targetRotationLeftHand, hintPositionLeftHand, hintRotationLeftHand, hintWeightLeftHand, targetOffsetLeftHand, HandleChest, HandleNeck, chestRadius, collisionSkin, collisionsEnabled, handRadius, handSkin, useHandCapsule, protectElbow, collideTrackedElbow, k_SwingLeftElbow);
-            SolveHand(stream, enabledRightHand, HandleRightUpperArm, HandleRightLowerArm, HandleRightHand, targetPositionRightHand, targetRotationRightHand, hintPositionRightHand, hintRotationRightHand, hintWeightRightHand, targetOffsetRightHand, HandleChest, HandleNeck, chestRadius, collisionSkin, collisionsEnabled, handRadius, handSkin, useHandCapsule, protectElbow, collideTrackedElbow, k_SwingRightElbow);
+            SolveHand(stream, enabledLeftHand, HandleLeftUpperArm, HandleLeftLowerArm, HandleLeftHand, targetPositionLeftHand, targetRotationLeftHand, hintPositionLeftHand, hintRotationLeftHand, hintWeightLeftHand, targetOffsetLeftHand, HandleChest, HandleNeck, chestRadius, collisionSkin, collisionsEnabled, handRadius, handSkin, protectElbow, collideTrackedElbow, k_SwingLeftElbow);
+            SolveHand(stream, enabledRightHand, HandleRightUpperArm, HandleRightLowerArm, HandleRightHand, targetPositionRightHand, targetRotationRightHand, hintPositionRightHand, hintRotationRightHand, hintWeightRightHand, targetOffsetRightHand, HandleChest, HandleNeck, chestRadius, collisionSkin, collisionsEnabled, handRadius, handSkin, protectElbow, collideTrackedElbow, k_SwingRightElbow);
 
             // Arm pop continuity: rate-limit the elbow swing so a torso-collision change eases in
             // instead of popping in one frame. Runs before arm twist (which reads the arm pose).
             float swingRate = swingSmoothRateDeg.Get(stream);
             float swingDt = stream.deltaTime;
-            if (enabledLeftHand.Get(stream))
+            if (enabledLeftHand.Get(stream) > 0f)
             {
                 ApplySwingContinuity(stream, k_SwingLeftElbow, HandleLeftUpperArm, HandleLeftLowerArm, HandleLeftHand, targetPositionLeftHand.Get(stream), swingRate, swingDt);
             }
 
-            if (enabledRightHand.Get(stream))
+            if (enabledRightHand.Get(stream) > 0f)
             {
                 ApplySwingContinuity(stream, k_SwingRightElbow, HandleRightUpperArm, HandleRightLowerArm, HandleRightHand, targetPositionRightHand.Get(stream), swingRate, swingDt);
             }
@@ -1254,19 +1249,21 @@ w20, w54;
 
             // Lock mode determines how hips position relates to head position:
             // 0 = LockHips:  Hips are the anchor; apply hips directly, no head-relative clamping.
-            // 1 = LockHead:  Head is the anchor; derive hips position below head.
+            // 1 = LockHead:  Head is the anchor; hips ride at rest spine length along the spine's own axis.
             // 2 = LockBoth:  Both independently positioned; spine must accommodate (original behavior).
             switch (lockMode)
             {
                 case 0: // LockHips - hips are authoritative, skip head-relative clamping
                     break;
 
-                case 1: // LockHead - head is the anchor; push hips down only if within restDist, allow sinking further
+                case 1: // LockHead - head is the anchor; the spine may not compress below its rest length, allow stretching further
                     {
-                        float gap = Vector3.Dot(headTargetPos - hipsTargetPos, up);
-                        if (gap < restDist)
+                        Vector3 headToHips = hipsTargetPos - headTargetPos;
+                        float spineLen = headToHips.magnitude;
+                        if (spineLen < restDist)
                         {
-                            hipsTargetPos -= up * (restDist - gap);
+                            Vector3 spineDir = spineLen > k_Epsilon ? headToHips / spineLen : hipDesired * Vector3.down;
+                            hipsTargetPos = headTargetPos + spineDir * restDist;
                         }
                     }
                     break;
@@ -1283,7 +1280,16 @@ w20, w54;
             // hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up);
             targetPositionHips.Set(stream, hipsTargetPos);
 
-            hipDesired = ApplyHipHinge(stream, headTargetPos, hipsTargetPos, hipDesired, up);
+            // The hinge SYNTHESISES an anterior pelvis pitch on a deep lean so the spine does not swallow the
+            // whole reach -- but only when there is no hip tracker. With one, the pelvis rotation is the
+            // user's OWN, measured, and must feed straight to IK "how we used to" (the hip-tilt-stabilization
+            // that reshaped a tracked pelvis was built and deliberately removed for exactly this reason). The
+            // hip-bob/sway synthesis in BasisLocalRigDriver is gated on the same flag, for the same reason:
+            // do not invent pelvis motion on top of a tracker.
+            if (!hasHipsTracker.Get(stream))
+            {
+                hipDesired = ApplyHipHinge(stream, headTargetPos, hipsTargetPos, hipDesired, up);
+            }
 
             // Apply hips driver if valid
             if (HandleHips.IsValid(stream))
@@ -1311,6 +1317,7 @@ w20, w54;
 
                 DistributeSpineBend(stream, headPos);
                 BiasSpineTowardChest(stream);
+                GuardSpineChain(stream);
                 SolveSequentialSpineIK(stream, headPos, headRot);
             }
             else if (HandleChest.IsValid(stream) && HandleNeck.IsValid(stream) && HandleHead.IsValid(stream))
@@ -1320,6 +1327,7 @@ w20, w54;
 
                 DistributeSpineBend(stream, headPos);
                 ApplyArmSwingChestFollow(stream);
+                GuardSpineChain(stream);
                 SolveSequentialSpineIK(stream, headPos, headRot);
             }
         }
@@ -1372,37 +1380,193 @@ w20, w54;
                 // shorter levers.
                 for (int i = lastJoint; i >= firstJoint; i--)
                 {
-                    Vector3 jointPos = ChainHeadToSpine[i].GetPosition(stream);
-                    Vector3 curTipPos = ChainHeadToSpine[tipIdx].GetPosition(stream);
-
-                    Vector3 cur = curTipPos - jointPos;
-                    Vector3 tgt = headTargetPos - jointPos;
-                    if (cur.sqrMagnitude < k_SqrEpsilon || tgt.sqrMagnitude < k_SqrEpsilon)
-                        continue;
-
-                    Quaternion delta = QuaternionExt.FromToRotation(cur, tgt);
-                    // Shape the reach like a real spine: grade the axial-twist allowance from the rigid
-                    // lumbar root (t=1) to the free cervical tip (t=0), and stiffen the mid-thoracic swing so
-                    // the bend distributes into a smooth curve instead of corkscrewing or kinking at a joint.
-                    float t = (i - firstJoint) / jointSpan;
-                    float jointTwistKeep = Mathf.Lerp(cervicalTwistKeep, lumbarTwistKeep, t);
-                    float jointSwingScale = 1f - k_ThoracicBendStiffen * (1f - Mathf.Abs(2f * t - 1f));
-                    delta = BasisTwistSolveCore.ShapeReachStep(delta, ccdUp, jointTwistKeep, jointSwingScale);
-                    delta = Quaternion.Slerp(Quaternion.identity, delta, ccdRelax);
-                    ChainHeadToSpine[i].SetRotation(stream, delta * ChainHeadToSpine[i].GetRotation(stream));
-
-                    if (i == firstJoint)
-                    {
-                        ClampNeckCone(stream, i, neckCone);
-                    }
-                    else if (chainLen >= 5 && i == chainLen - 3)
-                    {
-                        ClampChestCone(stream, i, chestCone);
-                    }
+                    ReachHeadJoint(stream, i, headTargetPos, firstJoint, chainLen, jointSpan,
+                        cervicalTwistKeep, lumbarTwistKeep, ccdUp, ccdRelax, neckCone, chestCone);
                 }
             }
 
+            // ==========================================================================================
+            // PHASE B -- THE CHEST AS A SECONDARY IK TARGET. The loop above placed the HEAD (primary,
+            // welded to the HMD); the chest position fell out of it as a free FK consequence. Now pull the
+            // chest bone onto its own target and RESTORE the head with the joints above the chest, which
+            // have spare DOF. The head is never traded for the chest. Bit-identical to head-only above when
+            // the chest target is off (weight 0). See SolveChestTarget.
+            // ==========================================================================================
+            SolveChestTarget(stream, headTargetPos, firstJoint, lastJoint, chainLen, jointSpan,
+                cervicalTwistKeep, lumbarTwistKeep, ccdUp, ccdRelax, neckCone, chestCone);
+
             ChainHeadToSpine[tipIdx].SetRotation(stream, finalHeadRot);
+        }
+        // One CCD step aiming the head tip from joint `i` -- the exact body of the Phase A loop, extracted so
+        // Phase B's head-restore reuses it verbatim (a copy would drift). Shapes the reach (twist graded root
+        // -> tip, mid-thoracic stiffened), relaxes, applies the cones, then the anatomy guard LAST.
+        void ReachHeadJoint(AnimationStream stream, int i, Vector3 headTargetPos, int firstJoint, int chainLen,
+            float jointSpan, float cervicalTwistKeep, float lumbarTwistKeep, Vector3 ccdUp, float ccdRelax,
+            float neckCone, float chestCone)
+        {
+            const int tipIdx = 0;
+            Vector3 jointPos = ChainHeadToSpine[i].GetPosition(stream);
+            Vector3 curTipPos = ChainHeadToSpine[tipIdx].GetPosition(stream);
+
+            Vector3 cur = curTipPos - jointPos;
+            Vector3 tgt = headTargetPos - jointPos;
+            if (cur.sqrMagnitude < k_SqrEpsilon || tgt.sqrMagnitude < k_SqrEpsilon)
+                return;
+
+            Quaternion delta = QuaternionExt.FromToRotation(cur, tgt);
+            float t = (i - firstJoint) / jointSpan;
+            float jointTwistKeep = Mathf.Lerp(cervicalTwistKeep, lumbarTwistKeep, t);
+            float jointSwingScale = 1f - k_ThoracicBendStiffen * (1f - Mathf.Abs(2f * t - 1f));
+            delta = BasisTwistSolveCore.ShapeReachStep(delta, ccdUp, jointTwistKeep, jointSwingScale);
+            delta = Quaternion.Slerp(Quaternion.identity, delta, ccdRelax);
+            ChainHeadToSpine[i].SetRotation(stream, delta * ChainHeadToSpine[i].GetRotation(stream));
+
+            if (i == firstJoint)
+            {
+                ClampNeckCone(stream, i, neckCone);
+            }
+            else if (chainLen >= 5 && i == chainLen - 3)
+            {
+                ClampChestCone(stream, i, chestCone);
+            }
+
+            // LAST, so it sees the outcome of every other constraint on this joint, not just the
+            // CCD's own step. The cones above are reach heuristics; this is anatomy.
+            GuardSpineJoint(stream, i);
+        }
+        // The Chest bone in the chain sits at chainLen-3 (the index ClampChestCone uses); the one joint below
+        // it -- the Spine (lastJoint) -- is what moves it. Weight 0.5 was the corpus sweet spot: at it, BOTH
+        // the chest AND the head placement improved over head-only (the restore sweeps tighten the head).
+        // Full weight (1.0) placed the chest slightly better but loosened the head, so it is deliberately not
+        // used. Iteration budget (8 x 2 restore) captures ~all of the gain a full 20 does, for a fraction of
+        // the cost -- measured, not guessed.
+        const float k_ChestIkWeight = 0.5f;
+        const int k_ChestIkIters = 8;
+        const int k_ChestIkHeadRestoreSweeps = 2;
+        void SolveChestTarget(AnimationStream stream, Vector3 headTargetPos, int firstJoint, int lastJoint,
+            int chainLen, float jointSpan, float cervicalTwistKeep, float lumbarTwistKeep, Vector3 ccdUp,
+            float ccdRelax, float neckCone, float chestCone)
+        {
+            // Off (toggle false -> weight 0): return before touching a single bone, so the head-only solve
+            // above is the whole story, bit for bit. This is the "same usability" guarantee.
+            if (!chestIkTarget.Get(stream))
+                return;
+
+            int chestBoneIdx = chainLen - 3;   // the Chest bone
+            // Need a real Spine joint below the chest to move it, and real upper joints to restore the head.
+            if (chestBoneIdx < firstJoint || lastJoint <= firstJoint || lastJoint <= chestBoneIdx)
+                return;
+
+            // THE RAW chest, not the head-hint-biased TargetChestPosition -- pinning to the biased one dragged
+            // the torso ~8cm up and leaned the body in desktop / no-tracker mode.
+            Vector3 chestTargetPos = TargetChestPositionRaw.Get(stream);
+            Vector3 chestBonePos = ChainHeadToSpine[chestBoneIdx].GetPosition(stream);
+            // A chest target that is wildly far from the FK chest is a glitching tracker or an unset target;
+            // chasing it would wreck the torso. Fall back to the head-only chest. Same guard the old
+            // BiasSpineTowardChest used, and the anatomy guard below bounds whatever does get through.
+            if ((chestTargetPos - chestBonePos).sqrMagnitude > k_ChestPullMaxDistSqr)
+                return;
+
+            // The Spine is the root end of the chain, so its shaping params are those of index lastJoint.
+            float spineT = (lastJoint - firstJoint) / jointSpan;
+            float spineTwistKeep = Mathf.Lerp(cervicalTwistKeep, lumbarTwistKeep, spineT);
+            float spineSwingScale = 1f - k_ThoracicBendStiffen * (1f - Mathf.Abs(2f * spineT - 1f));
+
+            for (int citer = 0; citer < k_ChestIkIters; citer++)
+            {
+                // 1) rotate the Spine so the Chest bone slides toward its target.
+                Vector3 spinePos = ChainHeadToSpine[lastJoint].GetPosition(stream);
+                Vector3 cCur = ChainHeadToSpine[chestBoneIdx].GetPosition(stream) - spinePos;
+                Vector3 cTgt = chestTargetPos - spinePos;
+                if (cCur.sqrMagnitude > k_SqrEpsilon && cTgt.sqrMagnitude > k_SqrEpsilon)
+                {
+                    Quaternion cDelta = QuaternionExt.FromToRotation(cCur, cTgt);
+                    cDelta = BasisTwistSolveCore.ShapeReachStep(cDelta, ccdUp, spineTwistKeep, spineSwingScale);
+                    // Relax x weight: a gentler chest pull lets the head-restore keep pace, which is exactly
+                    // why the moderate weight preserves the head where a full pull loosened it.
+                    cDelta = Quaternion.Slerp(Quaternion.identity, cDelta, ccdRelax * k_ChestIkWeight);
+                    ChainHeadToSpine[lastJoint].SetRotation(stream, cDelta * ChainHeadToSpine[lastJoint].GetRotation(stream));
+                    GuardSpineJoint(stream, lastJoint);
+                }
+
+                // 2) restore the head with the UPPER joints only (chest and above -- never the Spine, which
+                // now owns the chest). They have far more DOF than the head needs, so the head returns to
+                // target without disturbing the chest the Spine just placed.
+                for (int sweep = 0; sweep < k_ChestIkHeadRestoreSweeps; sweep++)
+                {
+                    for (int i = lastJoint - 1; i >= firstJoint; i--)
+                    {
+                        ReachHeadJoint(stream, i, headTargetPos, firstJoint, chainLen, jointSpan,
+                            cervicalTwistKeep, lumbarTwistKeep, ccdUp, ccdRelax, neckCone, chestCone);
+                    }
+                }
+            }
+        }
+        // ==============================================================================================
+        // THE ANATOMICAL ENVELOPE. Pulls one spine joint back inside the range of motion its real vertebrae
+        // have. See BasisSpineAnatomyCore for the measurements and BasisSpineAnatomy for the table.
+        //
+        // WHY IT LIVES INSIDE THE CCD LOOP. The CCD is what actually places the head, and before this it
+        // rotated the spine, chest and upperChest with NO per-joint limit whatsoever -- its only constraints
+        // were a cone on the neck and a cone on the chest. So a limit applied BEFORE the CCD is a suggestion
+        // the CCD is free to ignore, which is exactly what happened to BasisSpineBendCore.ClampAsymmetric.
+        // And a limit applied AFTER the CCD would drag the head off the HMD, which is not negotiable.
+        //
+        // Applied per-joint INSIDE the loop, the residual simply redistributes onto the other vertebrae on
+        // the next sweep -- which is what a real spine does when you ask one segment for more than it has.
+        // The head still converges, because the CCD still gets the last word on it.
+        //
+        // The chain runs head -> hips, so joint `i`'s PARENT is `i + 1`.
+        // ==============================================================================================
+        void GuardSpineJoint(AnimationStream stream, int i)
+        {
+            if (!spineAnatomicalRom.Get(stream))
+            {
+                return;
+            }
+            if (!ChainSpineRestFrames.IsCreated || i < 0 || i >= ChainSpineRestFrames.Length)
+            {
+                return;
+            }
+
+            BasisSpineRestFrame frame = ChainSpineRestFrames[i];
+            if (!frame.Valid)
+            {
+                return;   // the head and the hips: commanded, not solved. Never guarded.
+            }
+
+            int parent = i + 1;
+            if (parent >= ChainHeadToSpine.Length || !ChainHeadToSpine[parent].IsValid(stream) || !ChainHeadToSpine[i].IsValid(stream))
+            {
+                return;
+            }
+
+            Quaternion parentRot = ChainHeadToSpine[parent].GetRotation(stream);
+            Quaternion boneRot = ChainHeadToSpine[i].GetRotation(stream);
+            Quaternion local = BasisSpineAnatomyCore.Conj(parentRot) * boneRot;
+
+            Quaternion clamped = BasisSpineAnatomyCore.Clamp(local, frame, ChainSpineRoms[i], out BasisSpineClampInfo info);
+            if (!info.Touched)
+            {
+                return;   // legal pose: the bone is not written at all, so it cannot be perturbed.
+            }
+
+            ChainHeadToSpine[i].SetRotation(stream, parentRot * clamped);
+        }
+
+        // A full sweep of the envelope over every solved vertebra. Run right after DistributeSpineBend so
+        // the CCD starts from a legal spine -- the CCD breaks out early when the head is already on target,
+        // and on those frames it would otherwise never look at the pre-bend's output at all.
+        void GuardSpineChain(AnimationStream stream)
+        {
+            if (!ChainHeadToSpine.IsCreated || ChainHeadToSpine.Length < 3)
+            {
+                return;
+            }
+            for (int i = 1; i <= ChainHeadToSpine.Length - 2; i++)
+            {
+                GuardSpineJoint(stream, i);
+            }
         }
         // Constrains the neck (chain index neckIdx) to within maxConeDeg of the chest→neck
         // direction. Enforced in-loop so chest/spine take the slack on the next CCD sweep.
@@ -1509,12 +1673,54 @@ w20, w54;
             }
 
             Quaternion hipsRot = HandleHips.GetRotation(stream);
+            Quaternion headWorldRot = V4ToQuat(targetRotationHead.Get(stream)) * targetOffsetHead;
+
+            // ==========================================================================================
+            // THE SPINE IS CUED OFF THE NECK, NOT THE HEAD. This is the fix for "looking down forces chest
+            // to rotate".
+            //
+            // BasisSpineBendCore bends the spine by the angle between hips->chest and hips->CUE. Hand it the
+            // HEAD and you have handed it a point that is not on the spine at all -- the head sits on the END
+            // of the neck and ORBITS it when you nod. So a user who gazes down without moving their torso by
+            // one millimetre still swings the head target forward and down, the hips->head vector tips over,
+            // and the solver bends the spine to a lean that never happened. Measured on a T-posed adult with
+            // the torso held byte-identical: a 45 deg glance down invents 4.4 deg of chest pitch, 60 deg
+            // invents 8.4 deg, 75 deg invents 10.4 deg. (BasisSpineGazeContaminationTests.)
+            //
+            // The neck, estimated RIGIDLY off the head, is exactly invariant to that nod. Write it out: if
+            // the head orbits the neck by Q, then
+            //     estimatedNeck = (neck + Q*(head-neck)) + (Q*headRot) * inv(headRot)*(neck-head)
+            //                   = neck + Q*(head-neck) + Q*(neck-head)
+            //                   = neck
+            // -- the two lever arms cancel, algebraically, for ANY Q. Not damped, not faded, not clamped:
+            // CANCELLED. A gaze cannot move this cue, so it cannot bend the spine, so there is nothing left
+            // to tune. BasisSpineGazeContaminationTests pins it at exactly zero.
+            //
+            // A real human's chest pitches -0.05 deg per degree of gaze -- i.e. not at all -- so zero is not
+            // an approximation of the right answer here, it IS the right answer.
+            //
+            // It also disarms a SECOND bug for free. ComputeSquishMultiplier amplifies the spine's rotation
+            // as hips->cue COMPRESSES (x1.42 at 25% compression), and gazing down was shortening hips->HEAD
+            // -- so the phantom bend was being multiplied by a phantom squish. The neck does not move on a
+            // gaze, so neither does the squish. RestLen moves to hips->NECK to match: the spine spans the
+            // spine, and the head was never part of it.
+            // ==========================================================================================
+            Vector3 neckCue = headTargetPos + headWorldRot * TposeHeadToNeckLocal;
+
+            // A LITTLE REAL SPINE. neckCue is invariant to a pure gaze (the head orbits the neck by Q, the
+            // rigid re-attachment un-orbits it -- that is the look-down-stability fix, chest pitch 0.000 deg
+            // on any gaze). But that reads as a rigid mannequin under a swiveling head on desktop. Blend the
+            // cue a fraction back toward the ACTUAL head: on a look-down the head has orbited forward+down, so
+            // the cue tips that way and the chest folds a touch. 0 = rigid, 1 = the full (phantom) follow. A
+            // real chest does NOT fold on gaze (corpus: -0.05 deg/deg), so this is a deliberate desktop-feel
+            // knob, small by default, and it costs nothing with a chest tracker (the pitch weight is zeroed).
+            Vector3 spineCue = Vector3.Lerp(neckCue, headTargetPos, Mathf.Clamp01(spineGazeFollow.Get(stream)));
 
             BasisSpineBendInput input;
             input.HipsRot = hipsRot;
             input.HipsPos = HandleHips.GetPosition(stream);
             input.ChestPos = HandleChest.GetPosition(stream);
-            input.SmoothedHead = ApplyChestSpring(stream, headTargetPos);
+            input.SmoothedHead = ApplyChestSpring(stream, spineCue);
             input.HipsBind = V4ToQuat(offsetRotationHips.Get(stream));
             input.HeadTargetRot = V4ToQuat(targetRotationHead.Get(stream));
             input.SpineMaxForwardDeg = spineMaxForwardDeg.Get(stream);
@@ -1529,7 +1735,7 @@ w20, w54;
             input.AnatDifferentialStiffness = anatDifferentialStiffness.Get(stream);
             input.AnatPelvicTwistRouting = anatPelvicTwistRouting.Get(stream);
             input.SquishBoost = spineSquishBoost.Get(stream);
-            input.RestLen = TposeLengthHeadToHips.magnitude;
+            input.RestLen = TposeLengthNeckToHips.magnitude;   // the spine spans hips->NECK; the head was never part of it
             input.BendTwistCoupling = k_BendTwistCoupling;
             input.HasSpine = hasSpine;
             input.HasUpper = hasUpper;
@@ -1612,47 +1818,6 @@ w20, w54;
         }
         static bool IsFinite(Vector3 v) => !float.IsNaN(v.x) && !float.IsInfinity(v.x) && !float.IsNaN(v.y) && !float.IsInfinity(v.y) && !float.IsNaN(v.z) && !float.IsInfinity(v.z);
         static bool IsFinite(Quaternion q) => !float.IsNaN(q.x) && !float.IsInfinity(q.x) && !float.IsNaN(q.y) && !float.IsInfinity(q.y) && !float.IsNaN(q.z) && !float.IsInfinity(q.z) && !float.IsNaN(q.w) && !float.IsInfinity(q.w);
-        // Critically-damped angular spring on the hips rotation that feeds ArmBendFrame, so hip jitter/sway
-        // doesn't wobble the no-elbow-tracker elbow pole (the rotational analogue of ApplyChestSpring). Stepped
-        // ONCE per frame and stored; ArmBendFrame reads the smoothed value. Disabled (hz<=0) tracks raw hips.
-        void UpdateHipFrameSpring(AnimationStream stream)
-        {
-            if (!hipFrameSpringRot.IsCreated || !hipFrameSpringVel.IsCreated || !hipFrameSpringInit.IsCreated)
-            {
-                return;
-            }
-            bool hipsValid = HandleHips.IsValid(stream);
-            Quaternion rawHips = hipsValid ? HandleHips.GetRotation(stream) : Quaternion.identity;
-            float hz = hipFrameSpringHz.Get(stream);
-            // Disabled, no hips, or first frame: snap to the raw rotation (no spring kick) and mark seeded.
-            if (!hipsValid || hz <= 0f || hipFrameSpringInit[0] == 0)
-            {
-                hipFrameSpringRot[0] = rawHips;
-                hipFrameSpringVel[0] = Vector3.zero;
-                hipFrameSpringInit[0] = 1;
-                return;
-            }
-
-            float dt = stream.deltaTime;
-            if (dt <= 0f)
-            {
-                return;
-            }
-
-            BasisHipFrameSpringCore.Step(hipFrameSpringRot[0], hipFrameSpringVel[0], rawHips, dt, hz,
-                hipFrameSpringDamping.Get(stream), out Quaternion newRot, out Vector3 newVel);
-
-            // Defensive: a NaN upstream re-seeds instead of poisoning the bend frame.
-            if (!IsFinite(newRot) || !IsFinite(newVel))
-            {
-                hipFrameSpringRot[0] = rawHips;
-                hipFrameSpringVel[0] = Vector3.zero;
-                return;
-            }
-
-            hipFrameSpringRot[0] = newRot;
-            hipFrameSpringVel[0] = newVel;
-        }
         // Pelvis tilts forward to share the lean past the threshold. Without this, a deep forward
         // reach makes the spine swallow the entire bend and everything above the hips folds.
         Quaternion ApplyHipHinge(AnimationStream stream, Vector3 headPos, Vector3 hipsPos, Quaternion hipsRot, Vector3 playerUp)
@@ -1684,6 +1849,10 @@ w20, w54;
             BasisCrouchOffsetCore.Solve(input, out BasisCrouchOffsetResult result);
             return result.HipsPos;
         }
+        // Extra forward neck curve at FULL look-down when NeckGazeFollow = 1 (it scales this by the setting
+        // and by how far down you look). Modest: the head is re-pinned so this only arcs the neck, but too
+        // much cocks the head relative to the neck. The user dials the setting; this is the ceiling.
+        const float k_NeckGazeFollowMaxDeg = 18f;
         void ApplyCervicalLordosis(AnimationStream stream)
         {
             if (!HandleNeck.IsValid(stream))
@@ -1753,10 +1922,16 @@ w20, w54;
                 }
             }
 
-            if (result.NeckDeg != 0f)
+            // A LITTLE REAL SPINE, for the neck: extra forward curve on a look-down, on top of the lordosis.
+            // The head is re-pinned to the HMD just below (SetPosition/SetRotation), so this arcs the neck
+            // WITHOUT moving the head -- the neck curves, the head stays exactly on target. Look-down only
+            // (LookDownFrac); a real cervical spine flexes forward as you look down. 0 = lordosis only.
+            float extraNeckDeg = Mathf.Clamp01(neckGazeFollow.Get(stream)) * k_NeckGazeFollowMaxDeg * result.LookDownFrac;
+            float totalNeckDeg = result.NeckDeg + extraNeckDeg;
+            if (totalNeckDeg != 0f)
             {
                 Quaternion neckRotCurrent = HandleNeck.GetRotation(stream);
-                HandleNeck.SetRotation(stream, Quaternion.AngleAxis(result.NeckDeg, neckRotCurrent * Vector3.right) * neckRotCurrent);
+                HandleNeck.SetRotation(stream, Quaternion.AngleAxis(totalNeckDeg, neckRotCurrent * Vector3.right) * neckRotCurrent);
             }
 
             if (HandleHead.IsValid(stream))
@@ -1816,8 +1991,8 @@ w20, w54;
                 return;
             }
 
-            bool leftEnabled = enabledLeftHand.Get(stream);
-            bool rightEnabled = enabledRightHand.Get(stream);
+            bool leftEnabled = enabledLeftHand.Get(stream) > 0f;
+            bool rightEnabled = enabledRightHand.Get(stream) > 0f;
             if (!leftEnabled && !rightEnabled)
             {
                 return;
@@ -1904,7 +2079,7 @@ w20, w54;
         // dedicated shoulder tracker is no longer required. hasShoulderTrackerProp (the shoulder rig
         // layer) selects the base: the tracker when present, else the chest-anchored rest. The elbow
         // hint drives the upper-arm direction when an elbow tracker is present, hand target otherwise.
-        public void SolveShoulder(AnimationStream stream, ReadWriteTransformHandle shoulderHandle, BoolProperty hasShoulderTrackerProp, Vector3Property handTargetPosProp, Vector3Property hintPosProp, BoolProperty hintWeightProp, Vector3 tposeArmDir, Quaternion tposeShoulderRot, Quaternion tposeChestRot, float tposeArmLength, bool isLeft)
+        public void SolveShoulder(AnimationStream stream, ReadWriteTransformHandle shoulderHandle, BoolProperty hasShoulderTrackerProp, Vector3Property handTargetPosProp, Vector3Property hintPosProp, BoolProperty hintWeightProp, Vector3 tposeArmDir, Quaternion tposeShoulderRot, Quaternion tposeChestRot, float tposeArmLength, float tposeClavicleLen, float tposeElbowLen, bool isLeft)
         {
             if (!shoulderHandle.IsValid(stream))
             {
@@ -1924,6 +2099,9 @@ w20, w54;
             input.TposeShoulderRot = tposeShoulderRot;
             input.TposeArmDirWorld = tposeArmDir;
             input.TposeArmLength = tposeArmLength;
+            input.TposeClavicleLength = tposeClavicleLen;
+            input.TposeElbowLength = tposeElbowLen;
+            input.ShrugEnabled = shoulderShrugEnabled.Get(stream);
             input.ElevationFactor = shoulderElevationFactor.Get(stream);
             input.ProtractionFactor = shoulderProtractionFactor.Get(stream);
             input.CoupleRatio = k_ShoulderCoupleRatio;
@@ -2073,7 +2251,7 @@ w20, w54;
             // Geometry lives in BasisArmSolveCore so the offline sweep harness solves the
             // exact same elbow math. The core returns incremental deltas; apply them through
             // the stream in the original order (identity steps are exact no-ops).
-            BasisArmSolveInput input;
+            BasisArmSolveInput input = default;
             input.Shoulder = root.GetPosition(stream);
             input.Elbow = mid.GetPosition(stream);
             input.Hand = tip.GetPosition(stream);
@@ -2093,80 +2271,58 @@ w20, w54;
             // BasisArmSolveCore (reach stays exact), not by clamping the swivel.
             input.HintIsTracker = hintIsTracker;
             input.HintMaxStepDeg = float.MaxValue;
+            // The ANIMATED hand rotation (nothing has written the tip yet this frame): the neutral the
+            // wrist-roll relief measures the controller's roll against.
+            input.TipRotation = tip.GetRotation(stream);
+            // A real tracker's measured lower-arm rotation feeds the forearm roll; zero keeps it off for
+            // the model path, whose hint rotation is just the stale property value.
+            input.HintRotation = hintIsTracker ? hint.rotation : default;
 
             BasisArmSolveCore.Solve(input, out BasisArmSolveResult result);
 
             mid.SetRotation(stream, result.MidDelta * mid.GetRotation(stream));
             root.SetRotation(stream, result.RootDelta * root.GetRotation(stream));
             root.SetRotation(stream, result.HintDelta * root.GetRotation(stream));
+            mid.SetRotation(stream, result.MidPostRoll * mid.GetRotation(stream));
             tip.SetRotation(stream, result.TipRotation);
         }
         /// <summary>
-        /// Computes arm bend direction using the 3D lookup table.
-        /// Converts hand position to a yaw-stable torso frame, then samples the table.
+        /// The ARM's body frame, live, from BONE POSITIONS: shoulder line for right, chest->neck for up.
+        ///
+        /// From POSITIONS, not from the chest bone's ROTATION, and that is the whole reason it transfers. A
+        /// bone's local axes are a rig convention, so a frame taken from rotations is fitted to one skeleton and
+        /// no other. It also deletes the old frame's entire problem: ArmBendFrame had to strip the chest's YAW
+        /// (or head-gaze chest twist swept the lookup and flipped the elbow pole) and then spring-smooth the hips
+        /// to stop hip sway wobbling the derived elbow. A position frame has no yaw to strip -- the shoulder line
+        /// IS the yaw -- so both the twist-extraction and the hip-frame spring go away.
         /// </summary>
-        Vector3 ComputeArmBendFromLookup(AnimationStream stream, Vector3 shoulderPos, Vector3 handTargetPos, Quaternion handTargetRot, float armLength, bool isLeft)
+        BasisSwivelFrame BuildArmFrame(AnimationStream stream)
         {
-            if (!HandleChest.IsValid(stream) || armLength < k_Epsilon)
+            if (!HandleLeftUpperArm.IsValid(stream) || !HandleRightUpperArm.IsValid(stream)
+                || !HandleChest.IsValid(stream) || !HandleNeck.IsValid(stream))
             {
-                return isLeft ? Vector3.left : Vector3.right;
+                return default;   // Valid = false; the caller leaves the arm on the solver's own fallback pole
             }
 
-            Quaternion frameRot = ArmBendFrame(stream);
-            Quaternion invFrame = Quaternion.Inverse(frameRot);
-
-            // Transform hand position to torso-local, shoulder-centered, arm-length-normalized space
-            Vector3 shoulderToHand = handTargetPos - shoulderPos;
-            Vector3 localPos = invFrame * shoulderToHand / armLength;
-
-            // Mirror X for left arm (lookup table is generated for right arm perspective)
-            if (isLeft)
-            {
-                localPos.x = -localPos.x;
-            }
-
-            // Sample the lookup table
-            NativeArray<Vector3> table = isLeft ? ArmBendLookupLeft : ArmBendLookupRight;
-            Vector3 localBend = BasisArmBendLookup.SampleTrilinear(table, localPos);
-
-            // Mirror result back for left arm
-            if (isLeft)
-            {
-                localBend.x = -localBend.x;
-            }
-
-            // Transform bend direction back to world space
-            Vector3 worldBend = (frameRot * localBend).normalized;
-
-            // Chicken-wing flare (no elbow tracker only -- this path): turning the controller inward pushes the
-            // derived elbow OUT toward the half-T-pose mark and hard-clamps it there. Outward = the arm's
-            // away-from-body side in the bend frame; engagement comes from the controller roll. A no-op when the
-            // controller isn't rolled in (so normal reaches are untouched).
-            Vector3 outward = frameRot * (isLeft ? Vector3.left : Vector3.right);
-            return BasisElbowFlareCore.ApplyChickenWingFlare(worldBend, handTargetPos - shoulderPos, outward,
-                playerUp.Get(stream), handTargetRot, elbowFlareInwardGain.Get(stream),
-                elbowFlareFullRollDeg.Get(stream), elbowFlareMaxDeg.Get(stream));
+            return BasisSwivelHintCore.BuildFrame(
+                HandleLeftUpperArm.GetPosition(stream), HandleRightUpperArm.GetPosition(stream),
+                HandleChest.GetPosition(stream), HandleNeck.GetPosition(stream));
         }
-        // Elbow-bend reference frame: chest pitch/roll with hips yaw, so head-gaze chest yaw
-        // doesn't sweep the lookup and flip the elbow pole. Falls back to chest if no hips.
-        Quaternion ArmBendFrame(AnimationStream stream)
+        /// <summary>
+        /// The LEG's body frame hangs off the PELVIS, not the chest: hip line for right, hips->chest for up.
+        /// Same positions-only construction, same reason.
+        /// </summary>
+        BasisSwivelFrame BuildLegFrame(AnimationStream stream)
         {
-            Quaternion chestRot = HandleChest.GetRotation(stream);
-            if (!HandleHips.IsValid(stream))
+            if (!HandleLeftUpperLeg.IsValid(stream) || !HandleRightUpperLeg.IsValid(stream)
+                || !HandleHips.IsValid(stream) || !HandleChest.IsValid(stream))
             {
-                return chestRot;
+                return default;
             }
 
-            // Spring-smoothed hips rotation (UpdateHipFrameSpring): hip jitter/sway no longer wobbles the
-            // derived elbow pole. Falls back to the raw hips before the spring is seeded / when disabled.
-            Quaternion hipsRot = (hipFrameSpringInit.IsCreated && hipFrameSpringRot.IsCreated && hipFrameSpringInit[0] != 0)
-                ? hipFrameSpringRot[0]
-                : HandleHips.GetRotation(stream);
-            Quaternion chestRelative = Quaternion.Inverse(hipsRot) * chestRot;
-            // Drop the chest's yaw (twist around hips-up), keep its swing (pitch/roll).
-            Quaternion chestYaw = ExtractTwist(chestRelative, Vector3.up);
-            Quaternion chestSwing = chestRelative * Quaternion.Inverse(chestYaw);
-            return hipsRot * chestSwing;
+            return BasisSwivelHintCore.BuildFrame(
+                HandleLeftUpperLeg.GetPosition(stream), HandleRightUpperLeg.GetPosition(stream),
+                HandleHips.GetPosition(stream), HandleChest.GetPosition(stream));
         }
         public static Vector3 ClosestPointOnSegment(Vector3 p, Vector3 a, Vector3 b)
         {
@@ -2364,9 +2520,9 @@ w20, w54;
         /// <param name="hint">The transform handle for the hint transform.</param>
         /// <param name="HasHint">The weight for which hint transform has an effect on IK calculations. This is a value in between 0 and 1.</param>
         /// <param name="targetOffset">The offset applied to the target transform.</param>
-        public void SolveTwoBone(AnimationStream stream, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, AffineTransform target, AffineTransform hint, float hintWeight, Quaternion targetOffset, Vector3 BendNormal)
+        public void SolveTwoBone(AnimationStream stream, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, AffineTransform target, AffineTransform hint, float hintWeight, Quaternion targetOffset, Vector3 BendNormal, float hintDistrust = 0f)
         {
-            BasisLegSolveInput input;
+            BasisLegSolveInput input = default;
             input.Root = root.GetPosition(stream);
             input.Mid = mid.GetPosition(stream);
             input.Tip = tip.GetPosition(stream);
@@ -2376,6 +2532,7 @@ w20, w54;
             input.TargetRotation = target.rotation;
             input.HintPosition = hint.translation;
             input.HintWeight = hintWeight;
+            input.HintDistrust = hintDistrust;
             input.TargetOffset = targetOffset;
             input.BendNormal = BendNormal;
 
@@ -2387,7 +2544,7 @@ w20, w54;
             tip.SetRotation(stream, result.TipRotation);
         }
         public Quaternion V4ToQuat(Vector4 v) => new Quaternion(v.x, v.y, v.z, v.w);
-        public void SolveLegs(AnimationStream stream, FloatProperty enabledProp, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, Vector3Property targetPosProp, Vector4Property targetRotProp, Vector3Property hintPosProp, Vector4Property hintRotProp, FloatProperty hintWeightProp, Quaternion targetOffset, Vector3Property bendNormalProp, BoolProperty hintIsTrackerProp, int legSlot)
+        public void SolveLegs(AnimationStream stream, FloatProperty enabledProp, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, Vector3Property targetPosProp, Vector4Property targetRotProp, Vector3Property hintPosProp, FloatProperty hintWeightProp, Quaternion targetOffset, Vector3Property bendNormalProp, BoolProperty hintIsTrackerProp, int legSlot)
         {
             float posWeight = enabledProp.Get(stream);
             if (posWeight <= 0f)
@@ -2399,32 +2556,72 @@ w20, w54;
             {
                 return;
             }
-            Vector3 origRootPos = root.GetPosition(stream);
             Quaternion origRootRot = root.GetRotation(stream);
             Quaternion origMidRot = mid.GetRotation(stream);
-            Vector3 origTipPos = tip.GetPosition(stream);
             Quaternion origTipRot = tip.GetRotation(stream);
 
             // Solve at full strength toward the IK target
             Quaternion tRot = V4ToQuat(targetRotProp.Get(stream));
             // Zero-quaternion target = position-only foot IK: keep the foot's pre-solve (animation) rotation,
             // which is already correct, instead of applying target*offset. Sidesteps the foot offset entirely.
-            bool preserveTip = (tRot.x * tRot.x + tRot.y * tRot.y + tRot.z * tRot.z + tRot.w * tRot.w) < 0.5f;
+            //
+            // Written as !(x > 0.5f), NOT (x < 0.5f). Those are the same for every finite number and OPPOSITE for
+            // NaN: `NaN < 0.5f` is FALSE, so the old shape declared a NaN target "valid" and fed it straight into
+            // SolveTwoBone -- and a NaN'd bone transform PERSISTS in Unity, so the leg dies and never recovers,
+            // not even once good data returns. `!(NaN > 0.5f)` is TRUE, so a NaN now lands in the SAFE branch and
+            // the foot simply keeps the animation's rotation. A validity check must be "reject unless good", never
+            // "reject if bad", or it fails open on exactly the input that hurts most.
+            float tRotSqrLen = tRot.x * tRot.x + tRot.y * tRot.y + tRot.z * tRot.z + tRot.w * tRot.w;
+            bool preserveTip = !(tRotSqrLen > 0.5f);
             if (preserveTip) tRot = origTipRot;
-            Quaternion hRot = V4ToQuat(hintRotProp.Get(stream));
             float hintW = hintWeightProp.Get(stream);
 
             AffineTransform target = new AffineTransform(targetPosProp.Get(stream), tRot);
-            AffineTransform hint = new AffineTransform(hintPosProp.Get(stream), hRot);
+            // Hint rotation is unused by the leg solve (BasisLegSolveInput has no rotation field).
+            AffineTransform hint = new AffineTransform(hintPosProp.Get(stream), Quaternion.identity);
             Vector3 bendNormal = bendNormalProp.Get(stream);
 
-            SolveTwoBone(stream, root, mid, tip, target, hint, hintW, targetOffset, bendNormal);
+            float hintDistrust = 0f;
+            if (!(hintW > 0f))
+            {
+                // NO KNEE TRACKER. The leg used to have no hint model AT ALL here -- it fell through to
+                // BendNormal = hips-right, a FIXED body axis. A fixed pole collapses precisely when the leg
+                // straightens, and standing IS a straight leg, so the knee sat on the pole singularity nearly all
+                // the time: that is why it snapped past ~95% extension and why it never tracked where a real
+                // knee was. Predict the swivel angle instead; see BasisLegSwivelModel.
+                //
+                // Fed as a HINT, deliberately, and NOT by overwriting BendNormal. BendNormal does double duty in
+                // BasisLegSolveCore: it is the no-hint fallback pole AND it is the ANTERIOR REFERENCE for the
+                // half-space guard that stops a knee bending backwards through the joint. Overwrite it and the
+                // guard starts measuring "anterior" from the model's own answer, which makes it unfalsifiable.
+                // As a hint the model steers the knee and the hips-right anterior reference still guards it.
+                BasisSwivelFrame frame = BuildLegFrame(stream);
+
+                Vector3 hipPos = root.GetPosition(stream);
+                float upperLen = (mid.GetPosition(stream) - hipPos).magnitude;
+                float lowerLen = (tip.GetPosition(stream) - mid.GetPosition(stream)).magnitude;
+                float legLen = upperLen + lowerLen;
+                bool isLeft = legSlot == 0;
+
+                // The confidence is used as POLE distrust, never as a fade of hintW -- hintW is discontinuous
+                // at zero, and that jump is the pop the earlier weight-fade attempt measured (70 -> 65) and
+                // wrongly blamed on the idea rather than the mechanism. See BasisSwivelHintCore.LegModelTrust.
+                if (BasisSwivelHintCore.LegHint(frame, hipPos, target.translation, legLen, isLeft,
+                                                out Vector3 modelHint, out float conf))
+                {
+                    hint = new AffineTransform(modelHint, Quaternion.identity);
+                    hintW = 1f;
+                    hintDistrust = 1f - BasisSwivelHintCore.LegModelTrust(conf);
+                }
+            }
+
+            SolveTwoBone(stream, root, mid, tip, target, hint, hintW, targetOffset, bendNormal, hintDistrust);
+            // Rotation-only fade: the solve produces rotations, so blending positions here would
+            // translate bones off the FK chain (dislocated foot) mid-fade.
             if (posWeight < 1f)
             {
-                root.SetPosition(stream, Vector3.Lerp(origRootPos, root.GetPosition(stream), posWeight));
                 root.SetRotation(stream, Quaternion.Slerp(origRootRot, root.GetRotation(stream), posWeight));
                 mid.SetRotation(stream, Quaternion.Slerp(origMidRot, mid.GetRotation(stream), posWeight));
-                tip.SetPosition(stream, Vector3.Lerp(origTipPos, tip.GetPosition(stream), posWeight));
                 tip.SetRotation(stream, Quaternion.Slerp(origTipRot, tip.GetRotation(stream), posWeight));
             }
             if (preserveTip) tip.SetRotation(stream, origTipRot);
@@ -2439,13 +2636,29 @@ w20, w54;
             //    jitter via the bend normal -> heavy 1 Hz floor (the original leg-twist fix).
             if (legSwivelSmoothing.Get(stream))
             {
-                if (hintIsTrackerProp.Get(stream))
+                if (hintIsTrackerProp.Get(stream) || !preserveTip)
                 {
+                    // Something REAL drives this leg -- a knee/lower-leg tracker, or (no knee tracker but) a FOOT
+                    // tracker. Track it responsively.
+                    //
+                    // The foot-tracker case must NOT get the heavy standing floor below. That floor is justified by
+                    // "a turn moves the whole leg, so the swivel angle is ~unchanged" -- which only holds when the
+                    // foot moves WITH the body. A tracked foot is welded to the user's REAL foot, so a
+                    // character-controller turn rotates the hips while the foot stays put in the world: the leg's
+                    // body-frame geometry genuinely swings, the swivel angle really does change, and a 1 Hz
+                    // low-pass drags the knee visibly behind the turn. The pole is still invented and still needs
+                    // damping -- just at the responsive rate, not the fabricated-leg rate.
                     SmoothKneeSwivel(stream, root, mid, tip, legSlot, stream.deltaTime,
                         k_TrackedKneeSwivelMinCutoffHz, k_TrackedKneeSwivelBeta, k_TrackedKneeSwivelDerivCutoffHz);
                 }
-                else if (preserveTip)
+                else
                 {
+                    // Nothing real drives this leg: no knee tracker AND no foot tracker, so the pole is invented
+                    // (BendNormal = hipsRot * right) and the foot rides the body. A near-full-extension standing
+                    // leg sits on the pole singularity, where hips-yaw jitter is amplified hardest into knee
+                    // swivel -> heavy 1 Hz floor (the original leg-twist fix). Safe here precisely BECAUSE the
+                    // foot moves with the body: a turn carries the whole leg, so the body-frame swivel angle
+                    // barely changes and there is nothing real for the filter to lag.
                     SmoothKneeSwivel(stream, root, mid, tip, legSlot, stream.deltaTime,
                         BasisSwivelFilterCore.MinCutoffHz, BasisSwivelFilterCore.Beta, BasisSwivelFilterCore.DerivCutoffHz);
                 }
@@ -2469,55 +2682,6 @@ w20, w54;
                 }
             }
         }
-        // OneEuro smoothing of the ELBOW SWIVEL output (the angle the elbow makes around the shoulder->hand
-        // axis). The hand stays exactly on target -- only the swivel is damped. The velocity is low-passed
-        // FIRST, so frame-to-frame jitter (zero-mean swivel velocity) leaves the cutoff at its floor (heavy
-        // smoothing -> the solve's amplification of tiny input noise is killed), while a real reach (sustained
-        // swivel velocity) opens the cutoff so the elbow tracks with no lag. Per swing slot.
-        void SmoothElbowSwivel(AnimationStream stream, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, int slot, float dt)
-        {
-            if (!armLookupInit.IsCreated || slot < 0 || slot >= armLookupInit.Length || dt <= 1e-6f)
-            {
-                return;
-            }
-            Vector3 a = root.GetPosition(stream), b = mid.GetPosition(stream), c = tip.GetPosition(stream);
-            Vector3 ac = c - a;
-            float acSqr = ac.sqrMagnitude;
-            if (acSqr < k_SqrEpsilon) return;
-            Vector3 axis = ac / Mathf.Sqrt(acSqr);
-            Vector3 refDir = Vector3.ProjectOnPlane(Vector3.down, axis);
-            Vector3 pole = Vector3.ProjectOnPlane(b - a, axis);
-            if (refDir.sqrMagnitude < k_SqrEpsilon || pole.sqrMagnitude < k_SqrEpsilon) return;
-            refDir.Normalize();
-            float curSwivel = Vector3.SignedAngle(refDir, pole, axis);
-
-            if (armLookupInit[slot] == 0)
-            {
-                BasisSwivelFilterState seed = BasisSwivelFilterCore.Seed(curSwivel);
-                armLookupRaw[slot] = new Vector3(seed.Raw, seed.Vel, 0f);
-                armLookupSmooth[slot] = new Vector3(seed.Smooth, 0f, 0f);
-                armLookupInit[slot] = 1;
-                return;
-            }
-            BasisSwivelFilterState swivelState;
-            swivelState.Raw = armLookupRaw[slot].x;
-            swivelState.Vel = armLookupRaw[slot].y;
-            swivelState.Smooth = armLookupSmooth[slot].x;
-            swivelState = BasisSwivelFilterCore.Step(swivelState, curSwivel, dt);
-            float smooth = swivelState.Smooth;
-            armLookupRaw[slot] = new Vector3(swivelState.Raw, swivelState.Vel, 0f);
-            armLookupSmooth[slot] = new Vector3(swivelState.Smooth, 0f, 0f);
-
-            Vector3 center = a + axis * Vector3.Dot(b - a, axis);
-            float radius = (b - center).magnitude;
-            if (radius < k_Epsilon) return;
-            Vector3 desiredElbow = center + (Quaternion.AngleAxis(smooth, axis) * refDir) * radius;
-            Vector3 preHand = c;
-            Quaternion preHandRot = tip.GetRotation(stream);
-            SwingElbowAroundAC(stream, root, mid, tip, desiredElbow);
-            tip.SetPosition(stream, preHand);
-            tip.SetRotation(stream, preHandRot);
-        }
         // Tracked-knee swivel cutoffs. A One-Euro rejects rest jitter at its FLOOR, so the floor stays low
         // (near the 1 Hz standing floor) to actually kill the pole-amplified tracker jitter -- a high floor
         // would pass it straight through. The difference from the standing path is a much larger BETA: a knee
@@ -2527,61 +2691,70 @@ w20, w54;
         const float k_TrackedKneeSwivelBeta = 0.20f;        // 4x standing: opens fast so real shin motion isn't lagged
         const float k_TrackedKneeSwivelDerivCutoffHz = 1.0f;
 
-        // Leg analog of SmoothElbowSwivel: OneEuro low-pass of the knee swivel (leg roll about the
+        // OneEuro low-pass of the knee swivel (leg roll about the
         // hip->foot axis), foot kept exactly on target. Damps swivel jitter without lagging a real turn or
         // locomotion (both move the whole leg, leaving the swivel angle ~unchanged). Called on the no-foot-
         // tracker path (standing twist) and the tracked-knee path (pole-amplified tracker jitter); the
         // caller passes the appropriate One-Euro cutoffs. Per-leg slot.
         void SmoothKneeSwivel(AnimationStream stream, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, int slot, float dt, float minCutoffHz, float beta, float derivCutoffHz)
         {
-            if (!legSwivelInit.IsCreated || slot < 0 || slot >= legSwivelInit.Length || dt <= 1e-6f)
+            if (!legSwivelInit.IsCreated || slot < 0 || slot >= legSwivelInit.Length || !HandleHips.IsValid(stream))
             {
                 return;
             }
-            Vector3 a = root.GetPosition(stream), b = mid.GetPosition(stream), c = tip.GetPosition(stream);
-            Vector3 ac = c - a;
-            float acSqr = ac.sqrMagnitude;
-            if (acSqr < k_SqrEpsilon) return;
-            Vector3 axis = ac / Mathf.Sqrt(acSqr);
+            BasisSwivelSmootherInput input = default;
+            input.Root = root.GetPosition(stream);
+            input.Mid = mid.GetPosition(stream);
+            input.Tip = tip.GetPosition(stream);
+            input.BodyRotation = HandleHips.GetRotation(stream);
             // A standing leg hangs along the AC axis, so Vector3.down (the arm's ref) is colinear and
-            // degenerate here. Reference off forward (the knee bulges forward); right as the fallback.
-            Vector3 refDir = Vector3.forward - axis * Vector3.Dot(Vector3.forward, axis);
-            if (refDir.sqrMagnitude < k_SqrEpsilon) refDir = Vector3.right - axis * Vector3.Dot(Vector3.right, axis);
-            Vector3 pole = (b - a) - axis * Vector3.Dot(b - a, axis);
-            if (refDir.sqrMagnitude < k_SqrEpsilon || pole.sqrMagnitude < k_SqrEpsilon) return;
-            refDir.Normalize();
-            float curSwivel = Vector3.SignedAngle(refDir, pole, axis);
+            // degenerate here. Reference off body forward (the knee bulges forward); body right as the fallback.
+            input.ReferenceLocal = Vector3.forward;
+            input.FallbackLocal = Vector3.right;
+            input.Dt = dt;
+            input.MinCutoffHz = minCutoffHz;
+            input.Beta = beta;
+            input.DerivCutoffHz = derivCutoffHz;
+            // A standing leg sits ON the pole singularity -- footHeightOffset is deliberately clamped so the legs
+            // fully extend, which parks hip->foot distance at ~= thigh+shin, leaving the knee on the hip->foot axis
+            // with no meaningful bend plane. There the raw swivel is noise, and a speed-adaptive filter reads that
+            // noise as intent and opens right up (see BasisSwivelSmootherCore). Condition the filter on the pole's
+            // lever arm so it damps hard while straight and recovers full responsiveness once the knee is bent.
+            // Only the LEG opts in; the arm keeps the legacy path.
+            input.ConditionOnPole = true;
+            input.SingularMinCutoffHz = BasisSwivelFilterCore.MinCutoffHz;
+            // A knee is a hinge: it cannot bend backwards. The solve already refuses to PLACE the knee posterior
+            // (BasisLegSolveCore's pole guard), but this smoother MOVES it afterwards, so without the same bound
+            // here a lagging filter could still drag it through the joint. Same limits, one shared clamp.
+            input.GuardAnteriorHalfSpace = true;
+            input.AnteriorSoftDeg = BasisLegSolveCore.KneeAnteriorSoftDeg;
+            input.AnteriorHardDeg = BasisLegSolveCore.KneeAnteriorHardDeg;
+            input.State = new BasisSwivelFilterState { Raw = legSwivelRaw[slot].x, Vel = legSwivelRaw[slot].y, Smooth = legSwivelSmooth[slot].x };
+            input.Seeded = legSwivelInit[slot] != 0;
 
-            if (legSwivelInit[slot] == 0)
+            BasisSwivelSmootherCore.Solve(input, out BasisSwivelSmootherResult result);
+            if (result.WriteState)
             {
-                BasisSwivelFilterState seed = BasisSwivelFilterCore.Seed(curSwivel);
-                legSwivelRaw[slot] = new Vector3(seed.Raw, seed.Vel, 0f);
-                legSwivelSmooth[slot] = new Vector3(seed.Smooth, 0f, 0f);
+                legSwivelRaw[slot] = new Vector3(result.State.Raw, result.State.Vel, 0f);
+                legSwivelSmooth[slot] = new Vector3(result.State.Smooth, 0f, 0f);
                 legSwivelInit[slot] = 1;
+            }
+            if (!result.Valid)
+            {
                 return;
             }
-            BasisSwivelFilterState swivelState;
-            swivelState.Raw = legSwivelRaw[slot].x;
-            swivelState.Vel = legSwivelRaw[slot].y;
-            swivelState.Smooth = legSwivelSmooth[slot].x;
-            swivelState = BasisSwivelFilterCore.Step(swivelState, curSwivel, dt, minCutoffHz, beta, derivCutoffHz);
-            float smooth = swivelState.Smooth;
-            legSwivelRaw[slot] = new Vector3(swivelState.Raw, swivelState.Vel, 0f);
-            legSwivelSmooth[slot] = new Vector3(swivelState.Smooth, 0f, 0f);
 
-            Vector3 center = a + axis * Vector3.Dot(b - a, axis);
-            float radius = (b - center).magnitude;
-            if (radius < k_Epsilon) return;
-            Vector3 desiredKnee = center + (Quaternion.AngleAxis(smooth, axis) * refDir) * radius;
-            Vector3 preFoot = c;
+            Vector3 preFoot = input.Tip;
             Quaternion preFootRot = tip.GetRotation(stream);
-            SwingElbowAroundAC(stream, root, mid, tip, desiredKnee);
+            SwingElbowAroundAC(stream, root, mid, tip, result.DesiredMid);
             tip.SetPosition(stream, preFoot);
             tip.SetRotation(stream, preFootRot);
         }
-        public void SolveHand(AnimationStream stream, BoolProperty enabledProp, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, Vector3Property targetPosProp, Vector4Property targetRotProp, Vector3Property hintPosProp, Vector4Property hintRotProp, BoolProperty hintWeightProp, Quaternion targetOffset, ReadWriteTransformHandle chestStart, ReadWriteTransformHandle chestEnd, FloatProperty chestRadius, FloatProperty collisionSkin, BoolProperty collisionsEnabled, FloatProperty handRadius, FloatProperty handSkin, BoolProperty useHandCapsule, BoolProperty protectElbow, BoolProperty collideTrackedElbow, int swingSlot)
+        public void SolveHand(AnimationStream stream, FloatProperty enabledProp, ReadWriteTransformHandle root, ReadWriteTransformHandle mid, ReadWriteTransformHandle tip, Vector3Property targetPosProp, Vector4Property targetRotProp, Vector3Property hintPosProp, Vector4Property hintRotProp, BoolProperty hintWeightProp, Quaternion targetOffset, ReadWriteTransformHandle chestStart, ReadWriteTransformHandle chestEnd, FloatProperty chestRadius, FloatProperty collisionSkin, BoolProperty collisionsEnabled, FloatProperty handRadius, FloatProperty handSkin, BoolProperty protectElbow, BoolProperty collideTrackedElbow, int swingSlot)
         {
-            if (!enabledProp.Get(stream))
+            // Written `!(w > 0)` so a NaN weight takes the reject branch rather than solving on garbage.
+            float weight = enabledProp.Get(stream);
+            if (!(weight > 0f))
             {
                 return;
             }
@@ -2589,6 +2762,12 @@ w20, w54;
             {
                 return;
             }
+
+            // Rotation-only fade, exactly as SolveLegs does it: the solve produces ROTATIONS, so blending
+            // positions mid-fade would translate bones off the FK chain and dislocate the hand.
+            Quaternion origRootRot = root.GetRotation(stream);
+            Quaternion origMidRot = mid.GetRotation(stream);
+            Quaternion origTipRot = tip.GetRotation(stream);
 
             // Read inputs
             Vector3 tgtPos = targetPosProp.Get(stream);
@@ -2599,32 +2778,60 @@ w20, w54;
             var target = new AffineTransform(tgtPos, tgtRot);
             var hint = new AffineTransform(hintPos, hintRot);
             bool hasHint = hintWeightProp.Get(stream);
-            bool usedLookup = false;
+            bool usedModel = false;
 
-            if (!hasHint && HasArmBendLookup && HandleChest.IsValid(stream))
+            if (!hasHint)
             {
+                // NO ELBOW TRACKER: predict the elbow's SWIVEL ANGLE about the shoulder->hand axis.
+                //
+                // With the shoulder and the hand both fixed the elbow is confined to a CIRCLE, so its entire
+                // redundancy is ONE SCALAR. Predicting that angle lands the elbow ON the reachable circle by
+                // construction -- which is exactly why the snap past ~95% extension cannot happen here. The old
+                // lookup predicted a 3-VECTOR, which does not lie on the circle, so the solver needed fades and
+                // pole guards to drag it back; and as the arm straightens the circle collapses, the fades
+                // switched the hint off, and the pole was handed to a fallback pointing somewhere else. THAT
+                // HANDOFF WAS THE SNAP. An angle stays defined and continuous at every extension, and the
+                // resulting POSITION change goes to zero on its own as the circle shrinks.
+                BasisSwivelFrame frame = BuildArmFrame(stream);
+
                 Vector3 shoulderPos = root.GetPosition(stream);
                 float upperLen = (mid.GetPosition(stream) - shoulderPos).magnitude;
                 float lowerLen = (tip.GetPosition(stream) - mid.GetPosition(stream)).magnitude;
                 float armLen = upperLen + lowerLen;
-                bool isLeft = Vector3.Dot(shoulderPos - HandleChest.GetPosition(stream), HandleChest.GetRotation(stream) * Vector3.right) < 0f;
+                // Handedness is structural — derive it from the swing slot the binding assigned,
+                // not from live chest geometry (a heavy chest roll, e.g. lying on your side, can
+                // flip a geometric test and mirror the model mid-session).
+                bool isLeft = swingSlot == k_SwingLeftElbow;
 
-                Vector3 lookupBend = ComputeArmBendFromLookup(stream, shoulderPos, tgtPos, tgtRot, armLen, isLeft);
-                hint = new AffineTransform(shoulderPos + 0.5f * armLen * lookupBend, hintRot);
-                hasHint = true;
-                usedLookup = true;
+                // NO CONFIDENCE GATE. There used to be one -- `conf > 0.20` -- and it was a boolean cliff:
+                // below it the hint was dropped ENTIRELY and the elbow was handed back to whatever the
+                // animation clip was doing. Switching between two unrelated poles IS the pop, and the LEG
+                // worked this out long ago and deleted its copy (see BasisSwivelHintCore.LegHint's comment,
+                // which says exactly this). The arm's survived. BasisElbowFieldModel has nothing to be
+                // unconfident about anyway: its only degeneracy is geometric and it fades it internally.
+                if (BasisSwivelHintCore.ArmHint(frame, shoulderPos, tgtPos, armLen, isLeft,
+                                                out Vector3 modelHint, out _))
+                {
+                    hint = new AffineTransform(modelHint, hintRot);
+                    hasHint = true;
+                    usedModel = true;
+                }
             }
-            SolveTwoBoneIKArms(stream, root, mid, tip, target, hint, hasHint, hasHint && !usedLookup, targetOffset);
-            // Only damp the elbow on the lookup (no-tracker) path. A real elbow tracker is the user's
-            // intentional input -- smoothing it just mutes the hint they're moving (the knee has no such
-            // damper, which is why it feels far more responsive). Tracker present => drive the elbow directly.
-            if (usedLookup)
-            {
-                SmoothElbowSwivel(stream, root, mid, tip, swingSlot, stream.deltaTime);
-            }
+            SolveTwoBoneIKArms(stream, root, mid, tip, target, hint, hasHint, hasHint && !usedModel, targetOffset);
+            // NO OUTPUT FILTER ON THE MODEL PATH, and that is a measured choice, not an oversight.
+            //
+            // SmoothElbowSwivel is a One-Euro on the elbow swivel. It existed to fight the LOOKUP's jitter
+            // (0.126) -- a table sampled by a moving hand is not smooth, so its output had to be filtered. The
+            // model is a POLYNOMIAL: C-infinity, smooth by construction, and it measures JITTER 0.042, which is
+            // lower than a real elbow TRACKER's (0.046), with zero pops. Filtering something already smoother
+            // than the hardware buys nothing and costs lag on every deliberate reach.
+            //
+            // A real elbow tracker was never filtered either (the old code gated on `usedLookup`), for the same
+            // reason it should not be: it is the user's own input, and damping it just mutes the hint they are
+            // moving. So the filter now has no caller, and the arm's One-Euro state is gone with it.
             int collisionState = 0;
             bool doCollisions = collisionsEnabled.Get(stream) && chestStart.IsValid(stream) && chestEnd.IsValid(stream);
-            bool elbowTrackerForced = hasHint && !usedLookup;
+            bool elbowTrackerForced = hasHint && !usedModel;
             if (doCollisions && protectElbow.Get(stream) && (!elbowTrackerForced || collideTrackedElbow.Get(stream)))
             {
                 // Geometry lives in BasisElbowProtectCore so the offline sweep harness runs the
@@ -2660,6 +2867,13 @@ w20, w54;
             if (swingCollided.IsCreated)
             {
                 swingCollided[swingSlot] = collisionState;
+            }
+
+            if (weight < 1f)
+            {
+                root.SetRotation(stream, Quaternion.Slerp(origRootRot, root.GetRotation(stream), weight));
+                mid.SetRotation(stream, Quaternion.Slerp(origMidRot, mid.GetRotation(stream), weight));
+                tip.SetRotation(stream, Quaternion.Slerp(origTipRot, tip.GetRotation(stream), weight));
             }
         }
         public float TriangleAngle(float aLen, float aLen1, float aLen2)
@@ -2708,7 +2922,7 @@ w20, w54;
                 targetPositionHips = Vector3Property.Bind(animator, component, data.TargetPositionPropertyHips),
                 targetPositionHead = Vector3Property.Bind(animator, component, data.TargetPositionPropertyHead),
                 TargetChestPosition = Vector3Property.Bind(animator, component, data.PropertyChestPosition),
-                bendNormalHead = Vector3Property.Bind(animator, component, data.BendNormalHeadProperty),
+                TargetChestPositionRaw = Vector3Property.Bind(animator, component, data.PropertyChestPositionRaw),
                 playerUp = Vector3Property.Bind(animator, component, data.PlayerUpProperty),
 
                 KneeBendPrefLeft = Vector3Property.Bind(animator, component, data.KneeBendPrefLeftProperty),
@@ -2718,8 +2932,6 @@ w20, w54;
                 hintPositionLeftLowerLeg = Vector3Property.Bind(animator, component, data.HintPositionPropertyLeftLowerLeg),
                 targetPositionRightLowerLeg = Vector3Property.Bind(animator, component, data.TargetPositionPropertyRightLowerLeg),
                 hintPositionRightLowerLeg = Vector3Property.Bind(animator, component, data.HintPositionPropertyRightLowerLeg),
-                leftDrivenTargetPos = Vector3Property.Bind(animator, component, data.LeftDrivenTargetPosProperty),
-                rightDrivenTargetPos = Vector3Property.Bind(animator, component, data.RightDrivenTargetPosProperty),
                 targetPositionLeftHand = Vector3Property.Bind(animator, component, data.TargetPositionPropertyLeftHand),
                 hintPositionLeftHand = Vector3Property.Bind(animator, component, data.HintPositionPropertyLeftHand),
                 targetPositionRightHand = Vector3Property.Bind(animator, component, data.TargetPositionPropertyRightHand),
@@ -2731,9 +2943,7 @@ w20, w54;
                 TargetRotationLeftShoulder = Vector4Property.Bind(animator, component, data.TargetRotationLeftShoulderProperty),
                 TargetRotationRightShoulder = Vector4Property.Bind(animator, component, data.TargetRotationRightShoulderProperty),
                 targetRotationLeftLowerLeg = Vector4Property.Bind(animator, component, data.TargetRotationPropertyLeftLowerLeg),
-                hintRotationLeftLowerLeg = Vector4Property.Bind(animator, component, data.HintRotationPropertyLeftLowerLeg),
                 targetRotationRightLowerLeg = Vector4Property.Bind(animator, component, data.TargetRotationPropertyRightLowerLeg),
-                hintRotationRightLowerLeg = Vector4Property.Bind(animator, component, data.HintRotationPropertyRightLowerLeg),
                 leftDrivenTargetRot = Vector4Property.Bind(animator, component, data.LeftDrivenTargetRotProperty),
                 rightDrivenTargetRot = Vector4Property.Bind(animator, component, data.RightDrivenTargetRotProperty),
                 targetRotationLeftHand = Vector4Property.Bind(animator, component, data.TargetRotationPropertyLeftHand),
@@ -2749,14 +2959,13 @@ w20, w54;
                 hintWeightRightLowerLeg = FloatProperty.Bind(animator, component, data.HintWeightBoolPropertyRightLowerLeg),
                 leftToeEnabled = BoolProperty.Bind(animator, component, data.LeftToeEnabledProperty),
                 RightToeEnabled = BoolProperty.Bind(animator, component, data.RightToeEnabledProperty),
-                enabledLeftHand = BoolProperty.Bind(animator, component, data.EnabledPropertyLeftHand),
+                enabledLeftHand = FloatProperty.Bind(animator, component, data.EnabledPropertyLeftHand),
                 hintWeightLeftHand = BoolProperty.Bind(animator, component, data.HintWeightBoolPropertyLeftHand),
-                enabledRightHand = BoolProperty.Bind(animator, component, data.EnabledPropertyRightHand),
+                enabledRightHand = FloatProperty.Bind(animator, component, data.EnabledPropertyRightHand),
                 hintWeightRightHand = BoolProperty.Bind(animator, component, data.HintWeightBoolPropertyRightHand),
                 protectElbow = BoolProperty.Bind(animator, component, data.ProtectElbowBoolProperty),
                 collideTrackedElbow = BoolProperty.Bind(animator, component, data.CollideTrackedElbowBoolProperty),
                 collisionsEnabled = BoolProperty.Bind(animator, component, data.CollisionsEnabledBoolProperty),
-                useHandCapsule = BoolProperty.Bind(animator, component, data.UseHandCapsuleBoolProperty),
                 chestRadius = FloatProperty.Bind(animator, component, data.ChestRadiusFloatProperty),
                 collisionSkin = FloatProperty.Bind(animator, component, data.CollisionSkinFloatProperty),
                 handRadius = FloatProperty.Bind(animator, component, data.HandRadiusFloatProperty),
@@ -2764,9 +2973,6 @@ w20, w54;
                 maxBendDeg = FloatProperty.Bind(animator, component, data.MaxBendDegFloatProperty),
                 minFactor = FloatProperty.Bind(animator, component, data.MinFactorFloatProperty),
                 maxFactor = FloatProperty.Bind(animator, component, data.MaxFactorFloatProperty),
-                struggleStart = FloatProperty.Bind(animator, component, data.StruggleStartFloatProperty),
-                struggleEnd = FloatProperty.Bind(animator, component, data.StruggleEndFloatProperty),
-                MaxHipDeltaProperty = FloatProperty.Bind(animator, component, data.MaxHipDeltaPropertyDegFloatProperty),
                 MaxChestDeltaProperty = FloatProperty.Bind(animator, component, data.MaxChestDeltaPropertyDegFloatProperty),
                 enabledLeftShoulder = BoolProperty.Bind(animator, component, data.EnabledLeftShoulderProperty),
                 enabledRightShoulder = BoolProperty.Bind(animator, component, data.EnabledRightShoulderProperty),
@@ -2784,6 +2990,7 @@ w20, w54;
 
                 // Shoulder solve bindings
                 shoulderSolveEnabled = BoolProperty.Bind(animator, component, data.ShoulderSolveEnabledProperty),
+                shoulderShrugEnabled = BoolProperty.Bind(animator, component, data.ShoulderShrugEnabledProperty),
                 shoulderElevationFactor = FloatProperty.Bind(animator, component, data.ShoulderElevationFactorProperty),
                 shoulderProtractionFactor = FloatProperty.Bind(animator, component, data.ShoulderProtractionFactorProperty),
 
@@ -2798,15 +3005,12 @@ w20, w54;
                 hipHingeMaxAddDeg = FloatProperty.Bind(animator, component, data.HipHingeMaxAddDegFloatProperty),
                 chestSpringHz = FloatProperty.Bind(animator, component, data.ChestSpringHzFloatProperty),
                 chestSpringDamping = FloatProperty.Bind(animator, component, data.ChestSpringDampingFloatProperty),
-                hipFrameSpringHz = FloatProperty.Bind(animator, component, data.HipFrameSpringHzFloatProperty),
-                hipFrameSpringDamping = FloatProperty.Bind(animator, component, data.HipFrameSpringDampingFloatProperty),
-                elbowFlareMaxDeg = FloatProperty.Bind(animator, component, data.ElbowFlareMaxDegFloatProperty),
-                elbowFlareInwardGain = FloatProperty.Bind(animator, component, data.ElbowFlareInwardGainFloatProperty),
-                elbowFlareFullRollDeg = FloatProperty.Bind(animator, component, data.ElbowFlareFullRollDegFloatProperty),
                 spineMaxForwardDeg = FloatProperty.Bind(animator, component, data.SpineMaxForwardDegFloatProperty),
                 spineMaxBackwardDeg = FloatProperty.Bind(animator, component, data.SpineMaxBackwardDegFloatProperty),
                 spineMaxLateralDeg = FloatProperty.Bind(animator, component, data.SpineMaxLateralDegFloatProperty),
                 spineSquishBoost = FloatProperty.Bind(animator, component, data.SpineSquishBoostFloatProperty),
+                spineGazeFollow = FloatProperty.Bind(animator, component, data.SpineGazeFollowFloatProperty),
+                neckGazeFollow = FloatProperty.Bind(animator, component, data.NeckGazeFollowFloatProperty),
                 moveBodyBackWhenCrouching = FloatProperty.Bind(animator, component, data.MoveBodyBackWhenCrouchingFloatProperty),
                 swingSmoothRateDeg = FloatProperty.Bind(animator, component, data.SwingSmoothRateDegFloatProperty),
                 chestArmSwingFactor = FloatProperty.Bind(animator, component, data.ChestArmSwingFactorFloatProperty),
@@ -2818,6 +3022,8 @@ w20, w54;
                 anatShoulderSlide = BoolProperty.Bind(animator, component, data.AnatShoulderSlideProperty),
                 anatCervicalLordosis = BoolProperty.Bind(animator, component, data.AnatCervicalLordosisProperty),
                 anatPelvicTwistRouting = BoolProperty.Bind(animator, component, data.AnatPelvicTwistRoutingProperty),
+                spineAnatomicalRom = BoolProperty.Bind(animator, component, data.SpineAnatomicalRomProperty),
+                chestIkTarget = BoolProperty.Bind(animator, component, data.ChestIKTargetProperty),
                 legSwivelSmoothing = BoolProperty.Bind(animator, component, data.LegSwivelSmoothingProperty),
                 hintIsTrackerLeftLowerLeg = BoolProperty.Bind(animator, component, data.HintIsTrackerBoolPropertyLeftLowerLeg),
                 hintIsTrackerRightLowerLeg = BoolProperty.Bind(animator, component, data.HintIsTrackerBoolPropertyRightLowerLeg),
@@ -2855,7 +3061,17 @@ w20, w54;
                     ? Vector3.Distance(data.LeftShoulder.position, data.LeftHand.position) : 0.6f,
                 TposeShoulderToHandRight = (data.RightShoulder != null && data.RightHand != null)
                     ? Vector3.Distance(data.RightShoulder.position, data.RightHand.position) : 0.6f,
+                TposeClavicleLenLeft = (data.LeftShoulder != null && data.leftUpperArm != null)
+                    ? Vector3.Distance(data.LeftShoulder.position, data.leftUpperArm.position) : 0f,
+                TposeClavicleLenRight = (data.RightShoulder != null && data.RightUpperArm != null)
+                    ? Vector3.Distance(data.RightShoulder.position, data.RightUpperArm.position) : 0f,
+                TposeShoulderToElbowLeft = (data.LeftShoulder != null && data.leftLowerArm != null)
+                    ? Vector3.Distance(data.LeftShoulder.position, data.leftLowerArm.position) : 0f,
+                TposeShoulderToElbowRight = (data.RightShoulder != null && data.RightLowerArm != null)
+                    ? Vector3.Distance(data.RightShoulder.position, data.RightLowerArm.position) : 0f,
+
             };
+
             // Bind positions
             job.p0 = Vector3Property.Bind(animator, component, data.GetTargetPositionVector3Property(0));
             job.p1 = Vector3Property.Bind(animator, component, data.GetTargetPositionVector3Property(1));
@@ -2952,12 +3168,6 @@ w20, w54;
 
             GenerateHeadToSpine(animator, ref job, ref data);
 
-            // Generate arm bend lookup tables. The sampler mirrors X per-arm, so one table serves both.
-            var bendTable = BasisArmBendLookup.GenerateDefaultTable();
-            job.ArmBendLookupLeft = new NativeArray<Vector3>(bendTable, Allocator.Persistent);
-            job.ArmBendLookupRight = new NativeArray<Vector3>(bendTable, Allocator.Persistent);
-            job.HasArmBendLookup = true;
-
             var cacheBuilder = new AnimationJobCacheBuilder();
 
             job.spineMaxIterationsIdx = cacheBuilder.Add(20);
@@ -2967,19 +3177,12 @@ w20, w54;
             job.chestSpringState = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.chestSpringInit = new NativeArray<int>(1, Allocator.Persistent);
 
-            job.hipFrameSpringRot = new NativeArray<Quaternion>(1, Allocator.Persistent);
-            job.hipFrameSpringVel = new NativeArray<Vector3>(1, Allocator.Persistent);
-            job.hipFrameSpringInit = new NativeArray<int>(1, Allocator.Persistent);
-
             job.swingLastDir = new NativeArray<Vector3>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
             job.swingLastAxis = new NativeArray<Vector3>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
             job.swingLastTarget = new NativeArray<Vector3>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
             job.swingContinuityInit = new NativeArray<int>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
             job.swingCollided = new NativeArray<int>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
             job.swingSmoothState = new NativeArray<int>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
-            job.armLookupRaw = new NativeArray<Vector3>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
-            job.armLookupSmooth = new NativeArray<Vector3>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
-            job.armLookupInit = new NativeArray<int>(BasisFullIKConstraintJob.k_SwingCount, Allocator.Persistent);
             job.legSwivelRaw = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.legSwivelSmooth = new NativeArray<Vector3>(2, Allocator.Persistent);
             job.legSwivelInit = new NativeArray<int>(2, Allocator.Persistent);
@@ -2988,6 +3191,71 @@ w20, w54;
 
             return job;
         }
+        // Bakes each vertebra's anatomical rest frame + ROM, PARALLEL TO THE CHAIN, so the guard can be
+        // applied by chain index alone. Runs in the same T-pose window as TposeHeadToNeckLocal below.
+        //
+        // The chain is [head, neck, (upperChest,) chest, spine, hips]. The head and the hips get an INVALID
+        // frame on purpose -- the head is welded to the HMD and the hips are the anchor, so neither is a DOF
+        // the solver invents. Guarding a commanded bone would fight the tracker. Same doctrine as the arm:
+        // guard the elbow, never the hand.
+        //
+        // The segment a bone stands for depends on whether the avatar HAS an upperChest. With one, chest is
+        // the lower thorax and upperChest the upper. Without one, the single `chest` bone spans the whole
+        // thorax, so it inherits the LOWER thoracic ROM -- the more permissive of the two, because it is now
+        // doing both jobs and clamping it to the stiffer upper-thoracic envelope would rob the avatar of
+        // bend it genuinely has.
+        static void BuildSpineAnatomy(Transform[] chain, ref BasisFullIKConstraintJob job, ref BasisFullBodyData data)
+        {
+            int n = chain.Length;
+            job.ChainSpineRestFrames = new NativeArray<BasisSpineRestFrame>(n, Allocator.Persistent);
+            job.ChainSpineRoms = new NativeArray<BasisSpineRom>(n, Allocator.Persistent);
+
+            // The subject's RIGHT, from the shoulders. A body-wide fact -- NOT a bone's local axis, which is
+            // a rig convention and does not transfer between avatars. This project has been bitten by that
+            // repeatedly; it is why the arm swivel model is position-only.
+            if (data.leftUpperArm == null || data.RightUpperArm == null)
+            {
+                return;   // every frame stays Valid=false, so the guard is a no-op. Decline, never guess.
+            }
+            Vector3 hipsRight = data.RightUpperArm.position - data.leftUpperArm.position;
+
+            for (int i = 1; i <= n - 2; i++)   // skip the head (0) and the hips (n-1)
+            {
+                Transform bone = chain[i];
+                Transform child = chain[i - 1];    // the chain runs tip -> root, so the CHILD is i-1
+                Transform parent = chain[i + 1];
+                if (bone == null || child == null || parent == null)
+                {
+                    continue;
+                }
+
+                BasisSpineSegment segment;
+                if (bone == data.spine)
+                {
+                    segment = BasisSpineSegment.Lumbar;
+                }
+                else if (bone == data.chest)
+                {
+                    segment = BasisSpineSegment.LowerThoracic;
+                }
+                else if (bone == data.upperChest)
+                {
+                    segment = BasisSpineSegment.UpperThoracic;
+                }
+                else if (bone == data.neck)
+                {
+                    segment = BasisSpineSegment.Cervical;
+                }
+                else
+                {
+                    continue;
+                }
+
+                job.ChainSpineRestFrames[i] = BasisSpineAnatomy.BuildRestFrame(
+                    bone.position, child.position, bone.rotation, parent.rotation, hipsRight);
+                job.ChainSpineRoms[i] = BasisSpineAnatomy.Rom(segment);
+            }
+        }
         public void GenerateHeadToSpine(Animator animator, ref BasisFullIKConstraintJob job, ref BasisFullBodyData data)
         {
             var HeadToSpine = data.upperChest != null
@@ -2995,6 +3263,7 @@ w20, w54;
                 : new Transform[] { data.head, data.neck, data.chest, data.spine, data.hips };
             int SpineToHeadLength = HeadToSpine.Length;
             job.ChainHeadToSpine = new NativeArray<ReadWriteTransformHandle>(SpineToHeadLength, Allocator.Persistent);
+            BuildSpineAnatomy(HeadToSpine, ref job, ref data);
 
             for (int i = 0; i < SpineToHeadLength; i++)
             {
@@ -3008,21 +3277,44 @@ w20, w54;
             {
                 job.TposeLengthHeadToHips = Vector3.zero;
             }
+
+            // The spine's bend cue, baked while the avatar is still physically T-posed (the same window
+            // TposeChestRot and the swivel models' T-poses are captured in).
+            //
+            // TposeHeadToNeckLocal is the neck's position RELATIVE TO THE HEAD, expressed in the HEAD'S OWN
+            // rest frame. That is what makes it a rigid re-attachment rather than a fudge: rotate the head by
+            // anything at all, carry this offset along with it, and you land back on the neck. Dividing out the
+            // head's rest rotation is what makes it rig-independent -- a bone's local axes are a convention.
+            //
+            // No head or no neck => zero, and the cue degrades exactly to the old hips->head behaviour rather
+            // than to something novel and untested.
+            if (data.head != null && data.neck != null)
+            {
+                job.TposeHeadToNeckLocal = Quaternion.Inverse(data.head.rotation) * (data.neck.position - data.head.position);
+            }
+            else
+            {
+                job.TposeHeadToNeckLocal = Vector3.zero;
+            }
+
+            if (data.hips != null && data.neck != null)
+            {
+                job.TposeLengthNeckToHips = (data.neck.position - data.hips.position);
+            }
+            else
+            {
+                job.TposeLengthNeckToHips = job.TposeLengthHeadToHips;
+            }
         }
         static ReadWriteTransformHandle BindHandle(Animator animator, Transform t) => (t != null) ? ReadWriteTransformHandle.Bind(animator, t) : default;
         public override void Destroy(BasisFullIKConstraintJob job)
         {
             if (job.ChainHeadToSpine.IsCreated) job.ChainHeadToSpine.Dispose();
-
-            if (job.ArmBendLookupLeft.IsCreated) job.ArmBendLookupLeft.Dispose();
-            if (job.ArmBendLookupRight.IsCreated) job.ArmBendLookupRight.Dispose();
+            if (job.ChainSpineRestFrames.IsCreated) job.ChainSpineRestFrames.Dispose();
+            if (job.ChainSpineRoms.IsCreated) job.ChainSpineRoms.Dispose();
 
             if (job.chestSpringState.IsCreated) job.chestSpringState.Dispose();
             if (job.chestSpringInit.IsCreated) job.chestSpringInit.Dispose();
-
-            if (job.hipFrameSpringRot.IsCreated) job.hipFrameSpringRot.Dispose();
-            if (job.hipFrameSpringVel.IsCreated) job.hipFrameSpringVel.Dispose();
-            if (job.hipFrameSpringInit.IsCreated) job.hipFrameSpringInit.Dispose();
 
             if (job.swingLastDir.IsCreated) job.swingLastDir.Dispose();
             if (job.swingLastAxis.IsCreated) job.swingLastAxis.Dispose();
@@ -3030,9 +3322,6 @@ w20, w54;
             if (job.swingContinuityInit.IsCreated) job.swingContinuityInit.Dispose();
             if (job.swingCollided.IsCreated) job.swingCollided.Dispose();
             if (job.swingSmoothState.IsCreated) job.swingSmoothState.Dispose();
-            if (job.armLookupRaw.IsCreated) job.armLookupRaw.Dispose();
-            if (job.armLookupSmooth.IsCreated) job.armLookupSmooth.Dispose();
-            if (job.armLookupInit.IsCreated) job.armLookupInit.Dispose();
             if (job.legSwivelRaw.IsCreated) job.legSwivelRaw.Dispose();
             if (job.legSwivelSmooth.IsCreated) job.legSwivelSmooth.Dispose();
             if (job.legSwivelInit.IsCreated) job.legSwivelInit.Dispose();

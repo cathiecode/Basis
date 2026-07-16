@@ -72,6 +72,7 @@ namespace Basis.Scripts.Networking.Sync
         private byte[] _dirtyMask;
         private byte[] _scratch;
         private byte[] _sendBuffer;
+        private ushort[] _snapshotRecipient;
 
         private bool _schemaLocked;
         private bool _buffersReady;
@@ -84,6 +85,11 @@ namespace Basis.Scripts.Networking.Sync
         private float _rotDotThreshold = 0.99999f;
         private int _idleKeyframeBackoff;
         private const int MaxKeyframeBackoffShift = 4;
+        private int _idleKeyframesAtCap;
+        private const int MaxIdleKeyframesAtCap = 2;
+        private bool _lastSendWasIdle;
+        private ushort _lastKnownOwnerId;
+        private bool _haveKnownOwner;
 
         internal BasisSyncSchema Schema => _schema;
         internal BasisSyncReceiver Receiver => _receiver;
@@ -446,17 +452,59 @@ namespace Basis.Scripts.Networking.Sync
 
         public override void OnOwnershipTransfer(BasisNetworkPlayer newOwner)
         {
+            // A new owner is a new packet stream: its sequence numbering has no relation to the previous
+            // owner's, and everything buffered belongs to the old stream. Without this reset the sequence
+            // high-water-mark silently drops the new owner's packets (up to ~127 of them) about half the
+            // time, and playback first has to drain the previous owner's stale frames — together the
+            // "grabbed pickup freezes, then rushes to catch up" bug. Resetting re-seeds from the new
+            // owner's forced keyframe instead. Owner-id tracking keeps re-fires (e.g. late owner-player
+            // resolution) from resetting a healthy stream.
+            bool ownerChanged = !_haveKnownOwner || CurrentOwnerId != _lastKnownOwnerId;
+            _haveKnownOwner = true;
+            _lastKnownOwnerId = CurrentOwnerId;
+            if (ownerChanged && !IsOwnedLocallyOnClient) _receiver?.Reset();
             RefreshRole();
         }
 
         public override void OnServerOwnershipDestroyed()
         {
+            _haveKnownOwner = false;
             RefreshRole();
         }
 
         public override void OnPlayerJoined(BasisNetworkPlayer player)
         {
-            _forceKeyframe = true;
+            if (IsOwnedLocallyOnClient)
+            {
+                _forceKeyframe = true;
+                return;
+            }
+
+            if (player == null || _receiver == null || !_receiver.HasData) return;
+            if (HasPresentOwner()) return;
+            if (BasisNetworkConnection.TryGetLocalPlayerID(out ushort localId) && localId == player.playerId) return;
+            SendStateSnapshotTo(player.playerId);
+        }
+
+        private bool HasPresentOwner()
+            => BasisNetworkPlayers.OwnershipPairing.TryGetValue(clientIdentifier, out ushort ownerId)
+               && BasisNetworkPlayers.GetPlayerById(ownerId, out _);
+
+        private void SendStateSnapshotTo(ushort playerId)
+        {
+            if (!HasNetworkID) return;
+            EnsureBuffers();
+            OnBeforeTransmit();
+
+            unchecked { _seq++; }
+            ushort intervalMs = (ushort)math.clamp((int)math.round(SendIntervalSeconds * 1000.0), 1, 65535);
+            int len = BasisSyncCodec.Serialize(_schema, _local, true, _dirtyMask, _seq, intervalMs, _scratch, UseChecksum);
+
+            if (_sendBuffer == null || _sendBuffer.Length != len) _sendBuffer = new byte[len];
+            Array.Copy(_scratch, 0, _sendBuffer, 0, len);
+            if (_snapshotRecipient == null) _snapshotRecipient = new ushort[1];
+            _snapshotRecipient[0] = playerId;
+            SendCustomNetworkEvent(_sendBuffer, KeyframeDelivery, _snapshotRecipient);
         }
 
         public override void OnNetworkMessage(ushort playerID, byte[] buffer, DeliveryMethod deliveryMethod)
@@ -523,9 +571,6 @@ namespace Basis.Scripts.Networking.Sync
             bool intervalElapsed = _lastSendTime <= 0 || (time - _lastSendTime) >= effectiveInterval;
             if (!intervalElapsed) return;
 
-            double effectiveKeyframe = KeyframeBackoffInterval(keyframeInterval, _idleKeyframeBackoff, MaxKeyframeBackoffShift);
-            bool keyframe = _forceKeyframe || _lastSendTime <= 0 || (time - _lastKeyframeTime) >= effectiveKeyframe;
-
             int dirtyBytes = _schema.DirtyMaskBytes;
             for (int i = 0; i < dirtyBytes; i++) _dirtyMask[i] = 0;
 
@@ -540,11 +585,16 @@ namespace Basis.Scripts.Networking.Sync
                 if (_schema.GetField(fi).Pool == BasisSyncPool.Discrete) discreteChange = true;
             }
 
+            double effectiveKeyframe = KeyframeBackoffInterval(keyframeInterval, _idleKeyframeBackoff, MaxKeyframeBackoffShift);
+            bool periodicDue = (time - _lastKeyframeTime) >= effectiveKeyframe
+                && (anyChange || !IdleKeyframesExhausted(_idleKeyframeBackoff, MaxKeyframeBackoffShift, _idleKeyframesAtCap, MaxIdleKeyframesAtCap));
+            bool keyframe = _forceKeyframe || _lastSendTime <= 0 || periodicDue;
+
             if (discreteChange) keyframe = true;
             if (!keyframe && !anyChange) return;
-            if (anyChange) _idleKeyframeBackoff = 0;
+            if (anyChange) { _idleKeyframeBackoff = 0; _idleKeyframesAtCap = 0; }
 
-            double elapsed = _lastSendTime > 0 ? (time - _lastSendTime) : baseInterval;
+            double elapsed = _lastSendTime > 0 ? StampInterval(time - _lastSendTime, effectiveInterval, _lastSendWasIdle) : baseInterval;
             ushort intervalMs = (ushort)math.clamp((int)math.round(elapsed * 1000.0), 1, 65535);
 
             _lastSendTime = time;
@@ -562,13 +612,27 @@ namespace Basis.Scripts.Networking.Sync
             }
 
             _lastSent.CopyFrom(_local);
+            _lastSendWasIdle = !anyChange;
             if (keyframe)
             {
                 _lastKeyframeTime = time;
                 _forceKeyframe = false;
-                if (!anyChange && _idleKeyframeBackoff < MaxKeyframeBackoffShift) _idleKeyframeBackoff++;
+                if (!anyChange)
+                {
+                    if (_idleKeyframeBackoff < MaxKeyframeBackoffShift) _idleKeyframeBackoff++;
+                    else if (_idleKeyframesAtCap < MaxIdleKeyframesAtCap) _idleKeyframesAtCap++;
+                }
             }
         }
+
+        /// <summary>
+        /// True once an idle owner has delivered the whole backoff ladder plus <paramref name="maxAtCap"/>
+        /// keyframes at the capped interval. Keyframes are reliable, so remotes hold the converged state
+        /// without further re-sends; late joiners are covered by OnPlayerJoined (forced keyframe/snapshot)
+        /// and any change resets both counters.
+        /// </summary>
+        public static bool IdleKeyframesExhausted(int idleCount, int maxShift, int atCapCount, int maxAtCap)
+            => idleCount >= maxShift && atCapCount >= maxAtCap;
 
         /// <summary>
         /// Keyframe interval stretched by an idle backoff: after <paramref name="idleCount"/> consecutive keyframes
@@ -580,6 +644,19 @@ namespace Basis.Scripts.Networking.Sync
         {
             int shift = idleCount < 0 ? 0 : (idleCount > maxShift ? maxShift : idleCount);
             return baseInterval * (1 << shift);
+        }
+
+        /// <summary>
+        /// Interval stamp for the next outgoing packet. While streaming it's the real elapsed time (that's the
+        /// motion's true pacing, including distance-reduced cadences), but a quiet stretch — the last send was
+        /// an unchanged idle keyframe, or the gap dwarfs the current cadence — is dead time, not motion. Those
+        /// stamp the cadence instead, so remotes step across the gap rather than replaying it in real time
+        /// (the "grabbed pickup lags for seconds after sitting idle" bug).
+        /// </summary>
+        public static double StampInterval(double elapsed, double effectiveInterval, bool lastSendWasIdle)
+        {
+            if (lastSendWasIdle || elapsed > effectiveInterval * 8.0) return effectiveInterval;
+            return elapsed;
         }
 
         private bool FieldChanged(int fi)
@@ -611,6 +688,13 @@ namespace Basis.Scripts.Networking.Sync
                 if (_isRemoteRegistered) { BasisSyncDriver.UnregisterRemote(this); _isRemoteRegistered = false; _receiver.Reset(); }
                 if (!_isOwnedRegistered) { BasisSyncDriver.RegisterOwned(this); _isOwnedRegistered = true; }
                 _forceKeyframe = true;
+                // Stale from any previous tenure as owner — left alone, the first packet after re-grabbing
+                // would stamp the whole ownerless gap (up to 65.5 s) as its interval and remotes would
+                // interpolate across it.
+                _lastSendTime = 0;
+                _idleKeyframeBackoff = 0;
+                _idleKeyframesAtCap = 0;
+                _lastSendWasIdle = false;
             }
             else
             {

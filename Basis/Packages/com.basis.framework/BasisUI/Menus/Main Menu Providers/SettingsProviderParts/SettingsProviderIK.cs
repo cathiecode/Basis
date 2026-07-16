@@ -225,6 +225,11 @@ public static class SettingsProviderIK
             butterflyKneesToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.butterflyKnees"));
             butterflyKneesToggle.AssignBinding(BasisSettingsDefaults.FBIKButterflyKnees);
             butterflyKneesToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.butterflyKnees.tooltip"));
+
+            var kneeFollowsFootToggle = PanelToggle.CreateNewEntry(trackingParent);
+            kneeFollowsFootToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.kneeFollowsFoot"));
+            kneeFollowsFootToggle.AssignBinding(BasisSettingsDefaults.FBIKKneeFollowsFoot);
+            kneeFollowsFootToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.kneeFollowsFoot.tooltip"));
         });
 
         // ============== Body Collision ==============
@@ -246,11 +251,6 @@ public static class SettingsProviderIK
             collideTrackedElbowToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.collideTrackedElbow.title"));
             collideTrackedElbowToggle.AssignBinding(BasisSettingsDefaults.FBIKCollideTrackedElbow);
             collideTrackedElbowToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.collideTrackedElbow.title.tooltip"));
-
-            var handCapsuleToggle = PanelToggle.CreateNewEntry(collisionParent);
-            handCapsuleToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.handCapsule.title"));
-            handCapsuleToggle.AssignBinding(BasisSettingsDefaults.FBIKUseHandCapsule);
-            handCapsuleToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.handCapsule.title.tooltip"));
 
             var chestRadiusSlider = PanelSlider.CreateAndBind(
                 collisionParent,
@@ -298,6 +298,11 @@ public static class SettingsProviderIK
             shoulderSolveToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.shoulderSolve.title"));
             shoulderSolveToggle.AssignBinding(BasisSettingsDefaults.FBIKShoulderSolveEnabled);
             shoulderSolveToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.shoulderSolve.title.tooltip"));
+
+            var shoulderShrugToggle = PanelToggle.CreateNewEntry(shoulderParent);
+            shoulderShrugToggle.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.shoulderShrug.title"));
+            shoulderShrugToggle.AssignBinding(BasisSettingsDefaults.FBIKShoulderShrug);
+            shoulderShrugToggle.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.shoulderShrug.title.tooltip"));
 
             var shoulderElevSlider = PanelSlider.CreateAndBind(
                 shoulderParent,
@@ -359,12 +364,41 @@ public static class SettingsProviderIK
             AddAnatomyToggle(anatomyParent, BasisSettingsDefaults.FBIKAnatPelvicTwistRouting,
                 "settings.bodyTracking.anat.pelvicTwistRouting.title",
                 "settings.bodyTracking.anat.pelvicTwistRouting.description");
+            AddAnatomyToggle(anatomyParent, BasisSettingsDefaults.FBIKSpineAnatomicalRom,
+                "settings.bodyTracking.anat.spineRom.title",
+                "settings.bodyTracking.anat.spineRom.description");
+            AddAnatomyToggle(anatomyParent, BasisSettingsDefaults.FBIKChestIKTarget,
+                "settings.bodyTracking.anat.chestIkTarget.title",
+                "settings.bodyTracking.anat.chestIkTarget.description");
             AddAnatomyToggle(anatomyParent, BasisSettingsDefaults.FBIKLegSwivelSmoothing,
                 "settings.bodyTracking.anat.legSwivelSmoothing.title",
                 "settings.bodyTracking.anat.legSwivelSmoothing.description");
             AddAnatomyToggle(anatomyParent, BasisSettingsDefaults.FBIKTrackerBendNormal,
                 "settings.bodyTracking.anat.trackerBendNormal.title",
                 "settings.bodyTracking.anat.trackerBendNormal.description");
+        });
+
+        // ============== Desktop head carry ==============
+        // Desktop only: in VR the headset already rides the lever arm this reproduces.
+        CreateCollapsibleSection(tabDesc, colliderGroup,
+            BasisLocalization.Get("settings.bodyTracking.section.headSwing.title"),
+            BasisLocalization.Get("settings.bodyTracking.section.headSwing.description"), false, swingParent =>
+        {
+            AddAnatomyToggle(swingParent, BasisSettingsDefaults.DesktopHeadSwingEnabled,
+                "settings.bodyTracking.headSwing.enabled.title",
+                "settings.bodyTracking.headSwing.enabled.description");
+
+            var strength = PanelSlider.CreateAndBind(
+                swingParent,
+                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.headSwing.strength"), 0f, 2f, false, 2, ValueDisplayMode.Raw),
+                BasisSettingsDefaults.DesktopHeadSwingStrength);
+            strength?.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.headSwing.strength.tooltip"));
+
+            var backward = PanelSlider.CreateAndBind(
+                swingParent,
+                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.headSwing.backward"), 0f, 1f, false, 2, ValueDisplayMode.Raw),
+                BasisSettingsDefaults.DesktopHeadSwingBackward);
+            backward?.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.headSwing.backward.tooltip"));
         });
 
         // ============== Spine: Reach Limits ==============
@@ -381,24 +415,6 @@ public static class SettingsProviderIK
                 maxBendSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.maxBendDeg.title.tooltip"));
             }
 
-            var struggleStartSlider = PanelSlider.CreateAndBind(
-                reachParent,
-                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.struggleStart.title"), 0f, 1f, false, 2, ValueDisplayMode.Raw),
-                BasisSettingsDefaults.FBIKStruggleStart);
-            if (struggleStartSlider != null)
-            {
-                struggleStartSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.struggleStart.title.tooltip"));
-            }
-
-            var struggleEndSlider = PanelSlider.CreateAndBind(
-                reachParent,
-                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.struggleEnd.title"), 0f, 1f, false, 2, ValueDisplayMode.Raw),
-                BasisSettingsDefaults.FBIKStruggleEnd);
-            if (struggleEndSlider != null)
-            {
-                struggleEndSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.struggleEnd.title.tooltip"));
-            }
-
             var maxChestDeltaSlider = PanelSlider.CreateAndBind(
                 reachParent,
                 PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.maxChestDelta.title"), 0f, 180f, false, 0, ValueDisplayMode.Raw),
@@ -408,15 +424,6 @@ public static class SettingsProviderIK
                 maxChestDeltaSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.maxChestDelta.title.tooltip"));
             }
 
-            var maxHipDeltaSlider = PanelSlider.CreateAndBind(
-                reachParent,
-                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.maxHipDelta.title"), 0f, 180f, false, 0, ValueDisplayMode.Raw),
-                BasisSettingsDefaults.FBIKMaxHipDelta);
-            if (maxHipDeltaSlider != null)
-            {
-                maxHipDeltaSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.maxHipDelta.title.tooltip"));
-            }
-
             var butterflyMaxOpenSlider = PanelSlider.CreateAndBind(
                 reachParent,
                 PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.butterflyKneeMaxOpen.title"), 0f, 90f, false, 0, ValueDisplayMode.Raw),
@@ -424,6 +431,15 @@ public static class SettingsProviderIK
             if (butterflyMaxOpenSlider != null)
             {
                 butterflyMaxOpenSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.butterflyKneeMaxOpen.title.tooltip"));
+            }
+
+            var kneeFootFollowSlider = PanelSlider.CreateAndBind(
+                reachParent,
+                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.kneeFootFollow.title"), 0.1f, 1f, false, 2, ValueDisplayMode.Raw),
+                BasisSettingsDefaults.FBIKKneeFootFollowUpright);
+            if (kneeFootFollowSlider != null)
+            {
+                kneeFootFollowSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.kneeFootFollow.title.tooltip"));
             }
         });
 
@@ -493,6 +509,24 @@ public static class SettingsProviderIK
             if (spineSquishBoost != null)
             {
                 spineSquishBoost.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.spineSquishBoost.title.tooltip"));
+            }
+
+            var spineGazeFollow = PanelSlider.CreateAndBind(
+                bendParent,
+                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.spineGazeFollow.title"), 0f, 1f, false, 2, ValueDisplayMode.Raw),
+                BasisSettingsDefaults.FBIKSpineGazeFollow);
+            if (spineGazeFollow != null)
+            {
+                spineGazeFollow.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.spineGazeFollow.title.tooltip"));
+            }
+
+            var neckGazeFollow = PanelSlider.CreateAndBind(
+                bendParent,
+                PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.bodyTracking.neckGazeFollow.title"), 0f, 1f, false, 2, ValueDisplayMode.Raw),
+                BasisSettingsDefaults.FBIKNeckGazeFollow);
+            if (neckGazeFollow != null)
+            {
+                neckGazeFollow.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.neckGazeFollow.title.tooltip"));
             }
 
             var spineMaxFwd = PanelSlider.CreateAndBind(
@@ -1015,7 +1049,7 @@ public static class SettingsProviderIK
             "Player to Avatar Ratio", "Avatar to Player Ratio", "Device Scale", "Applied Up Scale", "Scaled to Match Value");
 
         AddDebugCategory(debugParent, BasisLocalization.Get("settings.bodyTracking.debug.calibrationState"),
-            "Height Mode", "Seated Mode", "Seated Height Delta", "Pitch Calibration Enabled", "Has Pitch Calibrated Height", "Pitch Calibrated Eye Height");
+            "Height Mode", "Seated Mode", "Seated Height Delta", "Height Grounding Offset");
 
         var refreshButton = PanelButton.CreateNew(debugParent);
         refreshButton.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.refreshDebug"));
@@ -1081,9 +1115,7 @@ public static class SettingsProviderIK
         "Height Mode" => $"{SMModuleCalibration.HeightMode}",
         "Seated Mode" => SMModuleSitStand.IsSteatedMode ? "Seated" : "Standing",
         "Seated Height Delta" => $"{SMModuleSitStand.MissingHeightDelta:F4} m",
-        "Pitch Calibration Enabled" => SMModuleCalibration.PitchCalibrationEnabled ? "Yes" : "No",
-        "Has Pitch Calibrated Height" => BasisHeightDriver.HasPitchCalibratedHeight ? "Yes" : "No",
-        "Pitch Calibrated Eye Height" => $"{BasisHeightDriver.PitchCalibratedEyeHeight:F4} m",
+        "Height Grounding Offset" => $"{BasisHeightDriver.HeightModeGroundingOffset:F4} m",
         _ => "--"
     };
 
@@ -1130,21 +1162,20 @@ public static class SettingsProviderIK
         BasisSettingsDefaults.DisableAnimationsInFBT.ResetToDefault();
         BasisSettingsDefaults.FBIKProtectElbow.ResetToDefault();
         BasisSettingsDefaults.FBIKCollideTrackedElbow.ResetToDefault();
-        BasisSettingsDefaults.FBIKUseHandCapsule.ResetToDefault();
         BasisSettingsDefaults.FBIKChestRadius.ResetToDefault();
         BasisSettingsDefaults.FBIKCollisionSkin.ResetToDefault();
         BasisSettingsDefaults.FBIKHandRadius.ResetToDefault();
         BasisSettingsDefaults.FBIKHandSkin.ResetToDefault();
         BasisSettingsDefaults.FBIKShoulderSolveEnabled.ResetToDefault();
+        BasisSettingsDefaults.FBIKShoulderShrug.ResetToDefault();
         BasisSettingsDefaults.FBIKShoulderElevation.ResetToDefault();
         BasisSettingsDefaults.FBIKShoulderProtraction.ResetToDefault();
         BasisSettingsDefaults.FBIKMaxBendDeg.ResetToDefault();
-        BasisSettingsDefaults.FBIKStruggleStart.ResetToDefault();
-        BasisSettingsDefaults.FBIKStruggleEnd.ResetToDefault();
         BasisSettingsDefaults.FBIKMaxChestDelta.ResetToDefault();
-        BasisSettingsDefaults.FBIKMaxHipDelta.ResetToDefault();
         BasisSettingsDefaults.FBIKButterflyKnees.ResetToDefault();
         BasisSettingsDefaults.FBIKButterflyKneeMaxOpenDeg.ResetToDefault();
+        BasisSettingsDefaults.FBIKKneeFollowsFoot.ResetToDefault();
+        BasisSettingsDefaults.FBIKKneeFootFollowUpright.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineBendPitch.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineBendYaw.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineBendRoll.ResetToDefault();
@@ -1188,6 +1219,8 @@ public static class SettingsProviderIK
         BasisSettingsDefaults.FBIKSpineMaxBackwardDeg.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineMaxLateralDeg.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineSquishBoost.ResetToDefault();
+        BasisSettingsDefaults.FBIKSpineGazeFollow.ResetToDefault();
+        BasisSettingsDefaults.FBIKNeckGazeFollow.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineCCDRelax.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineTwistKeep.ResetToDefault();
         BasisSettingsDefaults.FBIKSpineNeckTwistKeep.ResetToDefault();
@@ -1200,6 +1233,8 @@ public static class SettingsProviderIK
         BasisSettingsDefaults.FBIKAnatShoulderSlide.ResetToDefault();
         BasisSettingsDefaults.FBIKAnatCervicalLordosis.ResetToDefault();
         BasisSettingsDefaults.FBIKAnatPelvicTwistRouting.ResetToDefault();
+        BasisSettingsDefaults.FBIKSpineAnatomicalRom.ResetToDefault();
+        BasisSettingsDefaults.FBIKChestIKTarget.ResetToDefault();
         BasisSettingsDefaults.FBIKLegSwivelSmoothing.ResetToDefault();
         BasisSettingsDefaults.FBIKTrackerBendNormal.ResetToDefault();
 

@@ -22,10 +22,14 @@ on:
   push:
     paths:
       - "Basis/Packages/com.basis.mediaplayer/Native~/**"
+      - "tools/media-fuzz/**"
+      - "tools/media-conformance/**"
       - ".github/workflows/media-native.yml"
   pull_request:
     paths:
       - "Basis/Packages/com.basis.mediaplayer/Native~/**"
+      - "tools/media-fuzz/**"
+      - "tools/media-conformance/**"
       - ".github/workflows/media-native.yml"
 
 defaults:
@@ -53,10 +57,6 @@ jobs:
         with:
           name: librist-win-x64
           path: ${{ env.NATIVE_DIR }}/third_party/win-x64/rist.lib
-      - uses: actions/upload-artifact@v5
-        with:
-          name: librist-headers-win-x64
-          path: ${{ env.NATIVE_DIR }}/third_party/include/**/*.h
 
   android-arm64:
     runs-on: ubuntu-latest   # Android NDK is preinstalled ($ANDROID_NDK_ROOT)
@@ -73,7 +73,39 @@ jobs:
         with:
           name: librist-android-arm64
           path: ${{ env.NATIVE_DIR }}/third_party/android-arm64/librist.a
-      - uses: actions/upload-artifact@v5
-        with:
-          name: librist-headers-android-arm64
-          path: ${{ env.NATIVE_DIR }}/third_party/include/**/*.h
+
+  # Fuzz the hand-rolled container/protocol parsers, which read attacker-controlled
+  # bytes in-process. This gate is deterministic: it builds the libFuzzer targets
+  # under ASan/UBSan and replays every pinned crash repro (tools/media-fuzz/testcases),
+  # so a reintroduced memory-safety bug fails the PR. Coverage-growing fuzz runs are a
+  # separate (future) scheduled job; this one stays fast and stable. See
+  # tools/media-fuzz/README.md.
+  fuzz-demux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install clang (libFuzzer + ASan/UBSan)
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build fuzz targets
+        run: ./tools/media-fuzz/build.sh
+      - name: Replay pinned crash repros (regression gate)
+        run: ./tools/media-fuzz/ci-replay.sh
+
+  # Prove the demuxers produce the CORRECT output on valid input (the fuzz gate
+  # proves they don't crash on hostile input). Generates synthetic fixtures with
+  # ffmpeg -- a static Basis-logo track plus a tone, nothing committed -- then
+  # diffs our demuxer's access units against ffprobe's packets, payload MD5 and
+  # all. ffmpeg is used only as an external CLI tool here (no libav* linked, no
+  # media in the repo). See tools/media-conformance/README.md.
+  conformance-demux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install ffmpeg + a C compiler
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg gcc
+      - name: Build the demux dumper
+        run: ./tools/media-conformance/build.sh
+      - name: Generate synthetic fixtures
+        run: ./tools/media-conformance/gen_fixtures.sh "$RUNNER_TEMP/fixtures"
+      - name: Diff demuxer output against ffprobe (regression gate)
+        run: python3 ./tools/media-conformance/demux_gate.py "$RUNNER_TEMP/fixtures"
