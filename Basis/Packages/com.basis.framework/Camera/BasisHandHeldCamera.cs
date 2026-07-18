@@ -581,8 +581,8 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         }
         else
         {
-            format = TextureFormat.RGBA32;
-            renderFormat = RenderTextureFormat.ARGB32;
+            format = TextureFormat.RGBAHalf;
+            renderFormat = RenderTextureFormat.ARGBHalf;
         }
 
         // Play shutter sound locally at the camera position
