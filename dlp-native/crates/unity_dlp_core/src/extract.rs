@@ -48,7 +48,7 @@ fn run_extract(py: Python<'_>, url: &str, opts_json: Option<&str>) -> Result<Str
 //  - `extract_flat=False` ensures full format list resolution.
 // TODO: Pass the extraction timeout through the public ABI and add a dedicated
 // timeout result code instead of keeping it as an implementation detail here.
-const EXTRACT_PY: &str = r#"
+const EXTRACT_PY: &CStr = cr#"
 import threading as _threading
 import ctypes as _ctypes
 import logging as _logging
