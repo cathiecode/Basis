@@ -53,6 +53,7 @@ namespace Basis.Scripts.Drivers
         [System.NonSerialized] public readonly BasisPoseSkeleton PoseSkeleton = new BasisPoseSkeleton();
         [System.NonSerialized] public BasisFullIKConstraintJob IKJob;
         [System.NonSerialized] public bool IKJobCreated;
+        static readonly BasisLocks.LockContext VirtualSpineLock = BasisLocks.GetContext(BasisLocks.VirtualSpine);
         public bool RigLayerActive = true;
         [System.NonSerialized] public bool IKDataReady;
 
@@ -1906,6 +1907,9 @@ namespace Basis.Scripts.Drivers
 
             IKJob.Stream = PoseSkeleton.Stream;
             IKJob.Stream.deltaTime = deltaTime;
+            // BasisLocks is managed and cannot be queried from Burst. Snapshot its owner-count semantics onto
+            // the job each frame; the job freezes the last valid animation-relative hips pose while held.
+            IKJob.virtualSpineLocked = VirtualSpineLock;
             IKJob.Run();
 
             // Leg diagnostics are written INSIDE the job, so read them here and not before Run().

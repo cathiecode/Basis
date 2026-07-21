@@ -201,6 +201,11 @@ collisionsEnabled;
         public NativeArray<Vector3> legSwivelSmooth;
         public NativeArray<int> legSwivelInit;
         public NativeArray<BasisLegDiagnostics> legDiagnostics;
+        // One-element persistent state for animation-relative Virtual Spine. The job struct itself is copied
+        // when scheduled, so the frozen hips pose must live in native memory to survive between frames.
+        public NativeArray<BasisAnimationRelativeVirtualSpineState> virtualSpineState;
+        public bool virtualSpineLocked;
+        bool virtualSpineApplied;
         public float ikLockMode;
         public bool shoulderSolveEnabled;
         public bool shoulderShrugEnabled;
@@ -230,6 +235,11 @@ collisionsEnabled;
             targetOffsetRightShoulder = offsetRotationRightShoulder;
             targetOffsetLeftHand = offsetRotationLeftHand;
             targetOffsetRightHand = offsetRotationRightHand;
+
+            // Capture the evaluated animation before any IK bone is touched, then replace only the synthetic
+            // hips target. A real hips tracker remains authoritative. The older BoneControl Virtual Spine can
+            // continue feeding head/limb targets, but its absolute pelvis model is discarded on this path.
+            ApplyAnimationRelativeVirtualSpine(stream);
 
             // 1) Spine: hips + chest/neck/head chain
             SolveSpine(stream);
@@ -305,6 +315,74 @@ collisionsEnabled;
                 Apply(stream, slotHandles[i], slotPositions[i], slotRotations[i], slotOffsets[i], slotWeights[i]);
             }
         }
+        void ApplyAnimationRelativeVirtualSpine(BasisPoseStream stream)
+        {
+            virtualSpineApplied = false;
+            if (!virtualSpineState.IsCreated || virtualSpineState.Length == 0)
+            {
+                return;
+            }
+
+            if (hasHipsTracker)
+            {
+                // Do not resurrect a pose cached before a period of real hip tracking. If the tracker later
+                // disappears while locked, the first current animation pose becomes the new frozen pose.
+                BasisAnimationRelativeVirtualSpineState cleared = virtualSpineState[0];
+                cleared.Initialized = 0;
+                virtualSpineState[0] = cleared;
+                return;
+            }
+            if (!HandleHead.IsValid(stream) || !HandleHips.IsValid(stream))
+            {
+                return;
+            }
+
+            HandleHead.GetPositionAndRotation(stream, out Vector3 animatedHeadPosition, out Quaternion animatedHeadRotation);
+            HandleHips.GetPositionAndRotation(stream, out Vector3 animatedHipsPosition, out Quaternion animatedHipsRotation);
+
+            BasisAnimationRelativeVirtualSpineInput input;
+            input.AnimatedHeadPosition = animatedHeadPosition;
+            input.AnimatedHeadRotation = animatedHeadRotation;
+            input.AnimatedHipsPosition = animatedHipsPosition;
+            input.AnimatedHipsRotation = animatedHipsRotation;
+            input.TrackedHeadPosition = targetPositionHead;
+            input.TrackedHeadRotation = targetRotationHead * targetOffsetHead;
+            input.ReferenceUp = playerUp;
+            input.FallbackForward = targetRotationHead * Vector3.forward;
+            input.Locked = virtualSpineLocked;
+
+            BasisAnimationRelativeVirtualSpineState state = virtualSpineState[0];
+            BasisAnimationRelativeVirtualSpineCore.Solve(ref state, in input, out BasisAnimationRelativeVirtualSpineResult result);
+            virtualSpineState[0] = state;
+            if (!result.Valid)
+            {
+                return;
+            }
+
+            targetPositionHips = result.HipsPosition;
+            // SolveSpine applies the calibrated target->bone offset. The core already emits the final animated
+            // hips BONE orientation, so pre-cancel that multiply just as the procedural foot path does.
+            targetRotationHips = result.HipsRotation * Quaternion.Inverse(offsetRotationHips);
+            virtualSpineApplied = true;
+        }
+
+        bool TryGetVirtualSpineBodyUp(out Vector3 bodyUp)
+        {
+            bodyUp = playerUp;
+            if (!virtualSpineApplied || !virtualSpineState.IsCreated || virtualSpineState.Length == 0)
+            {
+                return false;
+            }
+
+            Vector3 candidate = virtualSpineState[0].BodyUp;
+            if (candidate.sqrMagnitude < k_SqrEpsilon)
+            {
+                return false;
+            }
+            bodyUp = candidate.normalized;
+            return true;
+        }
+
         public void SolveSpine(BasisPoseStream stream)
         {
             if (!enabledSpineIK)
@@ -326,6 +404,8 @@ collisionsEnabled;
             float restDist = MinHeadSpineHeight;
             int lockMode = (int)ikLockMode;
             Vector3 up = playerUp;
+            bool animationRelative = TryGetVirtualSpineBodyUp(out Vector3 animationBodyUp);
+            Vector3 lockUp = animationRelative ? animationBodyUp : up;
 
             // Lock mode determines how hips position relates to head position:
             // 0 = LockHips:  Hips are the anchor; apply hips directly, no head-relative clamping.
@@ -342,18 +422,21 @@ collisionsEnabled;
                         float spineLen = headToHips.magnitude;
                         if (spineLen < restDist)
                         {
-                            Vector3 spineDir = spineLen > k_Epsilon ? headToHips / spineLen : hipDesired * Vector3.down;
+                            Vector3 spineDir = spineLen > k_Epsilon ? headToHips / spineLen : -lockUp;
                             hipsTargetPos = headTargetPos + spineDir * restDist;
                         }
                     }
                     break;
 
                 default: // LockBoth (2) - original behavior: clamp hips relative to head
-                    hipsTargetPos = AntiContortionist(headTargetPos, headTargetRot, hipsTargetPos, hipDesired, restDist);
-                    hipsTargetPos = MitigateSpineBuckling(headTargetPos, hipDesired, hipsTargetPos, restDist, up);
+                    Quaternion lockHeadRotation = animationRelative
+                        ? headTargetRot * targetOffsetHead
+                        : headTargetRot;
+                    hipsTargetPos = AntiContortionist(headTargetPos, lockHeadRotation, hipsTargetPos, hipDesired, restDist);
+                    hipsTargetPos = MitigateSpineBuckling(headTargetPos, hipDesired, hipsTargetPos, restDist, lockUp);
                     float MaxBendDeg = maxBendDeg;
-                    hipsTargetPos = EnforceSpineBendLimit(headTargetPos, hipsTargetPos, MaxBendDeg, up);
-                    hipsTargetPos = ClampHipsAroundHead(headTargetPos, hipsTargetPos, restDist, minFactor, maxFactor, up);
+                    hipsTargetPos = EnforceSpineBendLimit(headTargetPos, hipsTargetPos, MaxBendDeg, lockUp);
+                    hipsTargetPos = ClampHipsAroundHead(headTargetPos, hipsTargetPos, restDist, minFactor, maxFactor, lockUp);
                     break;
             }
 
@@ -370,12 +453,15 @@ collisionsEnabled;
             // rather than stacking on top. Gated on the HIPS tracker alone (deliberately narrower than the
             // crouch gate): a chest tracker measures lean, but the pelvis POSITION is still synthesised here.
             float crouchFade = 1f;
-            if (!hasHipsTracker)
+            if (!hasHipsTracker && !animationRelative)
             {
                 hipsTargetPos = ApplyTrunkCounterbalance(neckCue, hipsTargetPos, up, out float flexionFrac);
                 crouchFade = 1f - flexionFrac;
             }
-            hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
+            if (!animationRelative)
+            {
+                hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
+            }
             targetPositionHips = hipsTargetPos;
 
             // The hinge SYNTHESISES an anterior pelvis pitch on a deep lean so the spine does not swallow the
@@ -384,7 +470,7 @@ collisionsEnabled;
             // that reshaped a tracked pelvis was built and deliberately removed for exactly this reason). The
             // hip-bob/sway synthesis in BasisLocalRigDriver is gated on the same flag, for the same reason:
             // do not invent pelvis motion on top of a tracker.
-            if (!hasHipsTracker)
+            if (!hasHipsTracker && !animationRelative)
             {
                 hipDesired = ApplyHipHinge(stream, neckCue, hipsTargetPos, hipDesired, up);
             }
@@ -1250,7 +1336,7 @@ collisionsEnabled;
                 shoulderHandle.SetRotation(stream, result.ShoulderRotation);
             }
         }
-        public static Vector3 ClampHipsAroundHead(Vector3 headPos, Vector3 hipsPos, float restDistance, float minFactor, float maxFactor, Vector3 playerUp)
+        public static Vector3 ClampHipsAroundHead(Vector3 headPos, Vector3 hipsPos, float restDistance, float minFactor, float maxFactor, Vector3 referenceUp)
         {
             Vector3 headToHips = hipsPos - headPos;
             float dist = headToHips.magnitude;
@@ -1258,24 +1344,23 @@ collisionsEnabled;
             float maxD = restDistance * maxFactor;
             if (dist < k_Epsilon)
             {
-                return headPos - minD * playerUp; // degenerate: place the hips straight below the head
+                return headPos - minD * referenceUp; // degenerate: place hips opposite the pose's body-up
             }
 
             Vector3 dir = headToHips / dist;
-            // The hips must never rise above the head -- that inversion is the deep-crouch flip (hips fly up).
-            // If the head→hips ray points upward, drop it to head height (a full forward fold) keeping its
-            // heading; if that heading is degenerate too, fall straight down. Below-head poses are untouched,
-            // so normal posture/lean is unchanged -- only the inversion is clamped.
-            float upDot = Vector3.Dot(dir, playerUp);
+            // The hips must never cross to the head side of the current BODY axis. For legacy targets that axis
+            // is play-space up; animation-relative VSP supplies its authored hips→head direction, so a prone or
+            // supine pose is not mistaken for the old deep-crouch inversion.
+            float upDot = Vector3.Dot(dir, referenceUp);
             if (upDot > 0f)
             {
-                Vector3 horiz = dir - playerUp * upDot;
-                dir = horiz.sqrMagnitude > k_SqrEpsilon ? horiz.normalized : -playerUp;
+                Vector3 horiz = dir - referenceUp * upDot;
+                dir = horiz.sqrMagnitude > k_SqrEpsilon ? horiz.normalized : -referenceUp;
             }
 
             return headPos + dir * Mathf.Clamp(dist, minD, maxD);
         }
-        public static Vector3 EnforceSpineBendLimit(Vector3 headPos, Vector3 hipsPos, float maxBendDeg, Vector3 playerUp)
+        public static Vector3 EnforceSpineBendLimit(Vector3 headPos, Vector3 hipsPos, float maxBendDeg, Vector3 referenceUp)
         {
             if (maxBendDeg <= 0f)
             {
@@ -1288,14 +1373,14 @@ collisionsEnabled;
                 return hipsPos;
             }
 
-            Vector3 up = playerUp;
+            Vector3 up = referenceUp;
 
-            // Decompose head→hips into a downward drop (along -up) and a horizontal lean.
+            // Decompose head→hips into an axial drop (along -up) and a pose-relative lateral lean.
             float down = Vector3.Dot(diff, -up);  // signed: hips are below the head when > 0
             Vector3 lateral = diff + up * down;   // diff minus the (-up * down) vertical part
             float lateralLen = lateral.magnitude;
 
-            // The hips sit at most maxBendDeg off straight-down from the head -- and NEVER above it. The
+            // The hips sit at most maxBendDeg off the pose-relative direction away from the head. The
             // downward drop that puts them exactly on that cone is lateral / tan(maxBend); if the current
             // drop is less (over-bent, or inverted with down <= 0) pull it down onto the cone, below the head.
             // Without this, a deep crouch drives the hips up/sideways here as the head passes hip height.
@@ -1335,11 +1420,11 @@ collisionsEnabled;
             return hipsPos;
         }
         /// <summary>
-        /// Spine buckling fix: when the body is upright but the hip-to-head distance is shorter
+        /// Spine buckling fix: when the body is aligned with its current pose axis but the hip-to-head distance is shorter
         /// than rest pose, the FABRIK chain can buckle into unnatural S-curves. This pushes the
         /// hips downward to prevent oscillation. From HVR-IK's HIKSpineSolver.
         /// </summary>
-        public static Vector3 MitigateSpineBuckling(Vector3 headPos, Quaternion hipsRot, Vector3 hipsPos, float restDistance, Vector3 playerUp)
+        public static Vector3 MitigateSpineBuckling(Vector3 headPos, Quaternion hipsRot, Vector3 hipsPos, float restDistance, Vector3 referenceUp)
         {
             Vector3 diff = hipsPos - headPos;
             float currentDist = diff.magnitude;
@@ -1354,7 +1439,7 @@ collisionsEnabled;
             float compression = 1f - (currentDist / restDistance);
 
             float pushAmount = compression * tension * restDistance * 0.5f;
-            return hipsPos - playerUp * pushAmount;
+            return hipsPos - referenceUp * pushAmount;
         }
         public static Quaternion ClampRotation(Quaternion current, Quaternion reference, float maxAngleDeg)
         {
@@ -2540,6 +2625,7 @@ collisionsEnabled;
             legSwivelSmooth = new NativeArray<Vector3>(2, Allocator.Persistent);
             legSwivelInit = new NativeArray<int>(2, Allocator.Persistent);
             legDiagnostics = new NativeArray<BasisLegDiagnostics>(2, Allocator.Persistent);
+            virtualSpineState = new NativeArray<BasisAnimationRelativeVirtualSpineState>(1, Allocator.Persistent);
         }
 
         // Bakes each vertebra's anatomical rest frame + ROM, PARALLEL TO THE CHAIN, so the guard can be
@@ -2722,6 +2808,7 @@ collisionsEnabled;
             if (legSwivelRaw.IsCreated) legSwivelRaw.Dispose();
             if (legSwivelSmooth.IsCreated) legSwivelSmooth.Dispose();
             if (legSwivelInit.IsCreated) legSwivelInit.Dispose();
+            if (virtualSpineState.IsCreated) virtualSpineState.Dispose();
         }
     }
 }
