@@ -9,6 +9,16 @@ public static class BasisLocalHeightCalculator
 {
     // 30% tolerance band
     private const float EyeArmTolerance = 0.30f;
+
+    /// <summary>
+    /// The point to measure a hand's span from: the wrist the avatar's hand bone is driven to, which is
+    /// the same landmark <see cref="CalculateAvatarArmSpan"/> reads on the avatar side (the LeftHand /
+    /// RightHand bones). Sampling the raw device pose instead compares a grip against a wrist on backends
+    /// that report one, over-reading the span on both sides — and the body fit turns that straight into
+    /// arm length, because its whole job is to make the avatar's shoulder-to-wrist match the player's.
+    /// </summary>
+    private static Vector3 HandSpanPoint(BasisInput input) =>
+        input is BasisInputController controller ? controller.UnscaledHandTarget : input.UnscaledDeviceCoord.position;
     public static void CalculatePlayerArmSpan()
     {
         bool hasLeft = BasisDeviceManagement.Instance.FindDevice(out BasisInput left, BasisBoneTrackedRole.LeftHand);
@@ -47,7 +57,7 @@ public static class BasisLocalHeightCalculator
             if (hasRight) right.LatePollData();
 
             var head = lockToInput.BasisInput.UnscaledDeviceCoord.position;
-            var hand = hasLeft ? left.UnscaledDeviceCoord.position : right.UnscaledDeviceCoord.position;
+            var hand = HandSpanPoint(hasLeft ? left : right);
 
             var headFlat = new Vector3(head.x, 0f, head.z);
             var handFlat = new Vector3(hand.x, 0f, hand.z);
@@ -60,8 +70,8 @@ public static class BasisLocalHeightCalculator
         left.LatePollData();
         right.LatePollData();
 
-        Vector3 l = left.UnscaledDeviceCoord.position;
-        Vector3 r = right.UnscaledDeviceCoord.position;
+        Vector3 l = HandSpanPoint(left);
+        Vector3 r = HandSpanPoint(right);
 
         Vector3 lFlat = new Vector3(l.x, 0f, l.z);
         Vector3 rFlat = new Vector3(r.x, 0f, r.z);
@@ -69,6 +79,92 @@ public static class BasisLocalHeightCalculator
 
         BasisHeightDriver.PlayerArmSpan = span;
         BasisDebug.Log($"Player hand-to-hand arm span: {BasisHeightDriver.PlayerArmSpan}", BasisDebug.LogTag.Avatar);
+    }
+
+    public static void CalculatePlayerHipHeight()
+    {
+        if (SMModuleSitStand.IsSteatedMode)
+        {
+            BasisHeightDriver.PlayerEyeToHipDrop = 0f;
+            BasisHeightDriver.PlayerHipHeight = 0f;
+            return;
+        }
+
+        // Measured as a drop below the eye, never against an independently estimated floor: the HMD and
+        // the hips tracker carry the same vertical shift, so the play-space offset, the grounding lift and
+        // whatever floor the tracker set happens to imply all cancel. Estimating the floor separately made
+        // the value move between calibrations, because TryGetTrackedFloor skips trackers that already hold
+        // a role -- so the first pass measured against the foot trackers and later passes did not.
+        if (!BasisDeviceManagement.Instance.FindDevice(out BasisInput hips, BasisBoneTrackedRole.Hips))
+        {
+            // Keep the last good measurement when the tracker is merely unassigned (calibration unassigns
+            // every FBT tracker before it reclassifies them), so the fit stays put across a recalibration.
+            return;
+        }
+
+        var headInput = BasisLocalCameraDriver.Instance?.BasisLockToInput?.BasisInput;
+        if (headInput == null)
+        {
+            return;
+        }
+
+        headInput.LatePollData();
+        hips.LatePollData();
+
+        float drop = headInput.UnscaledDeviceCoord.position.y - hips.UnscaledDeviceCoord.position.y;
+        if (drop <= 0f || float.IsNaN(drop) || float.IsInfinity(drop))
+        {
+            return;
+        }
+
+        BasisHeightDriver.PlayerEyeToHipDrop = drop;
+        BasisHeightDriver.PlayerHipHeight = BasisHeightDriver.PlayerEyeHeight - drop;
+
+        BasisDebug.Log($"Player hip height {BasisHeightDriver.PlayerHipHeight:F4} (eye {BasisHeightDriver.PlayerEyeHeight:F4} - drop {drop:F4})", BasisDebug.LogTag.Avatar);
+    }
+
+    public static void CalculateAvatarBodySegments()
+    {
+        BasisHeightDriver.AvatarHipHeight = 0f;
+        BasisHeightDriver.AvatarLegSpan = 0f;
+        BasisHeightDriver.AvatarSpineSpan = 0f;
+        BasisHeightDriver.AvatarShoulderWidth = 0f;
+
+        if (!BasisLocalAvatarDriver.HasTposeBoneSnapshot)
+        {
+            return;
+        }
+
+        var snapshot = BasisLocalAvatarDriver.TposeBoneSnapshot;
+
+        bool hasHips = snapshot.TryGetValue(BasisBoneTrackedRole.Hips, out var hipsBind);
+        if (hasHips)
+        {
+            BasisHeightDriver.AvatarHipHeight = hipsBind.position.y;
+        }
+
+        if (hasHips && snapshot.TryGetValue(BasisBoneTrackedRole.Head, out var headBind))
+        {
+            BasisHeightDriver.AvatarSpineSpan = headBind.position.y - hipsBind.position.y;
+        }
+
+        if (snapshot.TryGetValue(BasisBoneTrackedRole.LeftUpperLeg, out var upperLegBind)
+            && snapshot.TryGetValue(BasisBoneTrackedRole.LeftFoot, out var footBind))
+        {
+            BasisHeightDriver.AvatarLegSpan = upperLegBind.position.y - footBind.position.y;
+        }
+
+        if (snapshot.TryGetValue(BasisBoneTrackedRole.LeftUpperArm, out var leftArmBind)
+            && snapshot.TryGetValue(BasisBoneTrackedRole.RightUpperArm, out var rightArmBind))
+        {
+            Vector3 la = leftArmBind.position;
+            Vector3 ra = rightArmBind.position;
+            BasisHeightDriver.AvatarShoulderWidth = Vector3.Distance(
+                new Vector3(la.x, 0f, la.z),
+                new Vector3(ra.x, 0f, ra.z));
+        }
+
+        BasisDebug.Log($"Avatar segments hip {BasisHeightDriver.AvatarHipHeight:F3} legSpan {BasisHeightDriver.AvatarLegSpan:F3} spineSpan {BasisHeightDriver.AvatarSpineSpan:F3} shoulderWidth {BasisHeightDriver.AvatarShoulderWidth:F3}", BasisDebug.LogTag.Avatar);
     }
 
     public static void CalculatePlayerEyeHeight()
@@ -94,10 +190,27 @@ public static class BasisLocalHeightCalculator
             if (lockToInput != null && lockToInput.BasisInput != null)
             {
                 lockToInput.BasisInput.LatePollData();
-                // Subtract the play-space mover's vertical offset so calibrating while lifted doesn't read
-                // an inflated eye height (the offset is injected into UnscaledDeviceCoord by the device).
-                BasisHeightDriver.PlayerEyeHeight = lockToInput.BasisInput.UnscaledDeviceCoord.position.y - BasisLocalPlayspaceMover.VerticalOffset;
-                BasisDebug.Log($"Player raw eye height from device: {BasisHeightDriver.PlayerEyeHeight}", BasisDebug.LogTag.Avatar);
+                float rawEyeY = lockToInput.BasisInput.UnscaledDeviceCoord.position.y;
+
+                // Preferred: measure the eye against the player's OWN trackers' floor. The HMD and the
+                // trackers carry the same vertical shift, so this cancels ANY play-space offset — the
+                // Basis mover, the grounding lift, and offsets applied outside Basis (SteamVR/OVRAS
+                // space drags) alike. The player can calibrate wherever they happen to be.
+                if (TryGetTrackedFloor(rawEyeY, out float trackedFloorY))
+                {
+                    BasisHeightDriver.PlayerEyeHeight = rawEyeY - trackedFloorY;
+                    BasisDebug.Log($"Player eye height from tracked floor: {BasisHeightDriver.PlayerEyeHeight} (floor {trackedFloorY:F3})", BasisDebug.LogTag.Avatar);
+                }
+                else
+                {
+                    // No usable low trackers: subtract everything Basis itself injected into the device Y
+                    // (the play-space mover's vertical drag AND the height-mode grounding lift — the lift
+                    // previously leaked into the measurement and got persisted as a too-tall body).
+                    BasisHeightDriver.PlayerEyeHeight = rawEyeY
+                        - BasisLocalPlayspaceMover.VerticalOffset
+                        - BasisHeightDriver.HeightModeGroundingOffset;
+                    BasisDebug.Log($"Player raw eye height from device: {BasisHeightDriver.PlayerEyeHeight}", BasisDebug.LogTag.Avatar);
+                }
             }
             else
             {
@@ -118,6 +231,43 @@ public static class BasisLocalHeightCalculator
         }
 
         BasisHeightDriver.HasGenuinePlayerEyeHeight = genuine;
+    }
+
+    private static readonly System.Collections.Generic.List<float> s_trackerHeights = new(16);
+
+    /// <summary>
+    /// Gathers every free spatial tracker's unscaled height and asks
+    /// <see cref="BasisCalibrationMath.TryEstimateFloorFromTrackers"/> for the floor under the player's
+    /// feet. Pinned devices (HMD, named hand controllers) are excluded — they are head/hand evidence,
+    /// never floor evidence; linked pair-halves defer to their virtual midpoint, mirroring the
+    /// constellation classifier's own device filter.
+    /// </summary>
+    private static bool TryGetTrackedFloor(float hmdY, out float floorY)
+    {
+        floorY = 0f;
+        BasisDeviceManagement manager = BasisDeviceManagement.Instance;
+        if (manager == null)
+        {
+            return false;
+        }
+
+        s_trackerHeights.Clear();
+        BasisObservableList<BasisInput> devices = manager.AllInputDevices;
+        int count = devices.Count;
+        for (int Index = 0; Index < count; Index++)
+        {
+            BasisInput input = devices[Index];
+            if (input == null) continue;
+            if (input is BasisTouchInputDevice) continue;
+            if (input.IsLinked) continue;
+            if (input.DeviceMatchSettings != null && input.DeviceMatchSettings.HasTrackedRole) continue;
+
+            Vector3 unscaled = input.UnscaledDeviceCoord.position;
+            if (unscaled.sqrMagnitude < 1e-4f) continue;
+            s_trackerHeights.Add(unscaled.y);
+        }
+
+        return BasisCalibrationMath.TryEstimateFloorFromTrackers(s_trackerHeights, hmdY, out floorY);
     }
 
     public static void CalculateAvatarEyeHeight()

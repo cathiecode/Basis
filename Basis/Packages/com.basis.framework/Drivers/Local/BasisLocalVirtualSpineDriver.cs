@@ -8,7 +8,7 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.Animations.Rigging;   // BasisPelvisPostureModel
+using Basis.IK;   // BasisPelvisPostureModel
 
 /// <summary>
 /// Virtual spine solver for local avatars. It blends tracker-driven cues (head/neck)
@@ -44,7 +44,7 @@ public class BasisLocalVirtualSpineDriver
     public float HipsXZFollowBlend = 0.35f;
 
     /// <summary>Legacy inspector field — runtime reads BasisSettingsDefaults.VSpineHipsForwardBias.</summary>
-    public float HipsForwardBias = 0.02f; // meters
+    public float HipsForwardBias = 0f; // meters
 
     /// <summary>Initialization guard.</summary>
     private bool _initialized;
@@ -94,9 +94,6 @@ public class BasisLocalVirtualSpineDriver
     /// error after it stops, which is the drift this replaces.</summary>
     private const float HeadBaselinePullRate = 200f;
 
-    /// <summary>Low-pass frequency for Catherine's animation-relative pelvis anchor.</summary>
-    private const float AnimationHipsBaselineHz = 1.0f;
-
     /// <summary>How much hips track the head's deviation from baseline. 0 = pure counterbalance
     /// (hips never move from baseline), 1 = legacy "follow head fully". 0.25 keeps a small forward
     /// translation while still reading as a real spine bend.</summary>
@@ -118,15 +115,27 @@ public class BasisLocalVirtualSpineDriver
     private const float TorsoYawRelockSpeedDeg = 6f;
 
     /// <summary>
-    /// Legacy lifecycle hook retained for serialized avatars. Virtual Spine now executes as a
-    /// pre-solve inside <see cref="BasisFullIKConstraintJob"/>, so this driver no longer mutates
-    /// BoneControl state or subscribes to the player simulation event.
+    /// Enables the virtual overrides on all torso controls and hooks simulation callback.
+    /// Safe to call multiple times.
     /// </summary>
     public void Initialize()
     {
         if (_initialized) return;
 
         Instance = this;
+        BasisLocalBoneDriver.HeadControl.HasVirtualOverride = true;
+        BasisLocalBoneDriver.NeckControl.HasVirtualOverride = true;
+        BasisLocalBoneDriver.ChestControl.HasVirtualOverride = true;
+        BasisLocalBoneDriver.SpineControl.HasVirtualOverride = true;
+        BasisLocalBoneDriver.HipsControl.HasVirtualOverride = true;
+
+        BasisLocalPlayer.Instance.OnVirtualData += OnSimulate;
+        BasisLocalPlayer.OnPlayersHeightChangedNextFrame += OnHeightChanged;
+
+        _solveState = new NativeArray<SpineSolveState>(1, Allocator.Persistent);
+        _solveState[0] = default;
+
+        _lengthsDirty = true;
         _initialized = true;
     }
 
@@ -139,8 +148,17 @@ public class BasisLocalVirtualSpineDriver
 
         if (Instance == this)
         {
+            BasisLocalBoneDriver.HeadControl.HasVirtualOverride = false;
+            BasisLocalBoneDriver.NeckControl.HasVirtualOverride = false;
+            BasisLocalBoneDriver.ChestControl.HasVirtualOverride = false;
+            BasisLocalBoneDriver.SpineControl.HasVirtualOverride = false;
+            BasisLocalBoneDriver.HipsControl.HasVirtualOverride = false;
             Instance = null;
         }
+        BasisLocalPlayer.Instance.OnVirtualData -= OnSimulate;
+        BasisLocalPlayer.OnPlayersHeightChangedNextFrame -= OnHeightChanged;
+
+        if (_solveState.IsCreated) _solveState.Dispose();
 
         _initialized = false;
     }
@@ -154,7 +172,6 @@ public class BasisLocalVirtualSpineDriver
         {
             SpineSolveState s = _solveState[0];
             s.HeadBaselineInitialized = 0;
-            s.HipsBaselineInitialized = 0;
             _solveState[0] = s;
         }
     }
@@ -202,6 +219,7 @@ public class BasisLocalVirtualSpineDriver
         {
             Dt = Time.deltaTime,
             Scale = BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale,
+            TrackingLiftY = BasisLocalPlayspaceMover.VerticalOffset * BasisHeightDriver.DeviceScale,
             ParentMatrix = parentMatrix,
             ParentRotation = parentMatrix.rotation,
             EyeRot = eye.OutGoingData.rotation,
@@ -311,6 +329,19 @@ public class BasisLocalVirtualSpineDriver
     {
         public float Dt;
         public float Scale;
+        /// <summary>
+        /// The play-space mover's vertical offset expressed in scaled bone-sim space
+        /// (VerticalOffset × DeviceScale). Every device pose — head included — carries this shift, so
+        /// every "standing" reference measured against the floor-anchored T-pose (StandingHeadLocalY,
+        /// StandingHipsLocalY, ChestTposeY/SpineTposeY, TposeHips) must be lifted by it too. Without it
+        /// a space-dragged player reads as a phantom squat/bend: the pelvis posture law holds the hips
+        /// (and the whole untracked leg chain hanging off them) up to half the offset away from the
+        /// player's real body, and the chest/spine Y-pins miss by the full offset — which is what kept
+        /// the calibration lock-in guides from ever latching legs/hips after a play-space drag.
+        /// Body-size normalisations (posture d/f denominators, the stance radius) stay UN-lifted — the
+        /// lift moves the body, it does not resize it.
+        /// </summary>
+        public float TrackingLiftY;
         public float4x4 ParentMatrix;
         public quaternion ParentRotation;
         public quaternion EyeRot;
@@ -369,118 +400,14 @@ public class BasisLocalVirtualSpineDriver
     /// <summary>Persistent spine solver state carried across frames (low-pass + yaw deadzone).</summary>
     public struct SpineSolveState
     {
-        // Upstream support-base state used by the posture-aware legacy path.
         public float3 HeadBaselineXZ;
         public byte HeadBaselineInitialized;
-
-        // Animation-aware support state used by Catherine's graph pre-solve path.
-        public float3 HipsBaselineXZ;
-        public byte HipsBaselineInitialized;
 
         public byte TorsoYawInitialized;
         public float TorsoYawAnchorDeg;
         public float PrevHeadYawDeg;
         public byte TorsoYawBroken;
         public float TorsoFollow;
-
-        // The graph-integrated pre-solve has no BoneControl state buffer to borrow a
-        // previous hips rotation from, so it keeps the equivalent continuity here.
-        public float3 HipsPosition;
-        public quaternion HipsRotation;
-        public byte HipsPositionAndRotationInitialized;
-    }
-
-    /// <summary>Filtered tracker inputs consumed by the FullBodyIK virtual-spine pre-solve.</summary>
-    public struct VirtualHipsInput
-    {
-        public float DeltaTime;
-        public float3 PlayerRotation;
-        public float3 HeadPosition;
-        public float3 NeckPosition;
-        public float3 AnimatedHeadPosition;
-        public quaternion AnimatedHeadRotation;
-        public float3 AnimatedHipsPosition;
-        public quaternion AnimatedHipsRotation;
-        public quaternion HeadRotation;
-        public float3 PlayerUp;
-        public float3 LeftFootPosition;
-        public float3 RightFootPosition;
-        public bool LeftFootTracked;
-        public bool RightFootTracked;
-        public float Scale;
-        public float RestLength;
-        public float HipsForwardBias;
-        public float YawDeadzoneDeg;
-        public float YawBlendSpeed;
-        public float HipsRotationSpeed;
-        public float CompressionStrength;
-        public float MaxDrop;
-        public bool FreezeHipsToTPose;
-        public bool VirtualSpineLocked;
-        public bool IsLocomoting;
-        public float3 TposeHips;
-    }
-
-    /// <summary>
-    /// Computes the only Virtual Spine output consumed by the current FullBody IK path: the hips target.
-    /// Kept here so the legacy driver and the graph pre-solve share the same yaw, counterbalance, and
-    /// compression math while the legacy driver is retired.
-    /// </summary>
-    public static void SolveHips(ref SpineSolveState state, in VirtualHipsInput input, out Vector3 position, out Quaternion rotation)
-    {
-        if (input.VirtualSpineLocked && state.HipsPositionAndRotationInitialized != 0)
-        {
-            position = state.HipsPosition;
-            rotation = state.HipsRotation;
-            return;
-        }
-
-        float dt = math.max(input.DeltaTime, 1e-6f);
-        NormalizeSafeWithFallback(in input.PlayerUp, new float3(0f, 1f, 0f), out float3 worldUp);
-        ExtractYawBurst(in input.HeadRotation, out quaternion headYawRaw);
-
-        EstimateBodyYawFromHead(input.AnimatedHeadRotation, worldUp, math.mul(headYawRaw, new float3(0f, 0f, 1f)), out quaternion animatedHeadYaw);
-
-        EstimateBodyYawFromHead(input.HeadRotation, worldUp, math.mul(headYawRaw, new float3(0f, 0f, 1f)), out quaternion headYaw);
-
-        var animatedHeadYawToHeadYaw = math.mul(math.inverse(animatedHeadYaw), headYaw);
-        var animatedHeadYawToAnimatedHipsRotation = math.mul(math.inverse(animatedHeadYaw), input.AnimatedHipsRotation);
-
-        var animatedHipsToHeadRaw = math.mul(animatedHeadYawToHeadYaw, input.AnimatedHeadPosition - input.AnimatedHipsPosition);
-        NormalizeSafeWithFallback(in animatedHipsToHeadRaw, worldUp, out float3 animatedHipsToHeadNormalized);
-
-        // Smoothing causes weired hips movement when xz of hips position is far from head's one
-        float noSmoothingBlendAlpha = 1 - math.abs(math.dot(worldUp, animatedHipsToHeadNormalized));
-
-        quaternion torsoYaw = ComputeTorsoYawTargetBurst(ref state, in headYaw,
-            input.YawDeadzoneDeg * (1 - noSmoothingBlendAlpha), input.YawBlendSpeed, input.IsLocomoting, dt);
-
-        var animatedHeadYawToTorsoYaw = math.mul(math.inverse(animatedHeadYaw), torsoYaw);
-        var animatedHipsToHeadWithTorsoYawRaw = math.mul(animatedHeadYawToTorsoYaw, input.AnimatedHeadPosition - input.AnimatedHipsPosition);
-
-        float3 realisticHipsXZ = ComputeRealisticHipsXZBurst(ref state, input.HeadPosition - animatedHipsToHeadWithTorsoYawRaw, noSmoothingBlendAlpha, dt,
-            input.LeftFootPosition, input.RightFootPosition, input.LeftFootTracked, input.RightFootTracked);
-
-        ComputeHipsPositionBodyFrame(in input.NeckPosition, in animatedHipsToHeadNormalized, input.RestLength, in torsoYaw,
-            input.HipsForwardBias * input.Scale, in realisticHipsXZ, input.FreezeHipsToTPose, in input.TposeHips,
-            in input.AnimatedHipsPosition, input.CompressionStrength, input.MaxDrop, out float3 hipsPositionTarget);
-
-        // float3 hipsPosition = desiredHipsXZ;
-        quaternion hipsRotationTarget = input.FreezeHipsToTPose ? quaternion.identity : math.mul(torsoYaw, animatedHeadYawToAnimatedHipsRotation);
-        if (state.HipsPositionAndRotationInitialized == 0)
-        {
-            state.HipsPosition = hipsPositionTarget;
-            state.HipsRotation = hipsRotationTarget;
-            state.HipsPositionAndRotationInitialized = 1;
-        }
-        else
-        {
-            state.HipsPosition = hipsPositionTarget; // TODO: Move somoothing here?
-            SmoothSlerpBurst(in state.HipsRotation, in hipsRotationTarget, input.HipsRotationSpeed, noSmoothingBlendAlpha, dt, out state.HipsRotation);
-        }
-        // ExtractYawBurst(in state.HipsRotation, out quaternion hipsYaw);
-        position = state.HipsPosition;
-        rotation = state.HipsRotation;
     }
 
     /// <summary>
@@ -518,7 +445,7 @@ public class BasisLocalVirtualSpineDriver
             head.OutgoingRotation = eyeRot;
 
             quaternion neckCurrent = neck.OutgoingRotation;
-            SmoothSlerpBurst(in neckCurrent, in eyeRot, P.NeckRotationSpeed, 1f, dt, out quaternion neckRot);
+            SmoothSlerpBurst(in neckCurrent, in eyeRot, P.NeckRotationSpeed, dt, out quaternion neckRot);
             neck.OutgoingRotation = neckRot;
 
             ComposePosition(in P.HeadTargetPos, in P.HeadTargetRot, in P.HeadScaledOffset, out float3 headPos);
@@ -559,6 +486,7 @@ public class BasisLocalVirtualSpineDriver
                 in tposeHips,
                 P.StandingHipsLocalY,
                 P.StandingHeadLocalY,
+                P.TrackingLiftY,
                 P.PostureModel != 0,
                 P.HipsCompressionStrength,
                 P.HipsMaxDropMeters,
@@ -566,7 +494,7 @@ public class BasisLocalVirtualSpineDriver
 
             quaternion hipsRotTarget = freeze ? quaternion.identity : torsoYawTarget;
             quaternion hipsCurrent = hips.OutgoingRotation;
-            SmoothSlerpBurst(in hipsCurrent, in hipsRotTarget, P.HipsRotationSpeed, 1f, dt, out quaternion hipsSmoothed);
+            SmoothSlerpBurst(in hipsCurrent, in hipsRotTarget, P.HipsRotationSpeed, dt, out quaternion hipsSmoothed);
             ExtractYawBurst(in hipsSmoothed, out quaternion hipsYaw);
 
             hips.OutgoingRotation = hipsYaw;
@@ -582,8 +510,8 @@ public class BasisLocalVirtualSpineDriver
 
             if (math.lengthsq(neckToHips) < 1e-10f)
             {
-                ApplyPositionControlTorsoLock(ref chest, in P.ChestTargetRot, in P.ChestTargetPos, in P.ChestScaledOffset, P.ChestTposeY, in P.ParentMatrix, in P.ParentRotation);
-                ApplyPositionControlTorsoLock(ref spine, in P.SpineTargetRot, in P.SpineTargetPos, in P.SpineScaledOffset, P.SpineTposeY, in P.ParentMatrix, in P.ParentRotation);
+                ApplyPositionControlTorsoLock(ref chest, in P.ChestTargetRot, in P.ChestTargetPos, in P.ChestScaledOffset, P.ChestTposeY + P.TrackingLiftY, in P.ParentMatrix, in P.ParentRotation);
+                ApplyPositionControlTorsoLock(ref spine, in P.SpineTargetRot, in P.SpineTargetPos, in P.SpineScaledOffset, P.SpineTposeY + P.TrackingLiftY, in P.ParentMatrix, in P.ParentRotation);
             }
             else
             {
@@ -601,14 +529,14 @@ public class BasisLocalVirtualSpineDriver
                 quaternion chestCurrent = chest.OutgoingRotation;
                 quaternion spineCurrent = spine.OutgoingRotation;
 
-                SmoothSlerpBurst(in chestCurrent, in chestTarget, P.ChestRotationSpeed, 1f, dt, out quaternion chestSmoothed);
-                SmoothSlerpBurst(in spineCurrent, in spineTarget, P.SpineRotationSpeed, 1f, dt, out quaternion spineSmoothed);
+                SmoothSlerpBurst(in chestCurrent, in chestTarget, P.ChestRotationSpeed, dt, out quaternion chestSmoothed);
+                SmoothSlerpBurst(in spineCurrent, in spineTarget, P.SpineRotationSpeed, dt, out quaternion spineSmoothed);
 
                 chest.OutgoingRotation = chestSmoothed;
                 spine.OutgoingRotation = spineSmoothed;
 
-                ApplyPositionGivenBaseTorsoLock(ref chest, in chestPos, in P.ChestScaledOffset, P.ChestTposeY, in P.ParentMatrix, in P.ParentRotation);
-                ApplyPositionGivenBaseTorsoLock(ref spine, in spinePos, in P.SpineScaledOffset, P.SpineTposeY, in P.ParentMatrix, in P.ParentRotation);
+                ApplyPositionGivenBaseTorsoLock(ref chest, in chestPos, in P.ChestScaledOffset, P.ChestTposeY + P.TrackingLiftY, in P.ParentMatrix, in P.ParentRotation);
+                ApplyPositionGivenBaseTorsoLock(ref spine, in spinePos, in P.SpineScaledOffset, P.SpineTposeY + P.TrackingLiftY, in P.ParentMatrix, in P.ParentRotation);
             }
 
             States[IdxHead] = head;
@@ -807,89 +735,6 @@ public class BasisLocalVirtualSpineDriver
         return math.mul(yawBase, swing);
     }
 
-    [BurstCompile]
-    internal static void EstimateBodyYawFromHead(
-        in quaternion headRot,
-        in float3 upRaw,
-        in float3 fallbackForward,
-        out quaternion bodyYaw
-    )
-    {
-        const float EPS = 1e-8f;
-        NormalizeSafeWithFallback(upRaw, new float3(0f, 1f, 0f), out var up);
-
-        float3 headRight = math.mul(headRot, new float3(1f, 0f, 0f));
-        float3 headForward = math.mul(headRot, new float3(0f, 0f, 1f));
-
-        ProjectOnPlane(headRight, up, out float3 rightProjected);
-        ProjectOnPlane(headForward, up, out float3 forwardProjected);
-
-        float rightLenSq = math.lengthsq(rightProjected);
-        float forwardLenSq = math.lengthsq(forwardProjected);
-
-        bool hasRight = rightLenSq > EPS;
-        bool hasForward = forwardLenSq > EPS;
-
-        float3 fallback;
-
-        if (!hasRight && !hasForward)
-        {
-            ProjectOnPlane(fallbackForward, up, out fallback);
-
-            if (math.lengthsq(fallback) < EPS)
-                AnyPerpendicular(up, out fallback);
-
-            fallback = math.normalize(fallback);
-            bodyYaw = quaternion.LookRotationSafe(fallback, up);
-            return;
-        }
-
-        float3 mixedForward = 0f;
-
-        if (hasRight)
-        {
-            float3 bodyRight = math.normalize(rightProjected);
-
-            // Unity basis: right × up = forward
-            float3 rightBasedForward = math.normalize(math.cross(bodyRight, up));
-
-            // confidence は射影長。二乗のまま使うと、弱い候補をより強く抑えられる。
-            float rightWeight = rightLenSq;
-
-            mixedForward += rightBasedForward * rightWeight;
-        }
-
-        if (hasForward)
-        {
-            float3 forwardBasedForward = math.normalize(forwardProjected);
-
-            float forwardWeight = forwardLenSq;
-
-            float3 aboutToAdd = forwardBasedForward * forwardWeight;
-
-            if (math.lengthsq(mixedForward + aboutToAdd) > EPS)
-            {
-                mixedForward += aboutToAdd;
-            }
-        }
-
-        ProjectOnPlane(mixedForward, up, out mixedForward);
-
-        if (math.lengthsq(mixedForward) < EPS)
-        {
-            ProjectOnPlane(fallbackForward, up, out fallback);
-
-            if (math.lengthsq(fallback) < EPS)
-                AnyPerpendicular(up, out fallback);
-
-            mixedForward = fallback;
-        }
-
-        mixedForward = math.normalize(mixedForward);
-
-        bodyYaw = quaternion.LookRotationSafe(mixedForward, up);
-    }
-
     private static float DeltaAngleDeg(float current, float target)
     {
         float delta = target - current;
@@ -901,44 +746,6 @@ public class BasisLocalVirtualSpineDriver
     // -----------------------------
     // Burst-compiled static helpers
     // -----------------------------
-
-    [BurstCompile]
-    private static void SmoothSlerpBurst(in quaternion current, in quaternion target, float speed, float noSmoothingAlpha, float dt, out quaternion result)
-    {
-        float t = math.saturate(dt * math.max(0f, speed));
-        result = math.slerp(current, target, t);
-        result = math.slerp(result, target, noSmoothingAlpha);
-    }
-
-    // Catherine graph pre-solve variant. Its anchor follows the animated pelvis instead of the
-    // head so prone/supine animations and non-upright body frames do not feed back into world Y.
-    private static float3 ComputeRealisticHipsXZBurst(ref SpineSolveState s, float3 animatedHipsPosWorld, float noSmoothingBlendAlpha, float dt, float3 leftFootPos, float3 rightFootPos, bool leftFootTracked, bool rightFootTracked)
-    {
-        float3 animatedHipsPosXZ = new float3(animatedHipsPosWorld.x, 0f, animatedHipsPosWorld.z);
-        if (s.HipsBaselineInitialized == 0)
-        {
-            s.HipsBaselineXZ = animatedHipsPosXZ;
-            s.HipsBaselineInitialized = 1;
-        }
-        else
-        {
-            float safeDt = math.max(dt, 1e-6f);
-            float alpha = 1f - math.exp(-2f * math.PI * AnimationHipsBaselineHz * safeDt);
-            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, alpha);
-            s.HipsBaselineXZ = math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, noSmoothingBlendAlpha);
-        }
-
-        if (leftFootTracked && rightFootTracked)
-        {
-            float3 feetMidXZ = new float3(
-                (leftFootPos.x + rightFootPos.x) * 0.5f,
-                0f,
-                (leftFootPos.z + rightFootPos.z) * 0.5f);
-            return math.lerp(feetMidXZ, animatedHipsPosXZ, FootPendulumLeanFrac);
-        }
-
-        return math.lerp(s.HipsBaselineXZ, animatedHipsPosXZ, CounterbalanceFollowFrac);
-    }
 
     /// <summary>
     /// The framerate at which the *RotationSpeed settings were tuned, and the rate whose behaviour
@@ -1029,22 +836,28 @@ public class BasisLocalVirtualSpineDriver
         in float3 supportXZ,
         in float3 worldUp,
         float lenTotal,
-        in quaternion torsoYaw,
+        in quaternion headYaw,
         float biasScale,
         in float3 desiredHipsXZ,
         bool freezeToTpose,
         in float3 tposeHips,
         float standingHipsLocalY,
         float standingHeadLocalY,
+        float trackingLiftY,
         bool usePostureModel,
         float compressionStrength,
         float maxDrop,
         out float3 result)
     {
+        // The tracked body carries the play-space vertical offset; the T-pose-derived standing
+        // references don't. Lift them into the same frame or the offset reads as a phantom squat.
+        float standingHipsY = standingHipsLocalY + trackingLiftY;
+        float standingHeadY = standingHeadLocalY + trackingLiftY;
+
         // Match original semantics: when frozen, bias direction is world-aligned (identity yaw),
         // not head yaw. Position base swaps to TPose but forward bias is still applied.
-        float3 hipsBase = freezeToTpose ? tposeHips : neckPos - worldUp * lenTotal;
-        quaternion biasYaw = freezeToTpose ? quaternion.identity : torsoYaw;
+        float3 hipsBase = freezeToTpose ? tposeHips + new float3(0f, trackingLiftY, 0f) : neckPos - worldUp * lenTotal;
+        quaternion biasYaw = freezeToTpose ? quaternion.identity : headYaw;
         float3 forwardBias = math.mul(biasYaw, new float3(0f, 0f, 1f)) * biasScale;
 
         if (freezeToTpose)
@@ -1058,7 +871,7 @@ public class BasisLocalVirtualSpineDriver
         // what follows -- the pelvis may sit above it (the spine compresses, which is what a folding spine
         // does) but never below it, because that would mean the spine has STRETCHED.
         float rigidY = hipsBase.y;
-        float headDrop = standingHeadLocalY - headPos.y;
+        float headDrop = standingHeadY - headPos.y;
 
         if (usePostureModel && standingHeadLocalY > 1e-3f && headDrop > 0f)
         {
@@ -1082,7 +895,7 @@ public class BasisLocalVirtualSpineDriver
             // The pelvis may rise above the rigid pose (spine compresses) but never sink below it (spine
             // cannot stretch). On a squat the model lands ON the rigid pose, which is the whole point --
             // that is the case the old saturation was wrongly holding 32.8 cm up.
-            hipsBase.y = math.max(standingHipsLocalY - pelvisDrop, rigidY);
+            hipsBase.y = math.max(standingHipsY - pelvisDrop, rigidY);
         }
         else if (!usePostureModel)
         {
@@ -1090,11 +903,11 @@ public class BasisLocalVirtualSpineDriver
             // waist-bend (which is why it was added -- the rigid model buried the pelvis and folded the
             // knees), badly wrong for a squat. Kept behind the VSpinePostureModel toggle so the change is
             // one switch to A/B in a headset, and one switch to revert.
-            float drop = standingHipsLocalY - rigidY;
+            float drop = standingHipsY - rigidY;
             if (drop > 0f && compressionStrength > 0f && maxDrop > 1e-4f)
             {
                 float softDrop = maxDrop * (1f - math.exp(-drop / maxDrop));
-                hipsBase.y = standingHipsLocalY - math.lerp(drop, softDrop, math.saturate(compressionStrength));
+                hipsBase.y = standingHipsY - math.lerp(drop, softDrop, math.saturate(compressionStrength));
             }
         }
         // headDrop <= 0 (head at or above standing height -- tiptoes, a jump) leaves the RIGID pose
@@ -1103,64 +916,6 @@ public class BasisLocalVirtualSpineDriver
         // Y from the posture law, XZ from the realistic model (deliberately UNCHANGED -- a fit of the
         // horizontal pelvis lost to this constant out-of-sample, so it does not ship), plus pelvic bias.
         result = new float3(desiredHipsXZ.x, hipsBase.y, desiredHipsXZ.z) + forwardBias;
-    }
-
-    /// <summary>
-    /// Animation-aware version of the hips placement used by the graph pre-solve. Compression is
-    /// measured along the animated hips-to-head axis, relative to the animation hips pose, rather
-    /// than against a standing world-Y floor. This preserves the legacy result for an upright pose
-    /// while allowing a prone/supine body to translate vertically without lifting its pelvis.
-    /// </summary>
-    [BurstCompile]
-    internal static void ComputeHipsPositionBodyFrame(
-        in float3 neckPos,
-        in float3 bodyUp,
-        float lenTotal,
-        in quaternion torsoYaw,
-        float biasScale,
-        in float3 desiredHipsXZ,
-        bool freezeToTpose,
-        in float3 tposeHips,
-        in float3 animatedHipsPosition,
-        float compressionStrength,
-        float maxDrop,
-        out float3 result)
-    {
-        float3 rigidHips = freezeToTpose ? tposeHips : neckPos - bodyUp * lenTotal;
-        quaternion biasYaw = freezeToTpose ? quaternion.identity : torsoYaw;
-        float3 forwardBias = math.mul(biasYaw, new float3(0f, 0f, 1f)) * biasScale;
-
-        if (freezeToTpose)
-        {
-            result = rigidHips + forwardBias;
-            return;
-        }
-
-        // The rest plane takes its horizontal origin from counterbalance, so moving the whole
-        // tracked pose around the avatar does not turn into a body-axis compression. Its height
-        // still comes from the animation hips pose. For an upright animation this is the legacy
-        // standing-height reference; for a supine animation horizontal tracker movement follows
-        // the counterbalance reference instead of pulling the hips toward the avatar origin.
-        float3 compressionRest = new float3(
-            desiredHipsXZ.x,
-            animatedHipsPosition.y,
-            desiredHipsXZ.z);
-        float restAlongBody = math.dot(compressionRest, bodyUp);
-        float rigidAlongBody = math.dot(rigidHips, bodyUp);
-        float drop = restAlongBody - rigidAlongBody;
-        float compressionOffset = 0f;
-        if (drop > 0f && compressionStrength > 0f && maxDrop > 1e-4f)
-        {
-            float softDrop = maxDrop * (1f - math.exp(-drop / maxDrop));
-            float compressedDrop = math.lerp(drop, softDrop, math.saturate(compressionStrength));
-            compressionOffset = drop - compressedDrop;
-        }
-
-        // Counterbalance supplies the horizontal anchor. Apply compression as a vector in the
-        // body frame so tilted poses retain the corresponding horizontal correction too.
-        result = new float3(desiredHipsXZ.x, rigidHips.y, desiredHipsXZ.z)
-            + bodyUp * compressionOffset
-            + forwardBias;
     }
 
     [BurstCompile]
@@ -1187,19 +942,5 @@ public class BasisLocalVirtualSpineDriver
     {
         float3 f = math.mul(yawOnly, new float3(0f, 0f, 1f));
         result = math.degrees(math.atan2(f.x, f.z));
-    }
-
-    static void ProjectOnPlane(in float3 v, in float3 normal, out float3 projected)
-    {
-        projected = v - normal * math.dot(v, normal);
-    }
-
-    static void AnyPerpendicular(in float3 n, out float3 perpendicular)
-    {
-        float3 a = math.abs(n.y) < 0.99f
-            ? new float3(0f, 1f, 0f)
-            : new float3(1f, 0f, 0f);
-
-        perpendicular = math.normalize(math.cross(a, n));
     }
 }

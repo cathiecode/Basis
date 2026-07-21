@@ -33,9 +33,11 @@ typedef enum basis_codec {
     BASIS_CODEC_VP9  = 3,
     BASIS_CODEC_AV1  = 4,
     BASIS_CODEC_AAC  = 10,
-    BASIS_CODEC_LPCM = 11   /* raw integer PCM: Blu-ray HDMV LPCM (TS stream_type
+    BASIS_CODEC_LPCM = 11,  /* raw integer PCM: Blu-ray HDMV LPCM (TS stream_type
                              * 0x80, big-endian) or RIFF/WAV (little-endian —
                              * flags byte 3 of the announce config blob) */
+    BASIS_CODEC_OPUS = 12,  /* Opus in WebM (A_OPUS); extradata is the OpusHead */
+    BASIS_CODEC_MP3  = 13   /* MPEG-1/2 Layer III; decoded in-box, no init data */
 } basis_codec_t;
 
 /* Sink the demuxers push into. All callbacks are invoked from the demux thread.
@@ -163,6 +165,12 @@ int basis_decoder_try_open_url(basis_decoder_t* dec, const char* url);
 int  basis_decoder_render_update(basis_decoder_t* dec);
 void basis_decoder_render_release(basis_decoder_t* dec);
 
+/* Seek notification (any thread; typically the caller of basis_media_seek_us).
+ * Sets a target + bumps a generation the decoder's consumer legs observe; each
+ * leg flushes its own stale buffers and re-anchors the clock ON ITS OWN THREAD,
+ * so nothing is flushed across threads. Idempotent per generation. */
+void basis_decoder_seek(basis_decoder_t* dec, int64_t target_us);
+
 /* Accessors mirrored by the public ABI (any thread unless noted). */
 void*    basis_decoder_get_texture(basis_decoder_t* dec, int* out_w, int* out_h);
 uint64_t basis_decoder_get_frame_counter(basis_decoder_t* dec);
@@ -226,6 +234,12 @@ void        basis_engine_set_state(basis_media_engine_t* engine, basis_media_sta
 void        basis_engine_set_error(basis_media_engine_t* engine, const char* message);
 basis_decoder_t* basis_engine_get_decoder(basis_media_engine_t* engine);
 
+/* Render-thread entry point (the Unity plugin's OnRenderEvent forwards here). The
+ * engine pointer comes from Unity and can arrive after basis_media_close has freed
+ * it; this checks a liveness registry under a lock and no-ops on a stale engine,
+ * so a late render event can't use-after-free. event_id is a BASIS_RENDER_* value. */
+void        basis_engine_render_event(basis_media_engine_t* engine, int event_id);
+
 /* Consulted by the platform backend: paused freezes video publishing and mutes
  * audio reads; running going to 0 tells decode/demux loops to unwind. */
 int basis_engine_is_paused(basis_media_engine_t* engine);
@@ -251,6 +265,10 @@ int basis_engine_is_paced(basis_media_engine_t* engine);
  * primed frame is dropped rather than half-played. */
 static inline int basis_frames_before_origin(int64_t pts, int frames, int rate) {
     if (pts >= 0 || frames <= 0 || rate <= 0) return 0;
+    /* -pts is UB at INT64_MIN, and (-pts) * rate can overflow before the cap;
+     * a drop that large already covers the whole block. */
+    if (pts == INT64_MIN || -pts > (INT64_MAX - 999999) / (int64_t)rate)
+        return frames;
     int64_t drop = ((-pts) * (int64_t)rate + 999999) / 1000000;
     return drop >= (int64_t)frames ? frames : (int)drop;
 }

@@ -337,6 +337,25 @@ static int esds_extract_asc(const uint8_t* ep, int el, uint8_t* asc, int cap) {
     return (int)dlen;
 }
 
+/* Returns the esds objectTypeIndication (0x40 = AAC, 0x6B = MPEG-1 audio / MP3,
+ * 0x69 = MPEG-2 audio / MP3), or 0 if the descriptor tree can't be walked. Same
+ * walk as esds_extract_asc, stopping at the DecoderConfig's first byte. */
+static int esds_object_type(const uint8_t* ep, int el) {
+    int j = 0;
+    uint32_t len;
+    if (j >= el || ep[j++] != 0x03) return 0;                 /* ES_Descriptor */
+    if (!esds_desc_len(ep, el, &j, &len) || len > (uint32_t)(el - j)) return 0;
+    int es_end = j + (int)len;
+    if (j + 3 > es_end) return 0;
+    int flags = ep[j + 2]; j += 3;
+    if (flags & 0x80) j += 2;
+    if (flags & 0x40) { if (j >= es_end) return 0; j += 1 + ep[j]; }
+    if (flags & 0x20) j += 2;
+    if (j >= es_end || ep[j++] != 0x04) return 0;             /* DecoderConfigDescriptor */
+    if (!esds_desc_len(ep, es_end, &j, &len) || len < 1 || len > (uint32_t)(es_end - j)) return 0;
+    return ep[j];                                             /* objectTypeIndication */
+}
+
 static void parse_stsd(mp4_track_t* t, const uint8_t* p, int len) {
     /* stsd: version/flags(4) entry_count(4) then sample entries */
     if (len < 8) return;
@@ -417,6 +436,18 @@ static void parse_stsd(mp4_track_t* t, const uint8_t* p, int len) {
                 if (ct == 0x65736473 /*esds*/ && csz >= 12) {
                     /* esds payload after the box's 4-byte version/flags */
                     const uint8_t* ep = ent + co + 12; int el = csz - 12;
+                    int oti = esds_object_type(ep, el);
+                    if (oti == 0x6B /*MPEG-1 audio*/ || oti == 0x69 /*MPEG-2 audio*/) {
+                        /* MP3 in MP4: no AudioSpecificConfig; the sr/ch from the
+                         * sample entry stand, and the decoder reads frame headers.
+                         * The OTI names MPEG-1/2 audio without a layer, but MP4 only
+                         * carries Layer III here in practice; a non-III stream would
+                         * be handled by the platform MPEG-audio decoder or, on the
+                         * Layer-III-only Windows path, rejected (muted, video intact). */
+                        t->codec = BASIS_CODEC_MP3;
+                        co += csz;
+                        continue;
+                    }
                     int n = esds_extract_asc(ep, el, t->asc, (int)sizeof(t->asc));
                     if (n >= 2) {
                         /* Walk the ASC bit fields so the escape forms parse
@@ -508,17 +539,22 @@ static void parse_chunk_offsets(mp4_ctab_t* c, const uint8_t* p, int len, int is
     c->chunk_count = n;
 }
 
-static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len);
+/* Container-box nesting cap. Real files nest a handful deep (moov>trak>mdia>
+ * minf>stbl); a crafted file can nest thousands deep with 8-byte headers to
+ * exhaust the demux-thread stack, so bail well before that. */
+#define MP4_MAX_BOX_DEPTH 32
+
+static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len, int depth);
 
 /* Tracks are selected by role — the first supported video track and the first
  * supported audio track, wherever they sit in the moov. A fixed first-two-traks
  * cut would leave a valid file ordered audio,audio,video silently video-less. */
-static void parse_trak(mp4_t* m, const uint8_t* p, int len) {
+static void parse_trak(mp4_t* m, const uint8_t* p, int len, int depth) {
     mp4_track_t t;
     memset(&t, 0, sizeof(t));
     t.nal_len_size = 4;
     t.timescale = 90000;
-    parse_box_tree(m, &t, p, len);
+    parse_box_tree(m, &t, p, len, depth);
 
     int have_video = 0, have_audio = 0;
     for (int i = 0; i < m->ntracks; ++i) {
@@ -540,7 +576,8 @@ static void parse_trak(mp4_t* m, const uint8_t* p, int len) {
     free(t.ctab.stsc); free(t.ctab.chunk_offsets); free(t.ctab.stss);
 }
 
-static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len) {
+static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len, int depth) {
+    if (depth > MP4_MAX_BOX_DEPTH) return;
     int off = 0;
     while (off + 8 <= len) {
         int sz = (int)rd32(p + off);
@@ -549,11 +586,11 @@ static void parse_box_tree(mp4_t* m, mp4_track_t* t, const uint8_t* p, int len) 
         const uint8_t* body = p + off + 8;
         int blen = sz - 8;
         switch (ty) {
-            case 0x7472616b: parse_trak(m, body, blen); break;          /* trak */
+            case 0x7472616b: parse_trak(m, body, blen, depth + 1); break;      /* trak */
             case 0x6d646961: /* mdia */
             case 0x6d696e66: /* minf */
             case 0x65647473: /* edts */
-            case 0x7374626c: parse_box_tree(m, t, body, blen); break;    /* stbl */
+            case 0x7374626c: parse_box_tree(m, t, body, blen, depth + 1); break; /* stbl */
             case 0x6d766864: /* mvhd: movie timescale (elst duration units) + duration */
                 if (blen >= 4) {
                     int ver = body[0];
@@ -613,7 +650,8 @@ static void announce_tracks(mp4_t* m) {
             }
             m->sink->on_video_format(m->sink->user, t->codec, t->extradata, t->extradata_len, w, h);
         } else {
-            m->sink->on_audio_format(m->sink->user, BASIS_CODEC_AAC, t->sr ? t->sr : 48000, t->ch ? t->ch : 2,
+            m->sink->on_audio_format(m->sink->user, t->codec ? t->codec : BASIS_CODEC_AAC,
+                                     t->sr ? t->sr : 48000, t->ch ? t->ch : 2,
                                      t->asc_len ? t->asc : NULL, t->asc_len);
         }
         t->announced = 1;
@@ -1275,7 +1313,7 @@ int basis_mp4_run(basis_media_sink_t* sink, basis_read_fn read, void* ctx,
 
         switch (type) {
             case 0x6d6f6f76: /* moov */
-                parse_box_tree(&m, NULL, buf, (int)body);
+                parse_box_tree(&m, NULL, buf, (int)body, 0);
                 for (int i = 0; i < m.ntracks; ++i) {
                     classic_apply_elst(&m, &m.tracks[i]);
                     classic_init_cursor(&m.tracks[i].ctab);

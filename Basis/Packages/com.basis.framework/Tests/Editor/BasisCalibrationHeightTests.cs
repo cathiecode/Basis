@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using UnityEngine;
 
 namespace Basis.Tests.IK
 {
@@ -137,6 +138,65 @@ namespace Basis.Tests.IK
                         Assert.That(lift, Is.EqualTo(0f).Within(1e-6f),
                             $"eye={playerEye} ape={apeIndex}: no lift when the feet aren't below the floor.");
                 }
+        }
+
+        [Test]
+        public void ArmToHeightBlend_EndpointsReproduceThePureModes_MidpointBetween()
+        {
+            // The blend interpolates the metric pair (and the eye offset by its eye share, as
+            // ChooseHeightToUse assembles it), so 0% must be exactly eye-height mode, 100% exactly
+            // arm-distance mode, and anything between must land between the two DeviceScales.
+            const float avatarEye = 1.45f, avatarSpan = 1.60f, u = 1f, eyeOffset = 0.08f;
+            foreach (float playerEye in StandingEye)
+                foreach (float apeIndex in new[] { 0.94f, 1.00f, 1.10f })
+                {
+                    float playerSpan = playerEye * apeIndex;
+                    float eyeScale = BasisCalibrationMath.ComputeDeviceScale(avatarEye, u, playerEye, eyeOffset, 0f);
+                    float spanScale = BasisCalibrationMath.ComputeDeviceScale(avatarSpan, u, playerSpan, 0f, 0f);
+
+                    float BlendScale(float t) => BasisCalibrationMath.ComputeDeviceScale(
+                        BasisCalibrationMath.BlendEyeSpanMetric(avatarEye, avatarSpan, t), u,
+                        BasisCalibrationMath.BlendEyeSpanMetric(playerEye, playerSpan, t), eyeOffset * Mathf.Clamp01(1f - t), 0f);
+
+                    Assert.That(BlendScale(0f), Is.EqualTo(eyeScale).Within(1e-5f),
+                        $"eye={playerEye} ape={apeIndex}: 0% must reproduce eye-height mode.");
+                    Assert.That(BlendScale(1f), Is.EqualTo(spanScale).Within(1e-5f),
+                        $"eye={playerEye} ape={apeIndex}: 100% must reproduce arm-distance mode.");
+                    float mid = BlendScale(0.5f);
+                    Assert.That(mid, Is.InRange(Mathf.Min(eyeScale, spanScale) - 1e-5f, Mathf.Max(eyeScale, spanScale) + 1e-5f),
+                        $"eye={playerEye} ape={apeIndex}: 50% must land between the two modes.");
+
+                    // The blend no longer extrapolates: the uniform scale only ever sits between the two
+                    // measurements, and the residual mismatch is taken up per-segment by the body fit.
+                    // Anything outside 0..1 clamps onto the nearer endpoint.
+                    Assert.That(BlendScale(-0.5f), Is.EqualTo(eyeScale).Within(1e-5f),
+                        $"eye={playerEye} ape={apeIndex}: below 0% must clamp to eye-height mode.");
+                    Assert.That(BlendScale(1.5f), Is.EqualTo(spanScale).Within(1e-5f),
+                        $"eye={playerEye} ape={apeIndex}: above 100% must clamp to arm-distance mode.");
+
+                    float lo = Mathf.Min(eyeScale, spanScale) - 1e-5f;
+                    float hi = Mathf.Max(eyeScale, spanScale) + 1e-5f;
+                    for (float t = 0f; t <= 1f; t += 0.1f)
+                    {
+                        Assert.That(BlendScale(t), Is.InRange(lo, hi),
+                            $"eye={playerEye} ape={apeIndex} t={t:F1}: the blend must never leave the span of the two modes.");
+                    }
+                }
+        }
+
+        [Test]
+        public void ArmToHeightBlend_AtZero_GroundingLiftIsZero()
+        {
+            // The blended grounding lift adds the blended eye offset to the player eye term; at 0% the
+            // eye-mode denominator already grounds the feet, so the lift must vanish (no double-count).
+            const float avatarEye = 1.5f, u = 1f, eyeOffset = 0.08f;
+            foreach (float playerEye in StandingEye)
+            {
+                float eyeScale = BasisCalibrationMath.ComputeDeviceScale(avatarEye, u, playerEye, eyeOffset, 0f);
+                float lift = BasisCalibrationMath.ArmSpanFloorGroundingLift(avatarEye, u, eyeScale, playerEye + eyeOffset);
+                Assert.That(lift, Is.EqualTo(0f).Within(1e-5f),
+                    $"eye={playerEye}: at 0% blend the grounding lift must be exactly zero.");
+            }
         }
 
         [Test]

@@ -43,9 +43,11 @@
 #include <mftransform.h>
 #include <mferror.h>
 #include <wmcodecdsp.h>
+#include <mmreg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <mutex>
 
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfuuid.lib")
@@ -77,6 +79,9 @@ struct PcmRing {
     Chunk chunks[CHUNKS] = {};
     int chead = 0, ccount = 0;
     long trims = 0;  /* clock-gated trims fired (diagnostics) */
+    int64_t playedUs = INT64_MIN;  /* PTS served up to = the audio playback front;
+                                    * the position for an audio-only stream that
+                                    * never presents a video frame. */
 
     /* Serving is gated on media time: a sample is released when its PTS comes
      * due against the serve target (presentation clock + the consumer's output
@@ -172,6 +177,7 @@ struct PcmRing {
             }
         }
         int got = 0;
+        int64_t frontPts = (ccount > 0) ? chunks[chead].pts : INT64_MIN;
         while (got < n && ccount > 0) {
             Chunk& c = chunks[chead];
             if (target_us != INT64_MIN && c.pts > target_us + early_hold_us) break;
@@ -184,8 +190,25 @@ struct PcmRing {
                 c.pts += (int64_t)take * 1000000LL / (frame * srr);
             }
         }
+        /* Publish the playback front so an audio-only stream has a position.
+         * Only when samples actually served: a gated read that breaks before
+         * copying leaves the front unserved, so its PTS isn't yet "played". */
+        if (frontPts != INT64_MIN && got > 0)
+            playedUs = frontPts + (int64_t)(got / (frame > 0 ? frame : 1)) * 1000000LL / srr;
         LeaveCriticalSection(&cs);
         return got;
+    }
+
+    /* Drop everything buffered. Used on a seek so pre-seek chunks can neither
+     * gate the ring (a backward seek leaves front chunks whose PTS is ahead of
+     * the target, which block the newer post-seek audio queued behind them) nor
+     * play out ahead of the post-seek audio that replaces them. */
+    void flush() {
+        EnterCriticalSection(&cs);
+        head = 0; tail = 0;
+        chead = 0; ccount = 0;
+        playedUs = INT64_MIN;
+        LeaveCriticalSection(&cs);
     }
 };
 
@@ -308,6 +331,16 @@ struct basis_decoder {
     int aLpcmLE = 0;                /* 1 = little-endian samples (RIFF/WAV lane) */
     float* aLpcmBuf = nullptr;      /* reusable convert buffer */
     int aLpcmBufCap = 0;            /* in floats */
+
+    /* Opus (libopus via the opussharp-shipped DLL, resolved at runtime — §4-b2).
+     * Decode float straight into the ring like the LPCM bypass. */
+    void* opusDec = nullptr;        /* OpusDecoder* or OpusMSDecoder* */
+    int opusIsMS = 0;               /* 1 = multistream decoder (mapping family != 0) */
+    int opusMappingFamily = 0;      /* OpusHead channel-mapping family */
+    int opusPreSkip = 0;            /* encoder pre-skip frames still to drop */
+    float* opusBuf = nullptr;       /* reusable decode buffer (interleaved float) */
+    int opusBufCap = 0;             /* in floats */
+
     volatile LONG dbg_aout = 0;     /* AAC PCM outputs produced */
     PcmRing pcm;
     int64_t aPtsFallback = 0;       /* next chunk PTS when MF gives no sample time */
@@ -325,6 +358,28 @@ struct basis_decoder {
      * target forward so samples released now come due exactly when they reach
      * the speaker. */
     volatile LONG audLatencyUs = 60000;
+
+    /* Seek notification. basis_decoder_seek bumps seekGen (+ latches the target)
+     * on the caller thread. Each consumer leg keeps its own last-seen copy and,
+     * when it differs, flushes its stale buffers and re-anchors on ITS OWN thread:
+     * the audio-submit (demux) thread flushes the PCM ring + the MF/Opus decoder;
+     * the video-submit (demux) thread flushes the video MFT (drops its reorder
+     * buffer so retained pre-seek frames can't repopulate the ring) and clears the
+     * frame ring — it owns vdec and writes the ring; the render thread re-anchors
+     * the present clock and also clears the ring so a stale frame can't present in
+     * the window before the next video AU arrives. Nothing is touched across threads. */
+    volatile LONG   seekGen = 0;
+    volatile LONG64 seekTargetUs = 0;
+    int64_t seekFromUs = 0;   /* pre-seek audio front, for the audio-only settle (main thread only) */
+    LONG audioSeekGen = 0;    /* audio-submit (demux) thread only */
+    LONG videoSeekGen = 0;    /* video-submit (demux) thread only */
+    LONG renderSeekGen = 0;   /* render thread only */
+    int  audioSettling = 0;   /* audio-only position: hold get_position at the seek target
+                               * until post-seek audio serves near it (main thread only) */
+    volatile LONG videoSeekAck = 0; /* demux publishes seekGen here once it has flushed
+                                     * vdec + dropped pre-seek frames; the render leg
+                                     * holds until it matches so it neither anchors to a
+                                     * stale frame nor races the producer's ring clear */
 };
 
 /* ---- D3D / MF helpers --------------------------------------------------- */
@@ -547,9 +602,16 @@ static bool configure_video_mft(basis_decoder* d) {
      * Refuse here: only H.265 elementary streams reach this point sizeless (no SPS
      * parser for TS/RTSP/RTMP), and the size can't be recovered once it crashes. */
     if (d->vwidth <= 0 || d->vheight <= 0) {
-        basis_engine_set_error(d->engine,
-            "video track announced no frame size, so the decoder cannot be configured "
-            "(H.265 outside MP4 has no dimension parser yet)");
+        const char* codec_name =
+            d->vcodec == BASIS_CODEC_H265 ? "H.265" :
+            d->vcodec == BASIS_CODEC_H264 ? "H.264" :
+            d->vcodec == BASIS_CODEC_VP9  ? "VP9"   :
+            d->vcodec == BASIS_CODEC_AV1  ? "AV1"   : "this video codec";
+        char msg[176];
+        snprintf(msg, sizeof(msg),
+            "video track (%s) announced no frame size, so the decoder cannot be configured",
+            codec_name);
+        basis_engine_set_error(d->engine, msg);
         SAFE_RELEASE(d->vdec);
         return false;
     }
@@ -821,6 +883,10 @@ static void video_process_to_shared(basis_decoder* d, ID3D11Texture2D* nv12, UIN
     inView->Release();
 }
 
+/* Upper bound on a single decoded output frame — 8K RGB is ~100 MB, so this is
+ * past any real frame while stopping a malformed cbSize from driving a huge alloc. */
+#define BASIS_MAX_OUTPUT_BUFFER (256u * 1024u * 1024u)
+
 /* Pull all currently-available output samples from the video MFT.
  * CRITICAL: in DXVA mode the MFT hands us its own IMFSample in outBuf.pSample,
  * backed by a small pool of D3D11 surfaces. That sample MUST be released every
@@ -836,9 +902,25 @@ static void drain_video(basis_decoder* d) {
         outBuf.dwStreamID = 0;
         if (!providesSamples) {
             IMFSample* s = nullptr; IMFMediaBuffer* mb = nullptr;
-            MFCreateSample(&s);
-            MFCreateMemoryBuffer(si.cbSize ? si.cbSize : (DWORD)(d->vwidth * d->vheight * 3), &mb);
-            s->AddBuffer(mb); mb->Release();
+            DWORD cb = si.cbSize;
+            if (!cb) {
+                /* Dims are attacker-announced; bound each side BEFORE multiplying so
+                 * the product can't overflow (16384 is past any real frame — the SPS
+                 * parser already caps decode dimensions well below this). */
+                if (d->vwidth > 0 && d->vwidth <= 16384 && d->vheight > 0 && d->vheight <= 16384)
+                    cb = (DWORD)((uint64_t)d->vwidth * (uint64_t)d->vheight * 3u);
+                else
+                    cb = 0;
+            }
+            /* Cap both the MFT-declared cbSize and the fallback estimate so a
+             * malformed output size can't exhaust memory. */
+            if (cb == 0 || cb > BASIS_MAX_OUTPUT_BUFFER ||
+                FAILED(MFCreateSample(&s)) || FAILED(MFCreateMemoryBuffer(cb, &mb))) {
+                SAFE_RELEASE(s); SAFE_RELEASE(mb);
+                break;
+            }
+            if (FAILED(s->AddBuffer(mb))) { mb->Release(); s->Release(); break; }
+            mb->Release();
             outBuf.pSample = s;
         }
 
@@ -918,6 +1000,91 @@ static void drain_video(basis_decoder* d) {
  * Float vs 16-bit PCM only changes the conversion in drain_audio. Shared by
  * the initial configure and the drain's stream-change renegotiation (HE-AAC
  * raises one when the SBR-doubled rate replaces the core rate). */
+/* ---- libopus runtime loader (§4-b2) -------------------------------------- */
+/* The plugin does not link libopus; it resolves the decode entry points at
+ * runtime from the opus.dll com.avionblock.opussharp ships. C# passes the path
+ * (the in-Editor path differs from a flattened build); all decoders in the
+ * process share one resolved table. A missing library or symbol degrades to
+ * muted audio (the format is rejected), never a crash. */
+#define OPUS_SET_GAIN_REQUEST 4034
+#define OPUS_RESET_STATE 4028
+typedef struct OpusDecoder OpusDecoder;
+typedef struct OpusMSDecoder OpusMSDecoder;
+struct opus_api {
+    OpusDecoder*   (*dec_create)(int32_t Fs, int channels, int* error);
+    int            (*decode_float)(OpusDecoder*, const unsigned char*, int32_t, float*, int, int);
+    void           (*dec_destroy)(OpusDecoder*);
+    OpusMSDecoder* (*ms_create)(int32_t Fs, int channels, int streams, int coupled,
+                                const unsigned char* mapping, int* error);
+    int            (*ms_decode_float)(OpusMSDecoder*, const unsigned char*, int32_t, float*, int, int);
+    void           (*ms_destroy)(OpusMSDecoder*);
+    int            (*dec_ctl)(OpusDecoder*, int request, ...);
+    int            (*ms_ctl)(OpusMSDecoder*, int request, ...);
+    const char*    (*version)(void);
+};
+static opus_api g_opus = {};
+static bool g_opus_ok = false, g_opus_tried = false;
+/* Wide path so a project under a non-ANSI directory (e.g. C:\媒体\Basis) still
+ * loads: LoadLibraryA would fail there and the miss is cached for the session. */
+static wchar_t g_opus_path[32768] = {0};
+/* The loader and path setter touch process-wide state; concurrent decoder opens
+ * (multiple players) would otherwise race g_opus_tried/g_opus_ok/g_opus_path. */
+static std::mutex g_opus_mtx;
+
+/* Resolve opus.dll next to this plugin (the standalone-build flattened Plugins
+ * dir) and load it by absolute path — never a bare name, which would search the
+ * cwd/PATH and let a planted opus.dll be loaded. */
+static HMODULE opus_load_from_plugin_dir() {
+    HMODULE self = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)&opus_load_from_plugin_dir, &self))
+        return nullptr;
+    wchar_t path[2048];
+    DWORD n = GetModuleFileNameW(self, path, (DWORD)(sizeof(path) / sizeof(path[0])));
+    if (n == 0 || n >= sizeof(path) / sizeof(path[0])) return nullptr;
+    wchar_t* slash = wcsrchr(path, L'\\');
+    if (!slash) return nullptr;
+    slash[1] = 0;                                /* keep the trailing backslash */
+    if (wcslen(path) + wcslen(L"opus.dll") >= sizeof(path) / sizeof(path[0])) return nullptr;
+    wcscat_s(path, sizeof(path) / sizeof(path[0]), L"opus.dll");
+    /* LOAD_WITH_ALTERED_SEARCH_PATH: resolve opus.dll's own dependencies from its
+     * directory rather than the process search path. */
+    return LoadLibraryExW(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+}
+
+static bool opus_load() {
+    std::lock_guard<std::mutex> lock(g_opus_mtx);
+    if (g_opus_tried) return g_opus_ok;
+    g_opus_tried = true;
+    /* Absolute, trusted paths only. The C# side supplies the opussharp path in
+     * the Editor; standalone builds resolve opus.dll next to the plugin. */
+    HMODULE lib = g_opus_path[0] ? LoadLibraryExW(g_opus_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH) : nullptr;
+    if (!lib) lib = opus_load_from_plugin_dir();
+    if (!lib) return false;
+    g_opus.dec_create      = (decltype(g_opus.dec_create))      GetProcAddress(lib, "opus_decoder_create");
+    g_opus.decode_float    = (decltype(g_opus.decode_float))    GetProcAddress(lib, "opus_decode_float");
+    g_opus.dec_destroy     = (decltype(g_opus.dec_destroy))     GetProcAddress(lib, "opus_decoder_destroy");
+    g_opus.ms_create       = (decltype(g_opus.ms_create))       GetProcAddress(lib, "opus_multistream_decoder_create");
+    g_opus.ms_decode_float = (decltype(g_opus.ms_decode_float)) GetProcAddress(lib, "opus_multistream_decode_float");
+    g_opus.ms_destroy      = (decltype(g_opus.ms_destroy))      GetProcAddress(lib, "opus_multistream_decoder_destroy");
+    g_opus.dec_ctl         = (decltype(g_opus.dec_ctl))         GetProcAddress(lib, "opus_decoder_ctl");
+    g_opus.ms_ctl          = (decltype(g_opus.ms_ctl))          GetProcAddress(lib, "opus_multistream_decoder_ctl");
+    g_opus.version         = (decltype(g_opus.version))         GetProcAddress(lib, "opus_get_version_string");
+    g_opus_ok = g_opus.dec_create && g_opus.decode_float && g_opus.dec_destroy &&
+                g_opus.ms_create && g_opus.ms_decode_float && g_opus.ms_destroy;
+    return g_opus_ok;
+}
+
+/* C# resolves the opussharp library path and passes it before the first Opus
+ * decode (the Editor Packages path vs the flattened Plugins dir). C#-facing, so
+ * exported and __stdcall to match the P/Invoke (unlike the internal decoder
+ * entry points the native core calls). */
+extern "C" __declspec(dllexport) void __stdcall basis_decoder_set_opus_library_path(const wchar_t* path) {
+    if (!path) return;
+    std::lock_guard<std::mutex> lock(g_opus_mtx);
+    wcsncpy_s(g_opus_path, _countof(g_opus_path), path, _TRUNCATE);
+}
+
 static bool pick_audio_output(basis_decoder* d) {
     IMFMediaType* chosen = nullptr; int bits = 0; int chosenRank = -1;
     int target = d->achSrc ? d->achSrc : (d->ach ? d->ach : 2);
@@ -982,6 +1149,49 @@ static bool configure_audio_mft(basis_decoder* d, const uint8_t* asc, int asc_le
         in->SetBlob(MF_MT_USER_DATA, blob, n);
     }
     HRESULT hr = d->adec->SetInputType(0, in, 0);
+    in->Release();
+    if (FAILED(hr)) { SAFE_RELEASE(d->adec); return false; }
+
+    if (!pick_audio_output(d)) { SAFE_RELEASE(d->adec); return false; }
+
+    d->adec->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+    d->adec->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+    return true;
+}
+
+/* Configures the in-box MP3 decoder. Unlike AAC (a fixed CLSID) the MP3 decoder
+ * is found by enumeration, so activate the first MFT that takes MFAudioFormat_MP3.
+ * The input type is built from an MPEGLAYER3WAVEFORMAT so MF fills in the subtype
+ * and codec-private bytes; the decoder parses each frame header itself. Fails
+ * silently like configure_audio_mft — audio stays muted, video unaffected. */
+static bool configure_mp3_mft(basis_decoder* d, int sample_rate, int channels) {
+    MFT_REGISTER_TYPE_INFO inInfo = { MFMediaType_Audio, MFAudioFormat_MP3 };
+    IMFActivate** acts = nullptr;
+    UINT32 count = 0;
+    UINT32 flags = MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_LOCALMFT | MFT_ENUM_FLAG_SORTANDFILTER;
+    if (FAILED(MFTEnumEx(MFT_CATEGORY_AUDIO_DECODER, flags, &inInfo, nullptr, &acts, &count)) || count == 0)
+        return false;
+    for (UINT32 i = 0; i < count; ++i) {
+        if (!d->adec && SUCCEEDED(acts[i]->ActivateObject(IID_PPV_ARGS(&d->adec)))) { /* keep first */ }
+        acts[i]->Release();
+    }
+    CoTaskMemFree(acts);
+    if (!d->adec) return false;
+
+    MPEGLAYER3WAVEFORMAT wf = {};
+    wf.wfx.wFormatTag = WAVE_FORMAT_MPEGLAYER3;
+    wf.wfx.nChannels = (WORD)(channels > 0 ? channels : 2);
+    wf.wfx.nSamplesPerSec = (DWORD)(sample_rate > 0 ? sample_rate : 48000);
+    wf.wfx.nBlockAlign = 1;
+    wf.wfx.cbSize = MPEGLAYER3_WFX_EXTRA_BYTES;
+    wf.wID = MPEGLAYER3_ID_MPEG;
+    wf.nBlockSize = 1;
+    wf.nFramesPerBlock = 1;
+
+    IMFMediaType* in = nullptr;
+    MFCreateMediaType(&in);
+    HRESULT hr = MFInitMediaTypeFromWaveFormatEx(in, (const WAVEFORMATEX*)&wf, sizeof(wf));
+    if (SUCCEEDED(hr)) hr = d->adec->SetInputType(0, in, 0);
     in->Release();
     if (FAILED(hr)) { SAFE_RELEASE(d->adec); return false; }
 
@@ -1102,6 +1312,11 @@ extern "C" void basis_decoder_destroy(basis_decoder_t* d) {
     DeleteCriticalSection(&d->presentLock);
     d->pcm.destroy();
     free(d->aLpcmBuf);
+    if (d->opusDec) {
+        if (d->opusIsMS) { if (g_opus.ms_destroy) g_opus.ms_destroy((OpusMSDecoder*)d->opusDec); }
+        else             { if (g_opus.dec_destroy) g_opus.dec_destroy((OpusDecoder*)d->opusDec); }
+    }
+    free(d->opusBuf);
     delete d;
 }
 
@@ -1156,6 +1371,58 @@ extern "C" int basis_decoder_set_audio_format(basis_decoder_t* d, basis_codec_t 
         return 0;
     }
 
+    if (codec == BASIS_CODEC_OPUS) {
+        /* OpusHead (the extradata): [8]=version [9]=channels [10..11]=pre_skip LE
+         * [16..17]=output gain Q7.8 LE [18]=mapping family; family 1 adds
+         * [19]=streams [20]=coupled [21..]=channel-mapping table. Decode is
+         * native-side via the runtime-loaded libopus (§4-b2); a missing library
+         * or a decoder-create failure rejects the format = muted, video intact. */
+        if (!asc || asc_len < 19 || memcmp(asc, "OpusHead", 8) != 0) return 0;
+        if (!opus_load()) return 0;
+        int ch = asc[9];
+        int preskip = asc[10] | (asc[11] << 8);
+        int16_t gain = (int16_t)(asc[16] | (asc[17] << 8));
+        int family = asc[18];
+        if (ch < 1 || ch > 8) return 0;
+        if (family == 0 && ch > 2) return 0;             /* family 0 is mono/stereo only */
+        if (family != 0 && family != 1 && family != 255) return 0; /* reserved family */
+        d->opusMappingFamily = family;
+        int err = 0;
+        if (family == 0) {
+            OpusDecoder* dec = g_opus.dec_create(48000, ch, &err);
+            if (!dec || err != 0) return 0;
+            if (gain != 0 && g_opus.dec_ctl) g_opus.dec_ctl(dec, OPUS_SET_GAIN_REQUEST, (int)gain);
+            d->opusDec = dec; d->opusIsMS = 0;
+        } else {
+            if (asc_len < 21 + ch) return 0;
+            int streams = asc[19], coupled = asc[20];
+            OpusMSDecoder* ms = g_opus.ms_create(48000, ch, streams, coupled, asc + 21, &err);
+            if (!ms || err != 0) return 0;
+            /* Output gain applies independently of channel mapping (RFC 7845), and
+             * the multistream decoder has its own CTL entry point. */
+            if (gain != 0 && g_opus.ms_ctl) g_opus.ms_ctl(ms, OPUS_SET_GAIN_REQUEST, (int)gain);
+            d->opusDec = ms; d->opusIsMS = 1;
+        }
+        d->acodec = BASIS_CODEC_OPUS;
+        d->asr = 48000; d->ach = ch;
+        d->opusPreSkip = preskip;
+        d->aconfigured = true;
+        d->pcm.frame = ch;
+        d->pcm.sr = 48000;
+        return 0;
+    }
+
+    if (codec == BASIS_CODEC_MP3) {
+        d->asr = sample_rate; d->ach = channels; d->achSrc = channels;
+        if (configure_mp3_mft(d, sample_rate, channels)) {
+            d->acodec = BASIS_CODEC_MP3;
+            d->aconfigured = true;
+            d->pcm.frame = d->ach > 0 ? d->ach : 1;
+            d->pcm.sr = d->asr > 0 ? d->asr : 48000;
+        }
+        return 0;
+    }
+
     if (codec != BASIS_CODEC_AAC) return 0;
 
     /* The in-box AAC decoder (CLSID_CMSAACDecMFT) handles at most 6 channels
@@ -1190,16 +1457,29 @@ extern "C" int basis_decoder_set_audio_format(basis_decoder_t* d, basis_codec_t 
     return 0;
 }
 
+/* Upper bound on a single compressed access unit — far above any real one (an 8K
+ * HEVC keyframe is a few MB), so a demuxer that ever declared a wild size can't
+ * drive a huge MFCreateMemoryBuffer allocation. */
+#define BASIS_MAX_INPUT_SAMPLE (64 * 1024 * 1024)
+
 static IMFSample* make_input_sample(const uint8_t* data, int len, int64_t pts_us) {
+    /* len/data come from the demuxer (attacker-controlled). Reject a wild size and
+     * return NULL cleanly on a failed allocation rather than dereference a null buffer. */
+    if (!data || len <= 0 || len > BASIS_MAX_INPUT_SAMPLE) return nullptr;
     IMFSample* s = nullptr; IMFMediaBuffer* b = nullptr;
-    MFCreateSample(&s);
-    MFCreateMemoryBuffer(len, &b);
+    if (FAILED(MFCreateSample(&s))) return nullptr;
+    if (FAILED(MFCreateMemoryBuffer((DWORD)len, &b))) { s->Release(); return nullptr; }
     BYTE* p = nullptr; DWORD maxlen = 0;
-    b->Lock(&p, &maxlen, nullptr);
-    memcpy(p, data, len);
-    b->Unlock();
-    b->SetCurrentLength(len);
-    s->AddBuffer(b);
+    HRESULT lhr = b->Lock(&p, &maxlen, nullptr);
+    if (FAILED(lhr) || !p || maxlen < (DWORD)len) {
+        if (SUCCEEDED(lhr)) b->Unlock();   /* locked but unusable: unlock before releasing */
+        b->Release(); s->Release(); return nullptr;
+    }
+    memcpy(p, data, (size_t)len);
+    if (FAILED(b->Unlock()) || FAILED(b->SetCurrentLength((DWORD)len)) ||
+        FAILED(s->AddBuffer(b))) {
+        b->Release(); s->Release(); return nullptr;
+    }
     s->SetSampleTime((LONGLONG)pts_us * 10); /* us -> 100ns */
     b->Release();
     return s;
@@ -1213,11 +1493,31 @@ static IMFSample* make_input_sample(const uint8_t* data, int len, int64_t pts_us
  * this; if that ever changes, serialise submission through a decoder mutex. */
 extern "C" int basis_decoder_submit_video(basis_decoder_t* d, const uint8_t* annexb, int len, int64_t pts_us, int key) {
     (void)key;
-    if (!d || !d->vdec || !annexb || len <= 0) return -1;
+    /* Bound len here, before the AV1 configOBU concatenation below adds to it — so
+     * the total can't overflow int or drive an oversized allocation. */
+    if (!d || !d->vdec || !annexb || len <= 0 || len > BASIS_MAX_INPUT_SAMPLE) return -1;
+    /* First video AU after a seek: flush the MFT so its reorder buffer can't emit
+     * retained pre-seek frames into the ring, and drop the frames already in the
+     * ring. Demux thread owns vdec and writes the ring (drain_video below), so both
+     * are safe here; ring slots are aligned int64, cleared the same lock-free way
+     * they're written. */
+    LONG svg = InterlockedCompareExchange(&d->seekGen, 0, 0);
+    if (svg != d->videoSeekGen) {
+        d->videoSeekGen = svg;
+        d->vdec->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+        for (int i = 0; i < basis_decoder::RING; ++i) d->ringPts[i] = INT64_MIN;
+        /* The ring is this (demux) thread's to clear — do it here only, then publish
+         * the generation so the render leg knows the pre-seek frames are gone. That
+         * keeps a single writer of the ring on seek and stops the render leg from
+         * clearing frames this thread may already have repopulated. */
+        InterlockedExchange(&d->videoSeekAck, svg);
+    }
     IMFSample* s;
+    bool carried_config = false;
     if (d->vConfigObusLen > 0) {
         /* first AV1 AU: prepend the held configOBUs so the decoder sees the
          * sequence header before any frame data */
+        if (d->vConfigObusLen > BASIS_MAX_INPUT_SAMPLE - len) return -1; /* concat would overflow the cap */
         int total = d->vConfigObusLen + len;
         uint8_t* tmp = (uint8_t*)malloc((size_t)total);
         if (tmp) {
@@ -1225,13 +1525,14 @@ extern "C" int basis_decoder_submit_video(basis_decoder_t* d, const uint8_t* ann
             memcpy(tmp + d->vConfigObusLen, annexb, len);
             s = make_input_sample(tmp, total, pts_us);
             free(tmp);
+            carried_config = true;
         } else {
             s = make_input_sample(annexb, len, pts_us);
         }
-        d->vConfigObusLen = 0;
     } else {
         s = make_input_sample(annexb, len, pts_us);
     }
+    if (!s) return -1;   /* sample allocation failed; skip this AU rather than crash */
 
     /* Feed the AU, draining output to make room rather than dropping it. The
      * decoder must accept every frame or playback decimates to the rate at which
@@ -1248,8 +1549,12 @@ extern "C" int basis_decoder_submit_video(basis_decoder_t* d, const uint8_t* ann
         }
     }
     s->Release();
+    /* Only drop the held configOBUs once the sample carrying them was accepted;
+     * otherwise the next AU must re-prepend them or AV1 never sees its sequence
+     * header. If the sample was never consumed, report it so the caller knows. */
+    if (consumed && carried_config) d->vConfigObusLen = 0;
     drain_video(d);
-    return 0;
+    return consumed ? 0 : -1;
 }
 
 /* Source-order -> WAVE-order channel map for the Blu-ray HDMV LPCM
@@ -1302,11 +1607,95 @@ static void submit_lpcm(basis_decoder* d, const uint8_t* p, int len, int64_t pts
     InterlockedIncrement(&d->dbg_aout);
 }
 
+/* One Opus packet -> float PCM straight into the ring (§4-b2). Like the LPCM
+ * bypass, no OS decoder is involved. */
+/* Opus mapping family 1 delivers Vorbis channel order; the ring (and Unity) want
+ * WAVE/SMPTE order. Table maps each WAVE output channel to its Vorbis source
+ * index; NULL = identity (mono, stereo, and quad already coincide). Per RFC 7845
+ * §5.1.1 (Vorbis order) and WAVEFORMATEXTENSIBLE (WAVE order). */
+static const int* opus_vorbis_to_wave(int ch) {
+    static const int m3[3] = { 0, 2, 1 };                      /* L C R      -> L R C */
+    static const int m5[5] = { 0, 2, 1, 3, 4 };                /* FL C FR RL RR -> FL FR C RL RR */
+    static const int m6[6] = { 0, 2, 1, 5, 3, 4 };             /* +LFE last -> LFE at index 3 (5.1) */
+    static const int m7[7] = { 0, 2, 1, 6, 5, 3, 4 };          /* 6.1 */
+    static const int m8[8] = { 0, 2, 1, 7, 5, 6, 3, 4 };       /* 7.1 */
+    switch (ch) {
+        case 3: return m3; case 5: return m5; case 6: return m6;
+        case 7: return m7; case 8: return m8; default: return nullptr;
+    }
+}
+
+static void submit_opus(basis_decoder* d, const uint8_t* data, int len, int64_t pts_us) {
+    if (!d->opusDec || !g_opus_ok) return;
+    int ch = d->ach > 0 ? d->ach : 2;
+    int need = 5760 * ch;             /* max Opus frame (120 ms @ 48k) * channels */
+    if (d->opusBufCap < need) {
+        float* nb = (float*)realloc(d->opusBuf, sizeof(float) * (size_t)need);
+        if (!nb) return;
+        d->opusBuf = nb; d->opusBufCap = need;
+    }
+    int n = d->opusIsMS
+        ? g_opus.ms_decode_float((OpusMSDecoder*)d->opusDec, data, (int32_t)len, d->opusBuf, 5760, 0)
+        : g_opus.decode_float((OpusDecoder*)d->opusDec, data, (int32_t)len, d->opusBuf, 5760, 0);
+    if (n <= 0) return;               /* <0 = decode error, 0 = nothing produced */
+
+    /* Drop the encoder pre-skip from the head of the stream (once); libopus
+     * won't, and the priming samples aren't real audio. Advance the pts by what
+     * we drop so the remainder stays on the block timeline. */
+    int drop = d->opusPreSkip < n ? d->opusPreSkip : n;
+    d->opusPreSkip -= drop;
+    int remain = n - drop;
+    if (remain <= 0) return;
+    int64_t out_pts = pts_us + (int64_t)drop * 1000000LL / 48000;
+    /* Honour the media-time origin too (shared with #959; usually 0 for WebM). */
+    int origin = basis_frames_before_origin(out_pts, remain, 48000);
+    if (origin >= remain) return;
+    float* out = d->opusBuf + (int64_t)(drop + origin) * ch;
+    int outframes = remain - origin;
+    /* Family 1 is Vorbis channel order; reorder to WAVE before the ring. Family 0
+     * is mono/stereo and family 255 has no defined layout — neither is remapped. */
+    if (d->opusMappingFamily == 1) {
+        const int* map = opus_vorbis_to_wave(ch);
+        if (map) {
+            for (int f = 0; f < outframes; ++f) {
+                float* fr = out + (int64_t)f * ch;
+                float tmp[8];
+                for (int c = 0; c < ch; ++c) tmp[c] = fr[map[c]];
+                memcpy(fr, tmp, sizeof(float) * (size_t)ch);
+            }
+        }
+    }
+    d->pcm.write(out, outframes * ch, out_pts + (int64_t)origin * 1000000LL / 48000);
+    InterlockedIncrement(&d->dbg_aout);
+}
+
 extern "C" int basis_decoder_submit_audio(basis_decoder_t* d, const uint8_t* data, int len, int64_t pts_us) {
     if (!d || !data || len <= 0) return -1;
+    /* First audio AU after a seek: drop the stale pre-seek ring so this post-seek
+     * audio serves immediately (BUG: multi-second post-seek silence), and flush
+     * the MF decoder so it doesn't overlap-add across the discontinuity. Runs on
+     * the demux thread, which is the only thread that touches `adec`. */
+    LONG sg = InterlockedCompareExchange(&d->seekGen, 0, 0);
+    if (sg != d->audioSeekGen) {
+        d->audioSeekGen = sg;
+        d->pcm.flush();
+        if (d->adec) d->adec->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+        /* Opus bypasses the MFT; reset its predictive/history state so the first
+         * post-seek packet doesn't decode against the pre-seek timeline. */
+        if (d->opusDec) {
+            if (d->opusIsMS) { if (g_opus.ms_ctl)  g_opus.ms_ctl((OpusMSDecoder*)d->opusDec, OPUS_RESET_STATE); }
+            else             { if (g_opus.dec_ctl) g_opus.dec_ctl((OpusDecoder*)d->opusDec, OPUS_RESET_STATE); }
+        }
+        /* Seed the no-timestamp fallback from this AU so post-seek chunks land on
+         * the target timeline; 0 would put them at the start and the serve gate
+         * would trim or mis-time them. */
+        d->aPtsFallback = pts_us;
+    }
     if (d->acodec == BASIS_CODEC_LPCM) { submit_lpcm(d, data, len, pts_us); return 0; }
+    if (d->acodec == BASIS_CODEC_OPUS) { submit_opus(d, data, len, pts_us); return 0; }
     if (!d->adec) return -1;
     IMFSample* s = make_input_sample(data, len, pts_us);
+    if (!s) return -1;   /* sample allocation failed; skip this frame rather than crash */
     HRESULT hr = d->adec->ProcessInput(0, s, 0);
     s->Release();
     if (hr == MF_E_NOTACCEPTING) { drain_audio(d); }
@@ -1359,6 +1748,33 @@ extern "C" int basis_decoder_render_update(basis_decoder_t* d) {
 
     LARGE_INTEGER nowq; QueryPerformanceCounter(&nowq);
     EnterCriticalSection(&d->presentLock);
+
+    /* First render after a seek: re-anchor the present clock to the first post-seek
+     * frame instead of the stale `newest` — without a re-anchor the clock stays
+     * clamped and freezes until a post-seek frame arrives (a ~18s video hang on a
+     * cold forward seek). The ring is cleared by the demux thread that owns it (see
+     * submit_video); this leg only re-anchors, then waits on that clear before
+     * proceeding so it never anchors to a stale frame or races the producer. */
+    {
+        LONG sg = InterlockedCompareExchange(&d->seekGen, 0, 0);
+        if (sg != d->renderSeekGen) {
+            d->renderSeekGen = sg;
+            d->clockStarted = false;
+            d->primeStartQpc = 0;
+            d->lastPresentedPts = INT64_MIN;
+            d->videoBasePts = INT64_MIN;
+            /* Report the target now so get_position_us tracks before the first
+             * post-seek frame presents; render overwrites it once it does. */
+            InterlockedExchange64(&d->presentedPosUs, InterlockedCompareExchange64(&d->seekTargetUs, 0, 0));
+        }
+        /* Hold until the demux thread has flushed vdec and dropped the pre-seek
+         * frames. The prime/anchor path below then re-locks to the first post-seek
+         * frame the producer writes. */
+        if (InterlockedCompareExchange(&d->videoSeekAck, 0, 0) != sg) {
+            LeaveCriticalSection(&d->presentLock);
+            return 0;
+        }
+    }
 
     /* newest available PTS in the ring */
     int64_t newest = INT64_MIN;
@@ -1675,12 +2091,74 @@ extern "C" int basis_decoder_get_video_size(basis_decoder_t* d, int* w, int* h) 
     if (w) *w = d->sharedW; if (h) *h = d->sharedH; return 0;
 }
 extern "C" int basis_decoder_get_frame_origin(basis_decoder_t* d) { return d ? (int)d->frameTopLeft : 0; }
+
+extern "C" void basis_decoder_seek(basis_decoder_t* d, int64_t target_us) {
+    if (!d) return;
+    /* Record the pre-seek audio front before the flush clears it, so the audio-only
+     * settle can tell post-seek audio (near the target) from a stale pre-seek frame
+     * that slipped the drop (near this origin) — see get_position_us. A rapid re-seek
+     * with the ring already empty falls back to the prior target (where we were). */
+    EnterCriticalSection(&d->pcm.cs);
+    int64_t from = d->pcm.playedUs;
+    LeaveCriticalSection(&d->pcm.cs);
+    d->seekFromUs = from != INT64_MIN ? from : InterlockedCompareExchange64(&d->seekTargetUs, 0, 0);
+    /* Drop any pre-seek PCM still queued so the audio callback stops serving it
+     * immediately rather than up to the next audio AU. pcm.flush() is cs-guarded,
+     * safe from this (caller) thread; the codec-state reset stays on the submit
+     * thread where the MFT/Opus decoder is owned. */
+    d->pcm.flush();
+    /* Latch target before bumping the generation so any leg that observes the new
+     * generation reads the matching target. */
+    InterlockedExchange64(&d->seekTargetUs, target_us);
+    if (d->vdec) {
+        /* Video present: snap the presentation clock to the target so the seek bar
+         * shows the target immediately, before the first post-seek frame presents. */
+        InterlockedExchange64(&d->presentedPosUs, target_us);
+    } else {
+        /* Audio-only: no frame ever presents, so nothing would advance a pinned
+         * presentedPosUs and get_position_us (which returns it whenever >= 0) would
+         * freeze at the target. Leave it unset so get_position_us reports the audio
+         * front (playedUs), and mark the position settling: the ring was just
+         * flushed, but a pre-seek AU decoded in the window before the demuxer
+         * repositions can still drain a stale chunk into it, which would bounce the
+         * reported position (and the seek bar) to the old spot. get_position_us
+         * holds at the target through the settle until post-seek audio serves near
+         * it — the audio mirror of the video render leg re-anchoring to the target. */
+        InterlockedExchange64(&d->presentedPosUs, -1);
+        d->audioSettling = 1;
+    }
+    InterlockedIncrement(&d->seekGen);
+}
+
 extern "C" int64_t basis_decoder_get_position_us(basis_decoder_t* d) {
     if (!d) return -1;
     /* Presentation position once a frame has shown; decode-side before that
      * (start-up, audio-only) so early consumers still see the clock move. */
     int64_t presented = InterlockedCompareExchange64((volatile LONG64*)&d->presentedPosUs, 0, 0);
-    return presented >= 0 ? presented : d->lastPtsUs;
+    if (presented >= 0) return presented;
+    if (d->lastPtsUs >= 0) return d->lastPtsUs;
+    /* Audio-only: no video ever presents, so report the audio playback front.
+     * Through a post-seek settle, hold at the target until served audio lands nearer
+     * the target than the pre-seek origin. The core drops pre-seek audio before the
+     * ring, but that drop is not airtight (a frame can slip the seek-generation
+     * visibility window); latching on the first served sample would then report ~the
+     * pre-seek position. A slipped frame sits near the origin and post-seek audio near
+     * the target, so "nearer target than origin" rejects the former at any seek size —
+     * unlike a fixed proximity window, which a slip within it (a short seek) defeats. */
+    EnterCriticalSection(&d->pcm.cs);
+    int64_t played = d->pcm.playedUs;
+    LeaveCriticalSection(&d->pcm.cs);
+    if (d->audioSettling) {
+        int64_t target = InterlockedCompareExchange64((volatile LONG64*)&d->seekTargetUs, 0, 0);
+        if (played != INT64_MIN) {
+            int64_t from = d->seekFromUs;
+            uint64_t dTarget = played >= target ? (uint64_t)played - (uint64_t)target : (uint64_t)target - (uint64_t)played;
+            uint64_t dFrom   = played >= from   ? (uint64_t)played - (uint64_t)from   : (uint64_t)from   - (uint64_t)played;
+            if (dTarget <= dFrom) { d->audioSettling = 0; return played; }
+        }
+        return target;
+    }
+    return played != INT64_MIN ? played : -1;
 }
 extern "C" int basis_decoder_get_audio_format(basis_decoder_t* d, int* r, int* c) {
     if (!d || !d->aconfigured) return -1;

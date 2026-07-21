@@ -21,7 +21,9 @@
 #include "protocol/basis_ts.h"
 #include "protocol/basis_mp4.h"
 #include "protocol/basis_webm.h"
+#include "protocol/basis_ogg.h"
 #include "protocol/basis_wav.h"
+#include "protocol/basis_mp3.h"
 #include "protocol/basis_http.h"
 #include "protocol/basis_hls.h"
 #include "protocol/basis_rist.h"
@@ -191,7 +193,8 @@ struct basis_media_engine {
      * each demux leg takes a posted request once (its own taken counter — a
      * split source's two legs both reposition). HLS repositions at the segment
      * source instead: active_hls is set while run_hls owns a context. */
-    long seek_seq;
+    volatile long seek_seq;   /* volatile like its seek_taken siblings; aligned cross-thread
+                               * access, benign in practice on the shipped 64-bit targets */
     int64_t seek_target_us;
     volatile long seek_taken_main;
     volatile long seek_taken_audio;
@@ -224,6 +227,62 @@ basis_decoder_t* basis_engine_get_decoder(basis_media_engine_t* e) { return e ? 
 int basis_engine_is_paused(basis_media_engine_t* e) { return e ? e->paused : 0; }
 int basis_engine_is_running(basis_media_engine_t* e) { return e ? e->running : 0; }
 int basis_engine_is_paced(basis_media_engine_t* e) { return e ? e->paced : 0; }
+
+/* ---- render-event liveness registry ------------------------------------
+ * OnRenderEvent (Unity render thread) is handed the engine pointer and can fire
+ * concurrently with basis_media_close on the main thread. C# quiesces render
+ * events before closing, but a stale event must be a safe no-op, not a
+ * use-after-free. Every open engine is registered here; basis_engine_render_event
+ * dispatches under g_registry_lock only while the engine is still registered, and
+ * close removes it under the same lock — waiting out any in-flight event — before
+ * it frees the decoder and engine.
+ *
+ * Engines are keyed by pointer, so this stops a dispatch against a freed engine but
+ * not the narrow ABA case where a delayed event's pointer matches a *new* engine
+ * that reused the freed address. For the shipping C# binding that is benign: it
+ * issues only RENDER_UPDATE (idempotent — republishes the current frame). But
+ * RENDER_RELEASE is part of the public render-event ABI, and a caller that delivers
+ * one across a close+reopen could tear down the reused engine's decoder — so this
+ * registry's ABA-safety is only as strong as "no RELEASE is delivered after close."
+ * Closing the window fully needs a generation-stamped handle in the event payload
+ * (a C# ABI change) — deliberately out of scope here. */
+#define BASIS_MAX_ENGINES 64
+static basis_mutex_t g_registry_lock;
+static int           g_registry_ready;
+static basis_media_engine_t* g_engines[BASIS_MAX_ENGINES];
+
+/* opens run on Unity's main thread, so first-use init needs no extra guard. */
+static void registry_ensure(void) {
+    if (!g_registry_ready) { mutex_init(&g_registry_lock); g_registry_ready = 1; }
+}
+static int registry_add(basis_media_engine_t* e) {
+    registry_ensure();
+    int ok = 0;
+    mutex_lock(&g_registry_lock);
+    for (int i = 0; i < BASIS_MAX_ENGINES; ++i) if (!g_engines[i]) { g_engines[i] = e; ok = 1; break; }
+    mutex_unlock(&g_registry_lock);
+    return ok;   /* 0 => registry full */
+}
+static void registry_remove(basis_media_engine_t* e) {
+    if (!g_registry_ready) return;
+    mutex_lock(&g_registry_lock);
+    for (int i = 0; i < BASIS_MAX_ENGINES; ++i) if (g_engines[i] == e) { g_engines[i] = NULL; break; }
+    mutex_unlock(&g_registry_lock);
+}
+
+void basis_engine_render_event(basis_media_engine_t* e, int event_id) {
+    if (!e || !g_registry_ready) return;
+    mutex_lock(&g_registry_lock);
+    int live = 0;
+    for (int i = 0; i < BASIS_MAX_ENGINES; ++i) if (g_engines[i] == e) { live = 1; break; }
+    /* Dispatch under the lock so registry_remove (in close) blocks until this
+     * returns — the decoder can't be freed while a render event is using it. */
+    if (live && e->decoder) {
+        if (event_id == BASIS_RENDER_UPDATE) basis_decoder_render_update(e->decoder);
+        else if (event_id == BASIS_RENDER_RELEASE) basis_decoder_render_release(e->decoder);
+    }
+    mutex_unlock(&g_registry_lock);
+}
 
 /* Real-time delivery pacing. Blocks the demux thread so an access unit is handed to the
  * decoder no more than BASIS_PACE_LEAD_US ahead of a fixed 1x clock anchored to the first
@@ -308,7 +367,33 @@ static void sink_audio_format(void* user, basis_codec_t codec, int rate, int ch,
 static void sink_audio_frame(void* user, const uint8_t* data, int len, int64_t pts) {
     basis_media_engine_t* e = (basis_media_engine_t*)user;
     if (!e->running) return;
-    pace_gate(e, pts);              /* paced mode: hold until ~real time; no-op otherwise */
+    /* Drop audio a demuxer emits after a seek is posted but before this leg takes
+     * it. A byte-source demuxer checks take_seek at read-buffer granularity, so it
+     * can still flush the tail of the pre-seek buffer (~up to a bufferful, at the
+     * pre-seek PTS) before it repositions. Those stale frames must not reach the
+     * decoder: they survive the post-seek ring flush and would surface their pre-seek
+     * PTS as the audio-only position (the seek-bar bounce) and briefly play. Once the
+     * leg takes the seek, seek_taken advances to seek_seq and audio flows again. Safe
+     * because every byte source that reports a duration advances seek_taken by
+     * repositioning, so this never latches. The counter is the audio leg's for a split
+     * source, the main leg's otherwise. HLS is excluded: it repositions asynchronously
+     * through its own segment producer and drops its own pre-seek data at the
+     * BASIS_READ_REPOSITION boundary, so seek_taken is not the right signal for it. */
+    long taken = e->url_audio[0] ? e->seek_taken_audio : e->seek_taken_main;
+    if (!e->active_hls && e->seek_seq != taken) return;
+    /* A muxed source's audio rides the same demux thread as its video, which is
+     * already delivery-paced (sink_video_au), and banks into the PTS-gated PCM
+     * ring whose serve is clocked to presentation. Pacing audio delivery here too
+     * is redundant for timing and actively harmful when the container interleaves
+     * audio well ahead of the video keyframe: against the video-set anchor that
+     * audio reads as far-future, so the gate parks the whole demux thread for the
+     * skew — after a seek that shows up as video re-anchoring promptly while audio
+     * recovers seconds late. Let muxed audio flow into the ring and let the serve
+     * gate do the A/V timing. Split-stream audio (its own demux thread) still needs
+     * the gate for flood control, and an audio-only source has no video clock to
+     * serve against, so both keep pacing their own delivery. */
+    if (e->url_audio[0] || !e->video_format_seen)
+        pace_gate(e, pts);          /* paced mode: hold until ~real time; no-op otherwise */
     if (!e->running) return;
     e->audio_frame_count++;
     mutex_lock(&e->submit_lock);
@@ -821,11 +906,17 @@ static void run_http_like(demux_ctx_t* c) {
     int is_webm = head_len >= 4 && head[0] == 0x1A && head[1] == 0x45 &&
                   head[2] == 0xDF && head[3] == 0xA3; /* EBML magic */
     int is_wav = head_len >= 12 && memcmp(head, "RIFF", 4) == 0 && memcmp(head + 8, "WAVE", 4) == 0;
+    int is_ogg = head_len >= 4 && memcmp(head, "OggS", 4) == 0;
     int is_ts  = (head_len >= 1 && head[0] == 0x47);
-    if (!is_mp4 && !is_webm && !is_wav && !is_ts) {
+    /* MP3 is sniffed last: its magic is only an 11-bit frame sync (plus a leading
+     * "ID3" tag when tagged), the weakest of the container signatures. */
+    int is_mp3 = (head_len >= 3 && memcmp(head, "ID3", 3) == 0) || basis_mp3_sniff(head, head_len);
+    if (!is_mp4 && !is_webm && !is_wav && !is_ogg && !is_ts && !is_mp3) {
         is_mp4 = ends_with_ci(c->parts->path, ".mp4") || ends_with_ci(c->parts->path, ".m4s");
         is_webm = ends_with_ci(c->parts->path, ".webm");
         is_wav = ends_with_ci(c->parts->path, ".wav");
+        is_ogg = ends_with_ci(c->parts->path, ".opus") || ends_with_ci(c->parts->path, ".ogg");
+        is_mp3 = ends_with_ci(c->parts->path, ".mp3");
     }
 
     /* Paced (VOD): drain the network into a read-ahead ring on a reader thread and
@@ -855,12 +946,14 @@ static void run_http_like(demux_ctx_t* c) {
      * absolute seeks with a ranged refetch; everything else demuxes as before. */
     basis_reseek_fn reseek = NULL;
     void* reseek_ctx = NULL;
+    int64_t stream_size = -1;   /* total body size for the Ogg granule seek; -1 = unknown */
 #if defined(_WIN32)
     http_seek_src_t seek_src = { src, use_readahead ? &ring : NULL, &ps, &c->e->running,
                                  basis_win_http_abort, basis_win_http_reseek };
     if (c->e->paced && basis_win_http_can_reseek(src)) {
         reseek = http_reseek;
         reseek_ctx = &seek_src;
+        stream_size = basis_win_http_content_length(src);
     }
 #elif defined(__ANDROID__)
     http_seek_src_t seek_src = { src, use_readahead ? &ring : NULL, &ps, &c->e->running,
@@ -868,6 +961,7 @@ static void run_http_like(demux_ctx_t* c) {
     if (c->e->paced && basis_jni_https_can_reseek(src)) {
         reseek = http_reseek;
         reseek_ctx = &seek_src;
+        stream_size = basis_jni_https_content_length(src);
     }
 #endif
 
@@ -876,7 +970,11 @@ static void run_http_like(demux_ctx_t* c) {
     else if (is_webm)
         basis_webm_run(c->sink, demux_read, demux_ctx, reseek, reseek_ctx);
     else if (is_wav)
-        basis_wav_run(c->sink, demux_read, demux_ctx);
+        basis_wav_run(c->sink, demux_read, demux_ctx, reseek, reseek_ctx);
+    else if (is_ogg)
+        basis_ogg_run(c->sink, demux_read, demux_ctx, reseek, reseek_ctx, stream_size);
+    else if (is_mp3)
+        basis_mp3_run(c->sink, demux_read, demux_ctx, reseek, reseek_ctx);
     else
         basis_ts_run(c->sink, demux_read, demux_ctx); /* default to MPEG-TS */
 
@@ -1162,6 +1260,22 @@ static basis_media_engine_t* open_impl(const char* url, const char* audio_url, i
     }
     if (has_audio) e->audio_thread_started = 1;
 
+    /* Live now: the pointer is about to reach C#, which may issue render events.
+     * Registered last so no partially-built engine is ever visible to a dispatch.
+     * If the registry is full (too many concurrent players), fail cleanly rather
+     * than hand back an engine whose render events would be silently ignored. */
+    if (!registry_add(e)) {
+        e->running = 0;
+        thread_join(e);
+        audio_thread_join(e);
+        basis_decoder_destroy(e->decoder);
+        basis_io_global_shutdown();
+        basis_caption_destroy(e->captions);
+        mutex_destroy(&e->submit_lock);
+        mutex_destroy(&e->lock);
+        free(e);
+        return NULL;
+    }
     return e;
 }
 
@@ -1180,8 +1294,14 @@ BASIS_API basis_media_engine_t* BASIS_CALL basis_media_open_dual(const char* vid
 BASIS_API void BASIS_CALL basis_media_close(basis_media_engine_t* e) {
     if (!e) return;
 
-    /* Stop the demux threads first so nothing submits while we tear down. Both
-     * legs observe the same running flag; join both before freeing the decoder. */
+    /* Deregister first, before anything is torn down: this blocks until any
+     * in-flight render event returns and makes every later one a no-op, so no
+     * render callback can touch the decoder while the demux threads are still
+     * exiting or the decoder is being freed. */
+    registry_remove(e);
+
+    /* Stop the demux threads so nothing submits while we tear down. Both legs
+     * observe the same running flag; join both before freeing the decoder. */
     e->running = 0;
     thread_join(e);
     audio_thread_join(e);
@@ -1266,8 +1386,18 @@ BASIS_API int BASIS_CALL basis_media_seek_us(basis_media_engine_t* e, int64_t ta
      * that boundary before the generation is visible. */
     e->seek_target_us = target_us;
     e->seek_seq++;
+    /* Notify the decoder to drop its pre-seek audio/video buffers and re-anchor
+     * the present clock to the target (each leg does it on its own thread). The
+     * demuxer only repositions the byte source; without this the decoder keeps
+     * serving stale buffers — post-seek audio silence and a frozen video clock. */
+    if (e->decoder) basis_decoder_seek(e->decoder, target_us);
     void* hls = e->active_hls;
     int rc = hls ? basis_hls_request_seek(hls, target_us / 1000) : 0;
+    /* HLS is not acknowledged here: its reposition is asynchronous (the producer
+     * signals a later BASIS_READ_REPOSITION boundary), so marking seek_taken now would
+     * let in-flight pre-seek audio through and ack a failed request. HLS instead drops
+     * its own pre-seek data at that boundary, and sink_audio_frame excludes it from the
+     * byte-source pre-seek drop. */
     mutex_unlock(&e->lock);
     return rc;
 }
