@@ -1543,6 +1543,13 @@ namespace Basis.Scripts.Drivers
             // (play-space flip, seats/vehicles). Identical to Vector3.up for an upright root.
             Vector3 rootUp = BasisLocalPlayer.localToWorldMatrix.MultiplyVector(Vector3.up);
             data.playerUp = rootUp.sqrMagnitude > 1e-8f ? rootUp.normalized : Vector3.up;
+            data.virtualSpineYawDeadzoneDeg = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
+            if (BasisDeviceManagement.IsCurrentModeVR()
+                && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
+            {
+                data.virtualSpineYawDeadzoneDeg = 0f;
+            }
+            data.virtualSpineYawBlendSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue;
             data.maxBendDeg = Basis.BasisUI.BasisSettingsDefaults.FBIKMaxBendDeg.RawValue;
             data.MaxChestDeltaProperty = Basis.BasisUI.BasisSettingsDefaults.FBIKMaxChestDelta.RawValue;
             data.spineBendPitch = Basis.BasisUI.BasisSettingsDefaults.FBIKSpineBendPitch.RawValue;
@@ -1910,6 +1917,8 @@ namespace Basis.Scripts.Drivers
             // BasisLocks is managed and cannot be queried from Burst. Snapshot its owner-count semantics onto
             // the job each frame; the job freezes the last valid animation-relative hips pose while held.
             IKJob.virtualSpineLocked = VirtualSpineLock;
+            IKJob.virtualSpineIsLocomoting = localPlayer?.LocalCharacterDriver != null
+                && localPlayer.LocalCharacterDriver.MovementVector.sqrMagnitude > 0.001f;
             IKJob.Run();
 
             // Leg diagnostics are written INSIDE the job, so read them here and not before Run().

@@ -205,6 +205,9 @@ collisionsEnabled;
         // when scheduled, so the frozen hips pose must live in native memory to survive between frames.
         public NativeArray<BasisAnimationRelativeVirtualSpineState> virtualSpineState;
         public bool virtualSpineLocked;
+        public bool virtualSpineIsLocomoting;
+        public float virtualSpineYawDeadzoneDeg;
+        public float virtualSpineYawBlendSpeed;
         bool virtualSpineApplied;
         public float ikLockMode;
         public bool shoulderSolveEnabled;
@@ -327,9 +330,7 @@ collisionsEnabled;
             {
                 // Do not resurrect a pose cached before a period of real hip tracking. If the tracker later
                 // disappears while locked, the first current animation pose becomes the new frozen pose.
-                BasisAnimationRelativeVirtualSpineState cleared = virtualSpineState[0];
-                cleared.Initialized = 0;
-                virtualSpineState[0] = cleared;
+                virtualSpineState[0] = default;
                 return;
             }
             if (!HandleHead.IsValid(stream) || !HandleHips.IsValid(stream))
@@ -349,6 +350,10 @@ collisionsEnabled;
             input.TrackedHeadRotation = targetRotationHead * targetOffsetHead;
             input.ReferenceUp = playerUp;
             input.FallbackForward = targetRotationHead * Vector3.forward;
+            input.DeltaTime = stream.deltaTime;
+            input.YawDeadzoneDeg = virtualSpineYawDeadzoneDeg;
+            input.YawBlendSpeed = virtualSpineYawBlendSpeed;
+            input.IsLocomoting = virtualSpineIsLocomoting;
             input.Locked = virtualSpineLocked;
 
             BasisAnimationRelativeVirtualSpineState state = virtualSpineState[0];

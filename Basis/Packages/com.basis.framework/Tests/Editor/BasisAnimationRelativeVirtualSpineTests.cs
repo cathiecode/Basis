@@ -14,7 +14,11 @@ namespace Basis.Tests.IK
             Vector3 trackedHeadPosition,
             Quaternion trackedHeadRotation,
             bool locked,
-            ref BasisAnimationRelativeVirtualSpineState state)
+            ref BasisAnimationRelativeVirtualSpineState state,
+            float yawDeadzoneDeg = 0f,
+            float yawBlendSpeed = 0f,
+            float deltaTime = 1f / 90f,
+            bool isLocomoting = false)
         {
             BasisAnimationRelativeVirtualSpineInput input;
             input.AnimatedHeadPosition = animatedHeadPosition;
@@ -25,6 +29,10 @@ namespace Basis.Tests.IK
             input.TrackedHeadRotation = trackedHeadRotation;
             input.ReferenceUp = Vector3.up;
             input.FallbackForward = Vector3.forward;
+            input.DeltaTime = deltaTime;
+            input.YawDeadzoneDeg = yawDeadzoneDeg;
+            input.YawBlendSpeed = yawBlendSpeed;
+            input.IsLocomoting = isLocomoting;
             input.Locked = locked;
             BasisAnimationRelativeVirtualSpineCore.Solve(ref state, in input, out BasisAnimationRelativeVirtualSpineResult result);
             return result;
@@ -121,6 +129,47 @@ namespace Basis.Tests.IK
                 Quaternion.Euler(15f, 30f, 0f), new Vector3(5f, 3f, -2f), Quaternion.Euler(0f, 120f, 0f),
                 false, ref state);
             Assert.That(Vector3.Distance(released.HipsPosition, initial.HipsPosition), Is.GreaterThan(1f));
+        }
+
+        [Test]
+        public void UprightYaw_StaysInsideDeadzoneThenCatchesUpGradually()
+        {
+            BasisAnimationRelativeVirtualSpineState state = default;
+            Solve(Vector3.up, Quaternion.identity, Vector3.zero, Quaternion.identity,
+                Vector3.up, Quaternion.identity, false, ref state, 45f, 8f);
+
+            var insideCone = Solve(Vector3.up, Quaternion.identity, Vector3.zero, Quaternion.identity,
+                Vector3.up, Quaternion.AngleAxis(30f, Vector3.up), false, ref state, 45f, 8f);
+            Assert.That(Quaternion.Angle(insideCone.HipsRotation, Quaternion.identity), Is.LessThan(1e-3f),
+                "the torso followed while the head was still inside the yaw play cone");
+
+            var outsideCone = Solve(Vector3.up, Quaternion.identity, Vector3.zero, Quaternion.identity,
+                Vector3.up, Quaternion.AngleAxis(90f, Vector3.up), false, ref state, 45f, 8f);
+            float followedAngle = Quaternion.Angle(outsideCone.HipsRotation, Quaternion.identity);
+            Assert.That(followedAngle, Is.GreaterThan(1f));
+            Assert.That(followedAngle, Is.LessThan(30f),
+                "the torso snapped to the head instead of entering delayed follow");
+        }
+
+        [Test]
+        public void HorizontalPose_ReducesYawDeadzoneToZero()
+        {
+            BasisAnimationRelativeVirtualSpineState uprightState = default;
+            BasisAnimationRelativeVirtualSpineState lyingState = default;
+            Solve(Vector3.up, Quaternion.identity, Vector3.zero, Quaternion.identity,
+                Vector3.up, Quaternion.identity, false, ref uprightState, 45f, 8f);
+            Solve(Vector3.forward, Quaternion.identity, Vector3.zero, Quaternion.Euler(90f, 0f, 0f),
+                Vector3.forward, Quaternion.identity, false, ref lyingState, 45f, 8f);
+
+            Quaternion turned = Quaternion.AngleAxis(30f, Vector3.up);
+            var upright = Solve(Vector3.up, Quaternion.identity, Vector3.zero, Quaternion.identity,
+                Vector3.up, turned, false, ref uprightState, 45f, 8f);
+            var lying = Solve(Vector3.forward, Quaternion.identity, Vector3.zero, Quaternion.Euler(90f, 0f, 0f),
+                Vector3.forward, turned, false, ref lyingState, 45f, 8f);
+
+            Assert.That(Quaternion.Angle(upright.HipsRotation, Quaternion.identity), Is.LessThan(1e-3f));
+            Assert.That(Quaternion.Angle(lying.HipsRotation, Quaternion.Euler(90f, 0f, 0f)), Is.GreaterThan(1f),
+                "a horizontal torso incorrectly retained the full upright yaw deadzone");
         }
     }
 }

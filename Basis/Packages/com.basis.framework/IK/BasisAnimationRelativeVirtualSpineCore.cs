@@ -13,6 +13,10 @@ namespace Basis.IK
         public Quaternion TrackedHeadRotation;
         public Vector3 ReferenceUp;
         public Vector3 FallbackForward;
+        public float DeltaTime;
+        public float YawDeadzoneDeg;
+        public float YawBlendSpeed;
+        public bool IsLocomoting;
         public bool Locked;
     }
 
@@ -32,6 +36,11 @@ namespace Basis.IK
         public Quaternion HipsRotation;
         public Vector3 BodyUp;
         public int Initialized;
+        public Quaternion TorsoHeadingAnchor;
+        public Quaternion PreviousHeadHeading;
+        public float TorsoFollow;
+        public int TorsoHeadingInitialized;
+        public int TorsoHeadingBroken;
     }
 
     /// <summary>
@@ -45,6 +54,8 @@ namespace Basis.IK
     {
         const float k_Epsilon = 1e-5f;
         const float k_SqrEpsilon = 1e-8f;
+        const float k_TorsoYawRelockSpeedDeg = 6f;
+        const float k_SmoothingReferenceFps = 90f;
 
         public static void Solve(
             ref BasisAnimationRelativeVirtualSpineState state,
@@ -87,7 +98,17 @@ namespace Basis.IK
             Quaternion animatedHeading = EstimateHeading(animatedHeadRotation, up, fallback);
             Quaternion trackedHeading = EstimateHeading(
                 trackedHeadRotation, up, animatedHeading * Vector3.forward);
-            Quaternion headingDelta = trackedHeading * Quaternion.Inverse(animatedHeading);
+
+            // The old VSP reduced its yaw play as the authored torso approached horizontal. Preserve that
+            // behaviour: upright animation gets the configured cone; prone/supine animation starts following
+            // immediately because a large delayed horizontal head/hips separation looks especially wrong.
+            Vector3 authoredBodyUp = -animatedHeadToHips.normalized;
+            float verticality = Mathf.Abs(Vector3.Dot(authoredBodyUp, up));
+            float effectiveDeadzone = Mathf.Max(0f, input.YawDeadzoneDeg) * verticality;
+            Quaternion torsoHeading = ComputeTorsoHeading(
+                ref state, trackedHeading, effectiveDeadzone,
+                input.YawBlendSpeed, input.IsLocomoting, input.DeltaTime);
+            Quaternion headingDelta = torsoHeading * Quaternion.Inverse(animatedHeading);
 
             Vector3 rotatedHeadToHips = headingDelta * animatedHeadToHips;
             Vector3 hipsPosition = input.TrackedHeadPosition + rotatedHeadToHips;
@@ -145,6 +166,61 @@ namespace Basis.IK
                 mixedForward = Vector3.Cross(up, Mathf.Abs(up.y) < 0.99f ? Vector3.up : Vector3.right);
             }
             return Quaternion.LookRotation(mixedForward.normalized, up);
+        }
+
+        static Quaternion ComputeTorsoHeading(
+            ref BasisAnimationRelativeVirtualSpineState state,
+            Quaternion headHeading,
+            float deadzoneDeg,
+            float blendSpeed,
+            bool moving,
+            float deltaTime)
+        {
+            float dt = Mathf.Max(deltaTime, 1e-5f);
+            if (state.TorsoHeadingInitialized == 0)
+            {
+                state.TorsoHeadingAnchor = headHeading;
+                state.PreviousHeadHeading = headHeading;
+                state.TorsoHeadingBroken = 0;
+                state.TorsoFollow = 0f;
+                state.TorsoHeadingInitialized = 1;
+            }
+
+            float headSpeedDeg = Quaternion.Angle(state.PreviousHeadHeading, headHeading) / dt;
+            state.PreviousHeadHeading = headHeading;
+
+            // Keyboard/stick locomotion deliberately breaks the cone so the torso eases toward the movement /
+            // look direction. Once the head stops, the cone is re-centred at the new heading.
+            if (moving || (state.TorsoHeadingBroken == 0
+                && Quaternion.Angle(state.TorsoHeadingAnchor, headHeading) > deadzoneDeg))
+            {
+                state.TorsoHeadingBroken = 1;
+            }
+
+            float targetFollow = state.TorsoHeadingBroken != 0 ? 1f : 0f;
+            state.TorsoFollow = Mathf.Lerp(
+                state.TorsoFollow, targetFollow, FramerateIndependentAlpha(blendSpeed, dt));
+
+            // Wait for the entrance blend before moving the anchor; otherwise crossing the cone edge produces
+            // the exact one-frame click the blend is intended to remove.
+            if (state.TorsoHeadingBroken != 0
+                && state.TorsoFollow >= 0.999f
+                && headSpeedDeg <= k_TorsoYawRelockSpeedDeg)
+            {
+                state.TorsoHeadingBroken = 0;
+                state.TorsoHeadingAnchor = headHeading;
+            }
+
+            return Quaternion.Slerp(state.TorsoHeadingAnchor, headHeading, state.TorsoFollow);
+        }
+
+        static float FramerateIndependentAlpha(float speed, float deltaTime)
+        {
+            float alphaAtReference = Mathf.Clamp01(Mathf.Max(0f, speed) / k_SmoothingReferenceFps);
+            if (alphaAtReference >= 0.999f) return 1f;
+            if (alphaAtReference <= 0f) return 0f;
+            float rate = -k_SmoothingReferenceFps * Mathf.Log(1f - alphaAtReference);
+            return 1f - Mathf.Exp(-rate * Mathf.Max(0f, deltaTime));
         }
 
         static bool TryNormalize(Quaternion value, out Quaternion normalized)
