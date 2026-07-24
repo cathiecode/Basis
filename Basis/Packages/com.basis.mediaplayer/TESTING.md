@@ -213,6 +213,7 @@ covered bit-for-bit by the CI conformance gate; these rows are the real decode +
 | Windows D3D12 | Launch with `-force-d3d12`; shared-handle texture path is separate code — video must appear, no `dxgi-fmt` errors in the log |
 | Android/Quest | Vulkan path, `AMediaCodec`; https for TS/HLS lanes; check `adb logcat` for codec errors; AAC 5.1 arrives in WAVE order. 5.1 AAC in a progressive MP4 decodes discretely (see the codec row); the coded-height pad is cropped off the present (grey bottom strip) |
 | Desktop ↔ VR swap | Toggle mode mid-playback — the external texture must survive the graphics-device swap |
+| Linux via Proton/Wine | The Windows build under a compatibility layer. No lane here can stand in for it: the plugin runs against Wine's reimplementations of WinHTTP, Media Foundation and D3D11, so behaviour can differ from native Windows even though the binary is identical. Loading the plugin at all is gated behind a one-off prompt (Media Foundation may be absent). Verify a VOD plays at 1x rather than racing through the content — delivery pacing depends on the seekability probe reading Content-Length, and a probe failure shows up as synchronised fast-forward at roughly the download-speed-over-bitrate ratio. Confirm the seek slider works and that a late joiner syncing to a mid-VOD playhead lands at the right position, since both need the same probe. Testing this needs a real Proton user; there is no rig for it here |
 
 ### Behaviour checklists
 
@@ -223,15 +224,28 @@ different URL mid-play. No stale frames, no orphaned audio, position resets corr
 seek-then-pause shows the sought frame. The byte-source ranged refetch that backs a seek now
 runs on **Android** too (JNI `HttpsURLConnection`), not just Windows — run the same slider
 checks on a Quest against a range/`206` VOD host (`https://`), watching `adb logcat` for a clean
-reposition (no decoder error, playback resumes at the target).
+reposition (no decoder error, playback resumes at the target). A container seek repositions to
+the sync point at or before the target and the run-up from there is decoded but never shown, so
+playback lands **at the requested position** — never visibly replaying from the keyframe, and
+never crawling the gap at 1x. The adversarial case is a **sparse-keyframe file** (tens of
+seconds per GOP, e.g. a low-motion screen capture): a mid-GOP seek there should recover after a
+short silent pause that scales with decode speed, not with the distance seeked.
 
 **Seek (HLS-TS VOD)** — on the Mux master (`https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8`),
 seek both directions and confirm playback resumes **paced at 1x from the target**: a forward
 seek must not freeze for the jump distance, and a backward seek must not fast-forward through
-the intervening segments back to the pre-seek position. The segment producer repositions and
-the demux leg re-anchors delivery pacing at the flushed boundary, so a mis-anchored pace clock
-(stall forward / flood backward) is the failure to watch for. Shared clock, so check both the
-Editor (Windows) and Quest.
+the intervening segments back to the pre-seek position. The segment producer repositions at
+segment granularity but the landing is **target-exact**: the run-up from the segment boundary
+to the target is decoded and discarded, so playback must resume at the requested position, not
+the start of the containing segment. A mis-anchored pace clock (stall forward / flood backward)
+is the failure to watch for. Also seek **from the tail**: once the fetcher has downloaded every
+remaining segment (the last buffer's worth of the stream, so roughly the final ten seconds of a
+short VOD) it parks rather than exits, and a backward seek from there must still reposition —
+a bar that flashes the target and snaps forward means the parked-fetcher revival broke. Playing
+through to the end must present the tail before ENDED is raised: the position walks all the way
+to the true duration and the final content is actually shown and heard — ENDED firing early
+while banked audio or video is discarded is the failure. Shared clock, so check both the Editor
+(Windows) and Quest.
 
 **Seek (integrated fMP4)** — on a self-contained fragmented MP4 (moof/mdat fragments indexed by a
 top-level `sidx`) served from a range/`206` host. Produce one from a CC clip:
@@ -266,7 +280,20 @@ header reports no duration and shows no seek bar.
 **Networking** — two clients minimum: owner loads URL → both play; non-owner requests control
 → ownership transfers; owner pause/stop propagates; late joiner receives current state; each
 client resolves the URL independently (per-client CDN/bitrate differences are fine, state
-divergence is not).
+divergence is not). End-of-stream is per-client: a late joiner runs behind the owner by its
+join latency and must play through to its own end of the content — the owner finishing first
+must not cut it off. Clients therefore finish at slightly different wall-clock times; a peer
+stopping short of the end is the failure, synchronised finishes are not expected.
+
+**Networked audio-only** — the same two-client setup with an audio-only URL (`.wav`, `.mp3`,
+`.m4a`, `.opus`). These carry no video track, so anything that waits on a video frame or an
+output texture never fires for them, and a readiness regression here is invisible on the
+owner's own client — it plays locally either way. Load one while the peers are mid-playback of
+something else: they must switch to it, not carry on and then resume the old source when it
+ends. Check the peer starts near the beginning rather than at the outgoing video's playhead,
+and that a late joiner receives it too. Worth a pass on a peer with
+`AutoPlayOnSourceAssigned` unticked, which is the case that relies on the owner's advertised
+state rather than local autoplay.
 
 **Panel UI** ("Media Players" panel, `Runtime/UI/BasisMediaPlayerPanelProvider.cs`) — URL
 load, transport buttons, seek slider (VOD only), volume, bitrate dropdown (HLS multi-variant),
