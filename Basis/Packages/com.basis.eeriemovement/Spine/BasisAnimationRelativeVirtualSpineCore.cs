@@ -9,6 +9,9 @@ namespace Basis.IK
         public Quaternion AnimatedHeadRotation;
         public Vector3 AnimatedHipsPosition;
         public Quaternion AnimatedHipsRotation;
+        public Vector3 AnimatedChestPosition;
+        public Quaternion AnimatedChestRotation;
+        public bool HasAnimatedChest;
         public Vector3 TrackedHeadPosition;
         public Quaternion TrackedHeadRotation;
         public Vector3 ReferenceUp;
@@ -24,6 +27,9 @@ namespace Basis.IK
     {
         public Vector3 HipsPosition;
         public Quaternion HipsRotation;
+        public Vector3 ChestPosition;
+        public Quaternion ChestRotation;
+        public bool ChestValid;
         /// <summary>The authored hips-to-head axis after applying the tracked heading.</summary>
         public Vector3 BodyUp;
         public bool Valid;
@@ -34,6 +40,9 @@ namespace Basis.IK
     {
         public Vector3 HipsPosition;
         public Quaternion HipsRotation;
+        public Vector3 ChestPosition;
+        public Quaternion ChestRotation;
+        public int ChestValid;
         public Vector3 BodyUp;
         public int Initialized;
         public Quaternion TorsoHeadingAnchor;
@@ -68,6 +77,9 @@ namespace Basis.IK
             {
                 result.HipsPosition = state.HipsPosition;
                 result.HipsRotation = state.HipsRotation;
+                result.ChestPosition = state.ChestPosition;
+                result.ChestRotation = state.ChestRotation;
+                result.ChestValid = state.ChestValid != 0;
                 result.BodyUp = state.BodyUp;
                 result.Valid = true;
                 result.Frozen = true;
@@ -123,13 +135,32 @@ namespace Basis.IK
                 return;
             }
 
+            bool chestValid = false;
+            Vector3 chestPosition = default;
+            Quaternion chestRotation = Quaternion.identity;
+            if (input.HasAnimatedChest
+                && IsFinite(input.AnimatedChestPosition)
+                && TryNormalize(input.AnimatedChestRotation, out Quaternion animatedChestRotation))
+            {
+                Vector3 animatedHeadToChest = input.AnimatedChestPosition - input.AnimatedHeadPosition;
+                chestPosition = input.TrackedHeadPosition + headingDelta * animatedHeadToChest;
+                chestRotation = BasisQuaternionExt.NormalizeSafe(headingDelta * animatedChestRotation);
+                chestValid = IsFinite(chestPosition) && IsFinite(chestRotation);
+            }
+
             state.HipsPosition = hipsPosition;
             state.HipsRotation = hipsRotation;
+            state.ChestPosition = chestPosition;
+            state.ChestRotation = chestRotation;
+            state.ChestValid = chestValid ? 1 : 0;
             state.BodyUp = bodyUp;
             state.Initialized = 1;
 
             result.HipsPosition = hipsPosition;
             result.HipsRotation = hipsRotation;
+            result.ChestPosition = chestPosition;
+            result.ChestRotation = chestRotation;
+            result.ChestValid = chestValid;
             result.BodyUp = bodyUp;
             result.Valid = true;
             result.Frozen = input.Locked;
