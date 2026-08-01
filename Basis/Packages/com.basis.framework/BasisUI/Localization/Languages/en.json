@@ -183,6 +183,58 @@
       "value": "Lens Distortion"
     },
     {
+      "key": "camera.motionBlur",
+      "value": "Motion Blur"
+    },
+    {
+      "key": "camera.motionBlur.description",
+      "value": "Smear the shot along the direction things are moving. Zero switches it off."
+    },
+    {
+      "key": "camera.motionBlurClamp",
+      "value": "Blur Length Limit"
+    },
+    {
+      "key": "camera.motionBlurClamp.description",
+      "value": "How long a streak may get, as a share of the frame. Lower keeps fast pans readable."
+    },
+    {
+      "key": "camera.motionBlurQuality",
+      "value": "Blur Quality"
+    },
+    {
+      "key": "camera.motionBlurQuality.description",
+      "value": "Samples taken along each streak. Higher is smoother and costs more."
+    },
+    {
+      "key": "camera.motionBlurQuality.low",
+      "value": "Low"
+    },
+    {
+      "key": "camera.motionBlurQuality.medium",
+      "value": "Medium"
+    },
+    {
+      "key": "camera.motionBlurQuality.high",
+      "value": "High"
+    },
+    {
+      "key": "camera.motionBlurMode",
+      "value": "Blur Source"
+    },
+    {
+      "key": "camera.motionBlurMode.description",
+      "value": "Camera Only blurs when the camera moves. Camera And Objects also blurs things moving in front of a still camera, and costs more."
+    },
+    {
+      "key": "camera.motionBlurMode.cameraOnly",
+      "value": "Camera Only"
+    },
+    {
+      "key": "camera.motionBlurMode.cameraAndObjects",
+      "value": "Camera And Objects"
+    },
+    {
       "key": "camera.volumetricFog",
       "value": "Volumetric Fog"
     },
@@ -757,6 +809,10 @@
     {
       "key": "settings.developer.seatTargets.tooltip",
       "value": "Show the seated-pose solve targets for the back, knees, and feet."
+    },
+    {
+      "key": "settings.developer.jiggleGrab.tooltip",
+      "value": "Show live jiggle grabs: the held bone, where it is being pulled to, that bone's reach limit, and the pick spheres your hands search when you press grab."
     },
     {
       "key": "settings.developer.audioRanges.tooltip",
@@ -2307,6 +2363,42 @@
       "value": "Main Menu"
     },
     {
+      "key": "menu.panel.move",
+      "value": "Move"
+    },
+    {
+      "key": "menu.panel.move.tooltip",
+      "value": "Hold to drag this panel where you want it. In VR, push the thumbstick of the holding hand forward or back to move it further away or closer."
+    },
+    {
+      "key": "menu.panel.reset",
+      "value": "Reset"
+    },
+    {
+      "key": "menu.panel.reset.tooltip",
+      "value": "Put this panel back where it started, or put this page's settings back to defaults."
+    },
+    {
+      "key": "menu.panel.reset.position",
+      "value": "Reset Position"
+    },
+    {
+      "key": "menu.panel.search",
+      "value": "Search"
+    },
+    {
+      "key": "menu.panel.search.tooltip",
+      "value": "Look through everything on this panel and jump straight to it."
+    },
+    {
+      "key": "menu.panel.search.prompt",
+      "value": "Start typing to find a setting."
+    },
+    {
+      "key": "menu.panel.reset.choose",
+      "value": "Reset all {0} settings to defaults, or just put this panel back where it started?"
+    },
+    {
       "key": "keyboard.title",
       "value": "Virtual Keyboard"
     },
@@ -3235,6 +3327,14 @@
       "value": "Always render this player's avatar, even when distance, the max visible avatar cap, or the view cone filter would normally replace it with the loading avatar. Blocking and the performance filter still apply."
     },
     {
+      "key": "menu.individualPlayer.jiggleGrab",
+      "value": "Allow Jiggle Grabbing"
+    },
+    {
+      "key": "menu.individualPlayer.jiggleGrab.description",
+      "value": "Allow grabbing and pulling jiggle physics between you and this player, in both directions. Turning this off immediately releases any grab they have on you. Blocking a player always prevents grabbing."
+    },
+    {
       "key": "menu.individualPlayer.enableInteractions",
       "value": "Enable Interactions"
     },
@@ -3963,6 +4063,18 @@
       "value": "({0} spawned)"
     },
     {
+      "key": "library.stack.versions",
+      "value": "{0} versions"
+    },
+    {
+      "key": "library.stack.latestEntry",
+      "value": "{0} — Latest"
+    },
+    {
+      "key": "library.dialog.pickVersion.body",
+      "value": "This item has multiple uploaded versions. Pick the one you want to use."
+    },
+    {
       "key": "library.select",
       "value": "Select"
     },
@@ -3977,6 +4089,66 @@
     {
       "key": "library.share",
       "value": "Share"
+    },
+    {
+      "key": "library.checkForUpdate",
+      "value": "Check for Update"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.title",
+      "value": "Check {0} for Updates"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.checking",
+      "value": "Asking the host whether this content has changed..."
+    },
+    {
+      "key": "library.dialog.checkForUpdate.upToDate.title",
+      "value": "Already Up To Date"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.upToDate.body",
+      "value": "{0} matches the copy published at its address, so nothing needs downloading."
+    },
+    {
+      "key": "library.dialog.checkForUpdate.baseline.title",
+      "value": "Now Tracking Updates"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.baseline.body",
+      "value": "{0} had no recorded version yet, so this first check had nothing to compare against. The version published right now has been recorded, and future checks will detect changes properly.\n\nIf you updated this content before now, refresh it anyway?"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.available.title",
+      "value": "Update Available"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.available.body",
+      "value": "The content at this address has changed since {0} was downloaded.\n\nRefresh it now? The cached copy will be discarded and downloaded again the next time it loads."
+    },
+    {
+      "key": "library.dialog.checkForUpdate.unsupported.title",
+      "value": "Cannot Detect Changes"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.unsupported.body",
+      "value": "This host does not report when a file was last changed, so updates cannot be detected automatically.\n\nRefresh anyway? This discards the cached copy and downloads it again, even if nothing changed."
+    },
+    {
+      "key": "library.dialog.checkForUpdate.failed.title",
+      "value": "Update Check Failed"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.failed.body",
+      "value": "Could not reach the content at its address.\n\n{0}"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.refreshing.title",
+      "value": "Refreshing Content"
+    },
+    {
+      "key": "library.dialog.checkForUpdate.refreshing.body",
+      "value": "Discarding the cached copy of {0} and fetching the latest version..."
     },
     {
       "key": "library.teleportTo",
@@ -4477,6 +4649,14 @@
     {
       "key": "settings.general.disableVRAutoHold.description",
       "value": "Ignore VR auto-hold on pickups, so you must keep holding the grab button to carry them."
+    },
+    {
+      "key": "settings.general.jiggleGrabInteractions",
+      "value": "Jiggle Grab Interactions"
+    },
+    {
+      "key": "settings.general.jiggleGrabInteractions.tooltip",
+      "value": "Allow grabbing and pulling jiggle physics (hair, tails, and similar) between you and other players. Turning this off means you never grab anyone and nobody's grabs affect you. Per-player permission lives in each player's panel."
     },
     {
       "key": "settings.general.hud.title",
@@ -7549,6 +7729,10 @@
     {
       "key": "settings.developer.seatTargets",
       "value": "Seat Targets"
+    },
+    {
+      "key": "settings.developer.jiggleGrab",
+      "value": "Jiggle Grab"
     },
     {
       "key": "settings.developer.audioRanges",
