@@ -1,4 +1,4 @@
-using Basis.BasisUI;
+﻿using Basis.BasisUI;
 using Basis.Network.Core;
 using Basis.Scripts.BasisSdk;
 using Basis.Scripts.BasisSdk.Players;
@@ -96,6 +96,20 @@ public partial class BasisTransmissionResults
     private NativeArray<float> directionalDampening;
 
     /// <summary>
+    /// Per-index mouth facing direction, the companion to <see cref="targetPositions"/>.
+    /// Voice directivity needs the axis the talker's mouth radiates along.
+    /// </summary>
+    private NativeArray<float3> targetForwards;
+
+    /// <summary>
+    /// Per-index high-shelf depths, in dB, produced alongside the dampening
+    /// multiplier: the listener's head shadow and the talker's mouth directivity.
+    /// Applied on the audio thread by <see cref="BasisVoiceToneShaper"/>.
+    /// </summary>
+    private NativeArray<float> coneShelfDb;
+    private NativeArray<float> directivityShelfDb;
+
+    /// <summary>
     /// Pre-computed per-index flag: true when the remote player currently has an
     /// active audio source. Filled in the positions loop so managed objects are
     /// never touched during the audio cap sort.
@@ -125,6 +139,7 @@ public partial class BasisTransmissionResults
     [System.NonSerialized] public NativeArray<short> MeshLodLevel;
     [System.NonSerialized] public NativeArray<short> prevMeshLodLevel;
     [System.NonSerialized] public NativeArray<bool> MeshLodRange;
+    [System.NonSerialized] public NativeArray<short> PoseLodLevel;
 
     // Scratch + reduced outputs
     private NativeArray<float> perIndexMinD2;
@@ -156,11 +171,48 @@ public partial class BasisTransmissionResults
 
     /// <summary>Set by BasisTalkModeManager to force a recipient-list resend on the next tick after a talk-mode change.</summary>
     public static bool ForceVoiceRecipientResend;
+
+    // Tick state carried from ScheduleTick to CompleteTick. The snapshot reference is pinned for
+    // the window so a rebuild between the two halves can't re-index the arrays the jobs are
+    // writing; joins/leaves only reach the driver from the Update-phase dispatch.
+    private bool _tickScheduled;
+    private BasisNetworkReceiver[] _tickSnapshot;
+    private int _tickReceiverCount;
+    private BasisAvatar _tickAvatar;
+    private float _tickIntervalUsed;
+    private bool _tickDampenEnabled;
+#if UNITY_EDITOR
+    private bool _tickProf;
+    private System.Diagnostics.Stopwatch _tickStopwatch;
+#endif
+
     /// <summary>
     /// Called each frame; drives scheduling of distance job and network sync.
     /// </summary>
     public void Simulate()
     {
+        ScheduleTick();
+        CompleteTick();
+    }
+
+    /// <summary>
+    /// First half of the transmit tick: fills the distance job inputs off this frame's remote
+    /// mouth positions and camera pose, then schedules and kicks the distance/reduce/cap/dampen
+    /// chain. Runs early in LateUpdate so the chain overlaps the rest of the frame's main-thread
+    /// work instead of being fenced a few microseconds after it is scheduled.
+    /// </summary>
+    public void ScheduleTick()
+    {
+        // A tick that was scheduled but never completed (the transmitter unsubscribed between the
+        // halves) would leave this frame's schedule racing last frame's jobs on the same arrays.
+        if (_tickScheduled)
+        {
+            CompleteScheduledJobs(_tickDampenEnabled);
+            _tickSnapshot = null;
+            _tickAvatar = null;
+        }
+        _tickScheduled = false;
+
         float dt = Time.deltaTime;
         timer += dt;
         timer = math.min(timer, intervalSeconds * 2f);
@@ -200,11 +252,14 @@ public partial class BasisTransmissionResults
 
 #if UNITY_EDITOR
         bool _prof = BasisEventDriverProfilerData.Enabled;
+        _tickProf = _prof;
         System.Diagnostics.Stopwatch _psw = null;
         if (_prof)
         {
             BasisEventDriverProfilerData.Net_TransmitSimRanThisTick = true;
-            _psw = System.Diagnostics.Stopwatch.StartNew();
+            _tickStopwatch ??= new System.Diagnostics.Stopwatch();
+            _psw = _tickStopwatch;
+            _psw.Restart();
         }
 #endif
         EnsureCapacity(receiverCount);
@@ -218,6 +273,7 @@ public partial class BasisTransmissionResults
         unsafe
         {
             float3* pTargetPositions = (float3*)targetPositions.GetUnsafePtr();
+            float3* pTargetForwards = (float3*)targetForwards.GetUnsafePtr();
             bool* pHasRealAvatar = (bool*)hasRealAvatarLoaded.GetUnsafePtr();
             bool* pHasActiveAudio = (bool*)hasActiveAudioSource.GetUnsafePtr();
 
@@ -237,6 +293,8 @@ public partial class BasisTransmissionResults
                 {
                     pTargetPositions[Index] = farAway;
                 }
+                RemoteBoneJobSystem.GetOutGoingMouthForward(id, out float3 mouthForward);
+                pTargetForwards[Index] = mouthForward;
                 pHasRealAvatar[Index] = remotePlayer.InAvatarRange && !remotePlayer.IsConsideredFallBackAvatar;
                 pHasActiveAudio[Index] = remote.AudioReceiverModule.HasAudioSource;
             }
@@ -317,8 +375,13 @@ public partial class BasisTransmissionResults
 
         // Directional dampening job: only reads targetPositions (shared ReadOnly
         // with distance job) — no dependencies, runs in parallel with everything.
+        // Runs whenever EITHER the listener cone or the frequency-dependent tone
+        // shaping is on: tone shaping is orientation-driven and is meaningful even
+        // with the cone wide open.
         float coneAngle = BasisSettingsDefaults.RAListenerConeAngle.RawValue;
-        bool dampenEnabled = coneAngle < 360f;
+        bool coneEnabled = coneAngle < 360f;
+        bool toneEnabled = BasisSettingsDefaults.RAVoiceToneShaping.RawValue;
+        bool dampenEnabled = coneEnabled || toneEnabled;
         if (dampenEnabled)
         {
             float dampenPercent = Mathf.Clamp(BasisSettingsDefaults.RAListenerDampenAmount.RawValue, 1f, 95f);
@@ -331,6 +394,14 @@ public partial class BasisTransmissionResults
             dampenJob.HalfConeRad = halfConeRad;
             dampenJob.MinVolume = 1f - (dampenPercent / 100f);
 
+            dampenJob.ConeEnabled = coneEnabled;
+            dampenJob.ToneEnabled = toneEnabled;
+            dampenJob.ConeMaxShelfDb = BasisVoiceAcoustics.ConeMaxShelfDb;
+            dampenJob.ConeHighFrequencyShare = BasisVoiceAcoustics.ConeHighFrequencyShare;
+            dampenJob.ConeShelfBroadbandDb = BasisVoiceAcoustics.ConeShelfBroadbandDb;
+            dampenJob.DirectivityShelfMaxDb = BasisVoiceAcoustics.DirectivityShelfMaxDb;
+            dampenJob.DirectivityShapePower = BasisVoiceAcoustics.DirectivityShapePower;
+
             dampenJobHandle = dampenJob.Schedule(receiverCount, 64);
         }
         else
@@ -340,14 +411,55 @@ public partial class BasisTransmissionResults
 
         // Kick the batch. Schedule() only queues into the pending batch — nothing reaches a
         // worker until something flushes it, and without this the first flush is the
-        // Complete() below. That made the Compress call under it pure serial latency ahead of
-        // a job chain that had not started: the main thread paid schedule + full chain +
-        // compress instead of overlapping the chain with compress. Several dependency stages deep
-        // (distance -> reduce/caps) at a full instance, that is the whole tick.
+        // Complete() in CompleteTick. That made every main-thread stage between the two halves
+        // pure serial latency ahead of a job chain that had not started: the main thread paid
+        // schedule + full chain instead of overlapping the chain with the rest of LateUpdate.
+        // Several dependency stages deep (distance -> reduce/caps) at a full instance, that is
+        // the whole tick.
         JobHandle.ScheduleBatchedJobs();
 
 #if UNITY_EDITOR
-        if (_prof) { _psw.Stop(); BasisEventDriverProfilerData.Net_TransmitSim_JobScheduleMs = _psw.Elapsed.TotalMilliseconds; _psw.Restart(); }
+        if (_prof) { _psw.Stop(); BasisEventDriverProfilerData.Net_TransmitSim_JobScheduleMs = _psw.Elapsed.TotalMilliseconds; }
+#endif
+
+        _tickSnapshot = snapshot;
+        _tickReceiverCount = receiverCount;
+        _tickAvatar = avatar;
+        _tickIntervalUsed = intervalUsedThisTick;
+        _tickDampenEnabled = dampenEnabled;
+        _tickScheduled = true;
+    }
+
+    /// <summary>
+    /// Second half of the transmit tick: compresses and sends the local avatar, then joins the
+    /// chain <see cref="ScheduleTick"/> kicked and applies its results (audio start/stop, avatar
+    /// range, mesh LOD, recipient list). Runs in the frame's job-free window — the compress reads
+    /// local bone rotations inline on the main thread.
+    /// </summary>
+    public void CompleteTick()
+    {
+        if (!_tickScheduled)
+        {
+            return;
+        }
+        _tickScheduled = false;
+
+        BasisNetworkReceiver[] snapshot = _tickSnapshot;
+        int receiverCount = _tickReceiverCount;
+        BasisAvatar avatar = _tickAvatar;
+        float intervalUsedThisTick = _tickIntervalUsed;
+        bool dampenEnabled = _tickDampenEnabled;
+        _tickSnapshot = null;
+        _tickAvatar = null;
+
+#if UNITY_EDITOR
+        bool _prof = _tickProf;
+        System.Diagnostics.Stopwatch _psw = null;
+        if (_prof)
+        {
+            _psw = _tickStopwatch;
+            _psw.Restart();
+        }
 #endif
         // Do work that doesn't depend on distance results
         using (sMarkerCompress.Auto())
@@ -366,12 +478,7 @@ public partial class BasisTransmissionResults
         // Finish before consuming results — single sync point via CombineDependencies
         using (sMarkerJobComplete.Auto())
         {
-            var combined = JobHandle.CombineDependencies(reduceJobHandle, avatarCapJobHandle, audioCapJobHandle);
-            if (dampenEnabled)
-            {
-                combined = JobHandle.CombineDependencies(combined, dampenJobHandle);
-            }
-            combined.Complete();
+            CompleteScheduledJobs(dampenEnabled);
         }
 
 #if UNITY_EDITOR
@@ -444,9 +551,12 @@ public partial class BasisTransmissionResults
             bool* pHearingRange = (bool*)hearingRange.GetUnsafeReadOnlyPtr();
             float* pDistanceSq = (float*)distanceSq.GetUnsafeReadOnlyPtr();
             float* pDampening = dampenEnabled ? (float*)directionalDampening.GetUnsafeReadOnlyPtr() : null;
+            float* pConeShelf = dampenEnabled ? (float*)coneShelfDb.GetUnsafeReadOnlyPtr() : null;
+            float* pDirectivityShelf = dampenEnabled ? (float*)directivityShelfDb.GetUnsafeReadOnlyPtr() : null;
             bool* pAvatarRange = (bool*)AvatarRange.GetUnsafeReadOnlyPtr();
             bool* pMeshLodRange = (bool*)MeshLodRange.GetUnsafeReadOnlyPtr();
             short* pMeshLodLevel = (short*)MeshLodLevel.GetUnsafeReadOnlyPtr();
+            short* pPoseLodLevel = (short*)PoseLodLevel.GetUnsafeReadOnlyPtr();
 
             for (int i = 0; i < receiverCount; i++)
             {
@@ -480,7 +590,28 @@ public partial class BasisTransmissionResults
                     audio.ApplyRangeData(ConvertedVoiceDistance);
                 }
 
-                audio.DirectionalDampeningMultiplier = pDampening != null ? pDampening[i] : 1f;
+                // Guarded because the field is volatile: the write is a release store the audio
+                // thread orders against, and the value is unchanged for almost every player on
+                // almost every tick. Reading first keeps the barrier for the handful that moved.
+                float dampening = pDampening != null ? pDampening[i] : 1f;
+                if (audio.DirectionalDampeningMultiplier != dampening)
+                {
+                    audio.DirectionalDampeningMultiplier = dampening;
+                }
+
+                // Same read-before-write reasoning as the dampening multiplier
+                // above: these are volatile, and for most players on most ticks
+                // the value has not moved.
+                float coneShelf = pConeShelf != null ? pConeShelf[i] : 0f;
+                if (audio.ConeShelfDb != coneShelf)
+                {
+                    audio.ConeShelfDb = coneShelf;
+                }
+                float directivityShelf = pDirectivityShelf != null ? pDirectivityShelf[i] : 0f;
+                if (audio.DirectivityShelfDb != directivityShelf)
+                {
+                    audio.DirectivityShelfDb = directivityShelf;
+                }
 
                 // Viseme distance cutoff: skip lip-sync for players beyond half
                 // the hearing distance — too far to see mouth shapes. Routed
@@ -559,7 +690,7 @@ public partial class BasisTransmissionResults
                 }
 
                 // Update pose LOD from distance — independent of mesh LOD
-                remote.CurrentLodLevel = pMeshLodLevel[i];
+                remote.CurrentLodLevel = pPoseLodLevel[i];
 
                 // Far avatar stand-in upkeep (past avatar range, mid-download, platform
                 // missing). Edge-triggered; only actual swaps consume budget.
@@ -640,6 +771,16 @@ public partial class BasisTransmissionResults
 
         // Consume one interval worth of accumulated time (robust to overshoot)
         timer = math.max(0f, timer - intervalUsedThisTick);
+    }
+
+    private void CompleteScheduledJobs(bool dampenEnabled)
+    {
+        JobHandle combined = JobHandle.CombineDependencies(reduceJobHandle, avatarCapJobHandle, audioCapJobHandle);
+        if (dampenEnabled)
+        {
+            combined = JobHandle.CombineDependencies(combined, dampenJobHandle);
+        }
+        combined.Complete();
     }
 
     // Takes the snapshot as its concrete array type, not IReadOnlyList: indexing an array
@@ -860,6 +1001,7 @@ public partial class BasisTransmissionResults
         MeshLodLevel = new NativeArray<short>(newCap, Allocator.Persistent);
         prevMeshLodLevel = new NativeArray<short>(newCap, Allocator.Persistent);
         MeshLodRange = new NativeArray<bool>(newCap, Allocator.Persistent);
+        PoseLodLevel = new NativeArray<short>(newCap, Allocator.Persistent);
 
         perIndexMinD2 = new NativeArray<float>(newCap, Allocator.Persistent);
         perIndexMask = new NativeArray<int>(newCap, Allocator.Persistent);
@@ -867,6 +1009,9 @@ public partial class BasisTransmissionResults
         hasRealAvatarLoaded = new NativeArray<bool>(newCap, Allocator.Persistent);
         avatarCapEntries = new NativeArray<AvatarCapEntry>(newCap, Allocator.Persistent);
         directionalDampening = new NativeArray<float>(newCap, Allocator.Persistent);
+        targetForwards = new NativeArray<float3>(newCap, Allocator.Persistent);
+        coneShelfDb = new NativeArray<float>(newCap, Allocator.Persistent);
+        directivityShelfDb = new NativeArray<float>(newCap, Allocator.Persistent);
         hasActiveAudioSource = new NativeArray<bool>(newCap, Allocator.Persistent);
         audioCapEntries = new NativeArray<AudioCapEntry>(newCap, Allocator.Persistent);
 
@@ -888,6 +1033,7 @@ public partial class BasisTransmissionResults
         distanceJob.MeshLodLevel = MeshLodLevel;
         distanceJob.PrevMeshLodLevel = prevMeshLodLevel;
         distanceJob.MeshLodRange = MeshLodRange;
+        distanceJob.PoseLodLevel = PoseLodLevel;
 
         distanceJob.PerIndexMinD2 = perIndexMinD2;
         distanceJob.PerIndexMask = perIndexMask;
@@ -910,7 +1056,10 @@ public partial class BasisTransmissionResults
         audioCapJob.StickinessBonus = 0.75f;
 
         dampenJob.TargetPositions = targetPositions;
+        dampenJob.TargetForwards = targetForwards;
         dampenJob.Multipliers = directionalDampening;
+        dampenJob.ConeShelfDb = coneShelfDb;
+        dampenJob.DirectivityShelfDb = directivityShelfDb;
 
         LengthOfArrays = -1; // will be set on next Simulate call
     }
@@ -980,6 +1129,7 @@ public partial class BasisTransmissionResults
         if (MeshLodLevel.IsCreated) MeshLodLevel.Dispose();
         if (prevMeshLodLevel.IsCreated) prevMeshLodLevel.Dispose();
         if (MeshLodRange.IsCreated) MeshLodRange.Dispose();
+        if (PoseLodLevel.IsCreated) PoseLodLevel.Dispose();
 
         if (perIndexMinD2.IsCreated) perIndexMinD2.Dispose();
         if (perIndexMask.IsCreated) perIndexMask.Dispose();
@@ -987,6 +1137,9 @@ public partial class BasisTransmissionResults
         if (hasRealAvatarLoaded.IsCreated) hasRealAvatarLoaded.Dispose();
         if (avatarCapEntries.IsCreated) avatarCapEntries.Dispose();
         if (directionalDampening.IsCreated) directionalDampening.Dispose();
+        if (targetForwards.IsCreated) targetForwards.Dispose();
+        if (coneShelfDb.IsCreated) coneShelfDb.Dispose();
+        if (directivityShelfDb.IsCreated) directivityShelfDb.Dispose();
         if (hasActiveAudioSource.IsCreated) hasActiveAudioSource.Dispose();
         if (audioCapEntries.IsCreated) audioCapEntries.Dispose();
 

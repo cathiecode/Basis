@@ -44,6 +44,15 @@ public class BasisTrackedBundleWrapper
     /// </summary>
     [System.NonSerialized]
     public volatile bool IsUnloaded;
+    /// <summary>
+    /// The registry key this wrapper was actually filed under, captured at registration.
+    /// <para>Removal must use this rather than recomputing from the loadable bundle: the key
+    /// includes the content version tag, and that tag lives on a record other systems hold and
+    /// write to. A recomputed key that has drifted removes nothing, leaving a dead or orphaned
+    /// wrapper in the registry under its original key.</para>
+    /// </summary>
+    [System.NonSerialized]
+    public string RegisteredKey;
     public static TimeSpan TimeSpan = TimeSpan.FromSeconds(BasisBeeConstants.TimeUntilMemoryRemoval);
     /// <summary>
     /// for example this is the scene path. we can use this to see 
@@ -100,6 +109,10 @@ public class BasisTrackedBundleWrapper
     // it will remove other duplicate scenes?
     public async Task<bool> UnloadIfReady()
     {
+        if (IsUnloaded)
+        {
+            return true;
+        }
         bool isGltfContent = HasGltfTemplate || GltfImport != null;
         #if !UNITY_SERVER
         if (AssetBundle == null && !isGltfContent)
@@ -138,8 +151,10 @@ public class BasisTrackedBundleWrapper
                 // wrapper, not a loadable one — Unload(true) destroys every asset instances
                 // depend on (an instantiate from this wrapper afterwards produces an avatar
                 // whose Animator.avatar is null).
-                IsUnloaded = true;
-                AssetBundle.Unload(true);
+                if (!BasisLoadHandler.TryUnloadBundleAssets(this))
+                {
+                    return false;
+                }
                 #if UNITY_BUNDLEUNLOAD
                 AssetBundle = null;
                 IsBundleBackingStoreReleased = true;

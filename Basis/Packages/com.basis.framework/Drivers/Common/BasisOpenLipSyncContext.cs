@@ -15,9 +15,17 @@ namespace Basis.Scripts.Drivers
 
         private uint _contextHandle;
 
-        // Double-buffered frames: _backFrame written by batch task, consumed by Apply()
-        private Frame _backFrame = new Frame();
-        private volatile bool _hasNewResults;
+        // Result handoff, batch task -> Apply(). Two frames and a generation counter rather
+        // than one frame and a "new results" flag: the flag had to be cleared by Apply before
+        // Simulate would queue more audio, which cost a whole frame of lip-sync latency every
+        // time inference did not land inside the Simulate..Apply window. The task writes the
+        // slot the last publish did NOT use and only then bumps the generation, so Apply can
+        // read the published slot without a lock and without ever blocking the producer.
+        // Safe because Simulate and Apply each run once per frame, so at most one publish
+        // lands between two reads and the slots cannot be lapped.
+        private readonly Frame[] _resultFrames = { new Frame(), new Frame() };
+        private volatile int _publishedGeneration;
+        private int _consumedGeneration;
 
         // Viseme-to-blendshape mapping
         private int[] _visemeToBlendShape;
@@ -158,6 +166,33 @@ namespace Basis.Scripts.Drivers
                 }
             }
 
+            // FaceVisemeMovement is authored against the mesh the creator had in the SDK. A mesh
+            // that arrives with fewer shapes than that — a stripped LOD, a failed import, a
+            // remapped generic rebuild — leaves indices pointing past the end, so drop them here
+            // rather than letting every frame throw. Count 0 is not judged: the shapes may still
+            // be landing, and the per-frame guard covers it until they do.
+            int mappedCeiling = LiveBlendShapeCount();
+            if (mappedCeiling > 0)
+            {
+                int dropped = 0;
+                for (int i = 0; i < VisemeCount; i++)
+                {
+                    if (!_hasViseme[i]) continue;
+
+                    int bsIndex = _visemeToBlendShape[i];
+                    if (bsIndex >= 0 && bsIndex < mappedCeiling) continue;
+
+                    _visemeToBlendShape[i] = -1;
+                    _hasViseme[i] = false;
+                    dropped++;
+                }
+
+                if (dropped > 0)
+                {
+                    Debug.LogWarning($"[OpenLipSync] {dropped} viseme(s) on '{avatar.name}' map past the face mesh's {mappedCeiling} blendshapes and were disabled.");
+                }
+            }
+
             _audioBufferA = new float[AudioBufferSize];
             _audioBufferB = new float[AudioBufferSize];
             _activeBuffer = 0;
@@ -182,8 +217,24 @@ namespace Basis.Scripts.Drivers
         /// </summary>
         private int BakeProfiles(BasisAvatar avatar)
         {
-            BasisVisemeDriveConfig config = avatar.FaceVisemeDrive ?? new BasisVisemeDriveConfig();
+            BasisVisemeDriveConfig config = avatar.FaceVisemeDrive;
+            if (config == null || config.IsUnset)
+            {
+                // An avatar built before these fields existed reaches us as null or as an
+                // all-zero instance, and zero is not neutral here: BackendSmoothing 0 strips the
+                // temporal smoothing the backend used to get unconditionally, leaving the mouth
+                // sampling a 100 Hz signal at frame rate. Anything that authored nothing must
+                // come out of this exactly as it did before response shaping existed.
+                config = new BasisVisemeDriveConfig();
+            }
+
             BasisVisemeProfile[] authored = avatar.FaceVisemeProfiles;
+            if (IsUnsetTable(authored))
+            {
+                // Allocated but never filled in. Baking it would pin every shape to rest and
+                // mute the avatar outright, so fall back to the pass-through defaults.
+                authored = null;
+            }
 
             _mode = config.Mode;
             _winnerMargin = Math.Max(0f, config.WinnerMargin);
@@ -231,6 +282,14 @@ namespace Basis.Scripts.Drivers
                     ? authored[i]
                     : BasisVisemeProfile.Default;
 
+                if (profile.IsUnset)
+                {
+                    // An entirely-blank slot in an otherwise authored table. Only the blank ones
+                    // are rebuilt: a creator switching a viseme off zeroes its gain or collapses
+                    // its range, and rebuilding THAT would drive the shape they silenced.
+                    profile = BasisVisemeProfile.Default;
+                }
+
                 float threshold = Math.Clamp(profile.Threshold, 0f, 0.99f);
                 float outMin = Math.Clamp(profile.OutMin, 0f, 100f);
                 float outMax = Math.Clamp(profile.OutMax, 0f, 100f);
@@ -252,6 +311,29 @@ namespace Basis.Scripts.Drivers
             }
 
             return ResolveBackendSmoothing(config);
+        }
+
+        /// <summary>
+        /// True when a table exists but every entry in it is blank — an allocation nobody ever
+        /// filled in, which is the one case the zeroed struct cannot otherwise be told apart from
+        /// a creator deliberately silencing every viseme.
+        /// </summary>
+        private static bool IsUnsetTable(BasisVisemeProfile[] profiles)
+        {
+            if (profiles == null || profiles.Length == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < profiles.Length; i++)
+            {
+                if (!profiles[i].IsUnset)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private int ResolveBackendSmoothing(BasisVisemeDriveConfig config)
@@ -278,21 +360,25 @@ namespace Basis.Scripts.Drivers
             int ch = Math.Max(channels, 1);
             int buf = Volatile.Read(ref _activeBuffer);
             float[] dstArr = (buf == 0) ? _audioBufferA : _audioBufferB;
+            if (dstArr == null) return;
             int w = (buf == 0) ? Volatile.Read(ref _writeIndexA) : Volatile.Read(ref _writeIndexB);
-            int cap = AudioBufferSize;
 
-            for (int s = 0; s < length; s += ch)
+            if (length > data.Length) length = data.Length;
+            int frames = length / ch;
+
+            // Stop at the end rather than wrapping. Simulate drains this linearly from index 0,
+            // so a wrap does not cost the oldest samples the way a ring is supposed to — it
+            // reorders the buffer and hands the model a second of scrambled audio, which poisons
+            // the streaming convolution caches long after the stall that caused it. One second
+            // of headroom means only a catastrophic main-thread stall reaches this.
+            int room = AudioBufferSize - w;
+            if (frames > room) frames = room;
+
+            for (int i = 0, s = 0; i < frames; i++, s += ch)
             {
-                if (s < data.Length)
-                {
-                    dstArr[w] = data[s];
-                    w++;
-                    if (w >= cap)
-                    {
-                        w = 0;
-                    }
-                }
+                dstArr[w + i] = data[s];
             }
+            w += frames;
 
             if (buf == 0) Volatile.Write(ref _writeIndexA, w);
             else Volatile.Write(ref _writeIndexB, w);
@@ -309,11 +395,12 @@ namespace Basis.Scripts.Drivers
         {
             if (!_initialized || _disposed || !_faceVisible) return;
 
-            // Already queued for batch processing
+            // Already queued for batch processing. This is the only gate left: it protects
+            // _audioChunk, which the batch task is reading. Whether Apply() has picked up the
+            // PREVIOUS result is deliberately not consulted — waiting on that made the mouth
+            // run at half the frame rate and a further frame behind, which is exactly the lag
+            // this pipeline is trying not to add.
             if (_readyForInference) return;
-
-            // Don't queue new work until Apply() has consumed previous results
-            if (_hasNewResults) return;
 
             if (Interlocked.Exchange(ref _hasNewAudio, 0) != 1) return;
 
@@ -394,36 +481,69 @@ namespace Basis.Scripts.Drivers
         {
             var batch = _cachedBatch;
             int batchLen = _cachedBatchLen;
-            for (int i = 0; i < batchLen; i++)
+            int processed = 0;
+
+            while (batchLen > 0)
             {
-                var ctx = batch[i];
-                if (ctx._disposed)
+                for (int i = 0; i < batchLen; i++)
                 {
-                    ctx._readyForInference = false;
-                    continue;
-                }
+                    var ctx = batch[i];
+                    batch[i] = null;
+                    if (ctx == null) continue;
 
-                try
-                {
-                    var result = BasisOpenLipSyncDriver.ProcessFrame(
-                        ctx._contextHandle, ctx._audioChunk, ctx._frozenSampleCount, ctx._backFrame);
-
-                    if (result == Result.Success)
+                    if (ctx._disposed)
                     {
-                        ctx._hasNewResults = true;
+                        ctx._readyForInference = false;
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Write the slot the last publish did not use, then publish it. Nothing
+                        // reads the new slot until the generation bump makes it visible.
+                        int generation = ctx._publishedGeneration + 1;
+                        Frame target = ctx._resultFrames[generation & 1];
+
+                        var result = BasisOpenLipSyncDriver.ProcessFrame(
+                            ctx._contextHandle, ctx._audioChunk, ctx._frozenSampleCount, target);
+
+                        if (result == Result.Success)
+                        {
+                            ctx._publishedGeneration = generation;
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Expected during teardown
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[OpenLipSync] Batch inference error for context {ctx._contextHandle}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        ctx._readyForInference = false;
                     }
                 }
-                catch (ObjectDisposedException)
+
+                processed += batchLen;
+                batchLen = 0;
+
+                // Contexts that arrived while this task was running would otherwise sit until
+                // the next frame boundary, so a room full of speakers accumulates lip-sync lag
+                // in whole frames. Keep the thread we already have and drain them now. Bounded
+                // so one task cannot monopolise a pool thread indefinitely under sustained load.
+                if (processed >= MaxContextsPerBatch * 2) break;
+
+                lock (_pendingInference)
                 {
-                    // Expected during teardown
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[OpenLipSync] Batch inference error for context {ctx._contextHandle}: {ex.Message}");
-                }
-                finally
-                {
-                    ctx._readyForInference = false;
+                    int waiting = _pendingInference.Count;
+                    if (waiting == 0) break;
+
+                    batchLen = Math.Min(waiting, MaxContextsPerBatch);
+                    if (batch.Length < batchLen) batchLen = batch.Length;
+                    _pendingInference.CopyTo(0, batch, 0, batchLen);
+                    _pendingInference.RemoveRange(0, batchLen);
                 }
             }
         }
@@ -437,11 +557,13 @@ namespace Basis.Scripts.Drivers
             if (!_initialized || _disposed || _meshRenderer == null || !_faceVisible) return;
 
             // Pick up completed results from batch task
-            if (_hasNewResults)
+            int generation = _publishedGeneration;
+            if (generation != _consumedGeneration)
             {
-                _hasNewResults = false;
-                int visemeCount = Math.Min(_backFrame.Visemes.Length, _cachedVisemeWeights.Length);
-                Array.Copy(_backFrame.Visemes, _cachedVisemeWeights, visemeCount);
+                _consumedGeneration = generation;
+                float[] published = _resultFrames[generation & 1].Visemes;
+                int visemeCount = Math.Min(published.Length, _cachedVisemeWeights.Length);
+                Array.Copy(published, _cachedVisemeWeights, visemeCount);
             }
 
             if (_identityMapping)
@@ -468,12 +590,17 @@ namespace Basis.Scripts.Drivers
         /// </summary>
         private void ApplyDirect()
         {
+            int blendShapeCount = LiveBlendShapeCount();
+            if (blendShapeCount == 0) return;
+
             // Apply cached weights (new or stale from last frame - no stall)
             for (int i = 0; i < VisemeCount; i++)
             {
                 if (!_hasViseme[i]) continue;
 
                 int bsIndex = _visemeToBlendShape[i];
+                if (bsIndex < 0 || bsIndex >= blendShapeCount) continue;
+
                 float weight = _cachedVisemeWeights[i] * 100f;
                 weight = Math.Clamp(weight, 0f, 100f);
 
@@ -486,6 +613,21 @@ namespace Basis.Scripts.Drivers
                     _lastApplied[i] = weight;
                 }
             }
+        }
+
+        /// <summary>
+        /// Blendshape count of the mesh as it stands this frame, 0 when there is nothing writable.
+        /// The mapping is captured at Initialize but the mesh underneath it is not fixed: it drops
+        /// to 0 while a SkinnedMeshRenderer outlives its sharedMesh during an avatar swap, and a
+        /// generic import can hand over a renderer whose shapes are still being rebuilt. Writing a
+        /// stale index into either throws per frame, which the exception notifier then amplifies.
+        /// </summary>
+        private int LiveBlendShapeCount()
+        {
+            if (_meshRenderer == null) return 0;
+
+            Mesh sharedMesh = _meshRenderer.sharedMesh;
+            return sharedMesh == null ? 0 : sharedMesh.blendShapeCount;
         }
 
         private void ResolveContinuous()
@@ -575,9 +717,15 @@ namespace Basis.Scripts.Drivers
         /// </summary>
         private void ApplyShaped(float deltaTime)
         {
+            int blendShapeCount = LiveBlendShapeCount();
+            if (blendShapeCount == 0) return;
+
             for (int i = 0; i < VisemeCount; i++)
             {
                 if (!_hasViseme[i]) continue;
+
+                int bsIndex = _visemeToBlendShape[i];
+                if (bsIndex < 0 || bsIndex >= blendShapeCount) continue;
 
                 float value = _current[i];
                 float target = _target[i];
@@ -601,7 +749,7 @@ namespace Basis.Scripts.Drivers
 
                 if (diff * diff > BlendShapeWriteEps * BlendShapeWriteEps || (converged && diff != 0f))
                 {
-                    _meshRenderer.SetBlendShapeWeight(_visemeToBlendShape[i], target);
+                    _meshRenderer.SetBlendShapeWeight(bsIndex, target);
                     _lastApplied[i] = target;
                 }
             }
@@ -663,7 +811,9 @@ namespace Basis.Scripts.Drivers
                 _audioBufferA = null;
                 _audioBufferB = null;
                 _audioChunk = null;
-                _backFrame = null;
+                // _resultFrames deliberately survives: it is two 15-float frames, and a batch
+                // task that raced past the _disposed check above would otherwise dereference
+                // null inside the backend rather than throwing something the catch expects.
             }
         }
     }

@@ -184,6 +184,7 @@ namespace Basis.BasisUI.HandHeldCamera
         private bool? _lastCloseHides;
         private bool? _lastAutoFollow;
         private bool? _lastExposureOnCamera;
+        private bool? _lastFocusFollows;
 
         [RuntimeInitializeOnLoadMethod]
         public static void AddToMenu()
@@ -244,10 +245,17 @@ namespace Basis.BasisUI.HandHeldCamera
 
             BuildNavigationColumn(_navColumn);
 
+            // First, because a mode is the decision every other tab is downstream of: it sets them
+            // up for a job and colours them by the part each one plays in it.
+            AddTab("camera.modePreset", BuildModeTab);
+
             AddTab("camera.capture", content =>
             {
                 BuildActionsGroup(content);
                 PanelSectionToggleHelpers.FinalizeCollapsibleGroup(_actionSection, _actionGroup, true, OnSectionExpanded);
+
+                BuildBackgroundGroup(content);
+                PanelSectionToggleHelpers.FinalizeCollapsibleGroup(_backgroundSection, _backgroundGroup, false, OnSectionExpanded);
             });
 
             AddTab("camera.tab.image", content =>
@@ -295,6 +303,10 @@ namespace Basis.BasisUI.HandHeldCamera
 
             MakeSlidersLive((RectTransform)_tabGroup.transform);
             AssignSliderResetDefaults();
+
+            // After every tab: the section handles are assigned as each page is populated, so the
+            // tint list can only be complete once the last one has been built.
+            RegisterSectionTints();
 
             RebuildSelector();
 
@@ -621,6 +633,7 @@ namespace Basis.BasisUI.HandHeldCamera
             ApplyOnPropUIVisibility(false);
             SetPanelTickSubscription(false);
             ClearCinematicReferences();
+            ClearModeReferences();
             _panel = null;
             _tabGroup = null;
             _navColumn = null;
@@ -730,7 +743,9 @@ namespace Basis.BasisUI.HandHeldCamera
             _webPortField = null;
             _openStreamButton = null;
             _videoSenderNameField = null;
-            _activeCamera = null;
+            // Releases the preview request as well: the panel is gone, so the camera goes back to
+            // rendering only for the surfaces that are still showing it.
+            SetActiveCamera(null);
             _lastVideoOutputActive = null;
             _lastWebStreamActive = null;
             _lastWebStreamDescription = null;
@@ -741,6 +756,7 @@ namespace Basis.BasisUI.HandHeldCamera
             _lastSelfie = null;
             _lastCloseHides = null;
             _lastExposureOnCamera = null;
+            _lastFocusFollows = null;
             _entries.Clear();
         }
 
@@ -1306,8 +1322,10 @@ namespace Basis.BasisUI.HandHeldCamera
             _resolutionDropdown.OnValueChanged = _ =>
             {
                 if (_activeCamera == null || _resolutionDropdown == null) return;
+                // Through the UI, not straight to the camera: the UI owns the preset index that a
+                // save records and that the prop's sprites and cycle button read.
                 int index = _resolutionDropdown.Index;
-                if (index >= 0) _activeCamera.ChangeResolution(index);
+                if (index >= 0) _activeCamera.HandHeld.SetResolutionIndex(index);
             };
 
             _formatDropdown = PanelDropdown.CreateNewEntry(content);
@@ -1363,8 +1381,9 @@ namespace Basis.BasisUI.HandHeldCamera
         /// <summary>
         /// One toggle per named, user-togglable layer, controlling whether the capture camera
         /// draws it. Built once from the project's layers; the camera refuses the ones it
-        /// manages itself (OverlayUI, the prop HUD), so those never appear here. The UI layer
-        /// (players' nameplates) is exposed here as its own toggle.
+        /// manages itself (OverlayUI, its own world markers), so those never appear here. The
+        /// UI layer (players' nameplates) and HandHeldCameraUI (the prop's HUD) are exposed
+        /// here as their own toggles.
         /// </summary>
         private void BuildLayersGroup(RectTransform parent)
         {
@@ -1558,6 +1577,28 @@ namespace Basis.BasisUI.HandHeldCamera
             _topButtons.Add(_resetTopButton);
         }
 
+        /// <summary>
+        /// Binds the panel to a camera, and tells that camera its feed is being watched from here.
+        /// <para>
+        /// The preview draws the camera's render texture, but the camera only renders while its
+        /// own prop is in view — so a camera that has been flown away, sent to follow from behind,
+        /// or simply left facing the wrong way stops rendering and the preview sits on its last
+        /// frame. Every other camera is cleared as well as the outgoing one, so a request can
+        /// never be left behind on a camera the panel has moved off.
+        /// </para>
+        /// </summary>
+        private void SetActiveCamera(BasisHandHeldCamera camera)
+        {
+            _activeCamera = camera;
+
+            IReadOnlyList<BasisHandHeldCamera> cameras = BasisHandHeldCameraRegistry.Cameras;
+            for (int Index = 0; Index < cameras.Count; Index++)
+            {
+                BasisHandHeldCamera entry = cameras[Index];
+                if (entry != null) entry.SetPanelPreviewActive(entry == camera);
+            }
+        }
+
         private void RebuildSelector()
         {
             if (_selector == null) return;
@@ -1583,7 +1624,7 @@ namespace Basis.BasisUI.HandHeldCamera
                 _selector.gameObject.SetActive(false);
                 _emptyState?.SetActive(true);
                 SetGroupsActive(false);
-                _activeCamera = null;
+                SetActiveCamera(null);
                 return;
             }
 
@@ -1593,7 +1634,7 @@ namespace Basis.BasisUI.HandHeldCamera
 
             int selected = _activeCamera != null ? _entries.IndexOf(_activeCamera) : 0;
             if (selected < 0) selected = 0;
-            _activeCamera = _entries[selected];
+            SetActiveCamera(_entries[selected]);
             _selector.SetValueWithoutNotify(labels[selected]);
 
             ApplyActiveCameraToControls();
@@ -1605,7 +1646,7 @@ namespace Basis.BasisUI.HandHeldCamera
             if (_selector == null) return;
             int index = _selector.Index;
             if (index < 0 || index >= _entries.Count) return;
-            _activeCamera = _entries[index];
+            SetActiveCamera(_entries[index]);
             ApplyActiveCameraToControls();
         }
 
@@ -1617,6 +1658,7 @@ namespace Basis.BasisUI.HandHeldCamera
                 if (button != null) button.gameObject.SetActive(active);
             }
             if (_previewGroup != null) _previewGroup.SetActive(active);
+            if (_modeDropdown != null) _modeDropdown.gameObject.SetActive(active);
             // The pages have nothing to drive without a camera, so the navigation goes with them.
             if (_tabGroup != null && _tabGroup.TabButtonParent != null)
             {
@@ -1657,6 +1699,12 @@ namespace Basis.BasisUI.HandHeldCamera
             _lastShotRosterHash = -1;
             _lastWaypointCount = -1;
             _lastCinematic = null;
+
+            // Cameras hold their modes independently, so switching between two of them has to
+            // repaint rather than trust the cache from the one that was showing.
+            _activeCamera.RefreshCameraMode();
+            RefreshModeVisuals(force: true);
+
             SeedCinematicCameraControls();
             RefreshShotList();
             RefreshWaypointList();
@@ -1698,6 +1746,7 @@ namespace Basis.BasisUI.HandHeldCamera
                 RefreshDoFModeVisibility();
             }
 
+            _lastFocusFollows = _activeCamera.autoFocusFollowSubject;
             _focusModeDropdown?.SetValueWithoutNotify(FocusModeLabels[_activeCamera.autoFocusFollowSubject ? 0 : 1]);
 
             if (metaData.vignette != null)
@@ -1770,6 +1819,13 @@ namespace Basis.BasisUI.HandHeldCamera
                 int markerIndex = Mathf.Clamp((int)_activeCamera.detachedMarker, 0, DetachedMarkerLabels.Length - 1);
                 _followMarkerDropdown.SetValueWithoutNotify(DetachedMarkerLabels[markerIndex]);
             }
+            // Each camera holds its own follow target, and the roster has not changed just because
+            // the selected camera has — so drop the cached list to force the rebuild. Without it
+            // the dropdown kept showing the previous camera's target, and picking the name already
+            // on screen raises no change event, so the new camera silently stayed on "Me".
+            _followTargetIds.Clear();
+            RefreshFollowTargets();
+
             _followPlayspaceToggle?.SetValueWithoutNotify(_activeCamera.autoFollowPlayspace);
             _followLookAtHeightSlider?.SetValueWithoutNotify(_activeCamera.autoFollowLookAtHeightOffset);
             _followSideSlider?.SetValueWithoutNotify(_activeCamera.autoFollowPositionOffset.x);
@@ -1982,6 +2038,7 @@ namespace Basis.BasisUI.HandHeldCamera
             SyncToggle(_autoFollowToggle, _activeCamera.IsAutoFollowing, ref _lastAutoFollow);
             SyncSharedControls();
             RefreshFollowTargets();
+            TickModeState();
             TickCinematicSections();
             RefreshTimerLabel();
             RefreshHiddenState();
@@ -2012,6 +2069,16 @@ namespace Basis.BasisUI.HandHeldCamera
             SyncToggle(_autoLevelToggle, _activeCamera.useAutoLeveling, ref _lastAutoLevel);
             SyncToggle(_vrStabToggle, _activeCamera.useVRHandheldSmoothing, ref _lastVrStab);
 
+            // The prop carries its own Auto/Manual focus buttons, so this is a shared control like
+            // the ones above — and it also decides whether the focus slider is on screen at all.
+            bool focusFollows = _activeCamera.autoFocusFollowSubject;
+            if (_lastFocusFollows != focusFollows)
+            {
+                _lastFocusFollows = focusFollows;
+                _focusModeDropdown?.SetValueWithoutNotify(FocusModeLabels[focusFollows ? 0 : 1]);
+                RefreshDoFModeVisibility();
+            }
+
             _activeCamera.HandHeld.SyncPropControlsFromState();
         }
 
@@ -2022,6 +2089,13 @@ namespace Basis.BasisUI.HandHeldCamera
         private void RefreshFollowTargets()
         {
             if (_followTargetDropdown == null || _activeCamera == null) return;
+
+            // Rebuilding swaps the option list out from under an open one. Unity has already
+            // spawned the item toggles by then and they keep the indices they were built with, so
+            // the click lands on whatever now sits at that row — nothing, or the wrong player.
+            // The roster is re-read the moment it closes, so nothing is lost by waiting.
+            if (_followTargetDropdown.DropdownComponent != null &&
+                _followTargetDropdown.DropdownComponent.IsExpanded) return;
 
             var remotes = Basis.Scripts.Networking.BasisNetworkPlayers.RemotePlayers;
             if (!FollowTargetRosterChanged(remotes)) return;
@@ -2038,9 +2112,20 @@ namespace Basis.BasisUI.HandHeldCamera
             {
                 if (pair.Value == null) continue;
                 _followTargetIds.Add(pair.Key);
-                keys.Add(pair.Key.ToString());
-                string name = !string.IsNullOrEmpty(pair.Value.SafeDisplayName) ? pair.Value.SafeDisplayName : $"Player {pair.Key}";
-                labels.Add(name);
+            }
+
+            // A ConcurrentDictionary enumerates in bucket order, which reshuffles as players come
+            // and go — so the same roster could list in a different order on every rebuild and
+            // move a name out from under the cursor. Net id is stable and is join order.
+            _followTargetIds.Sort(1, _followTargetIds.Count - 1, null);
+
+            for (int index = 1; index < _followTargetIds.Count; index++)
+            {
+                ushort id = _followTargetIds[index];
+                keys.Add(id.ToString());
+                labels.Add(remotes.TryGetValue(id, out var remote) && !string.IsNullOrEmpty(remote.SafeDisplayName)
+                    ? remote.SafeDisplayName
+                    : $"Player {id}");
             }
 
             _followTargetDropdown.AssignEntries(keys, labels);
@@ -2054,11 +2139,21 @@ namespace Basis.BasisUI.HandHeldCamera
         private bool FollowTargetRosterChanged(
             System.Collections.Concurrent.ConcurrentDictionary<ushort, Basis.Scripts.BasisSdk.Players.BasisRemotePlayer> remotes)
         {
-            if (remotes.Count + 1 != _followTargetIds.Count) return true;
+            // Counted the way the rebuild lists them. The rebuild skips null values — a player
+            // part-way through teardown — so counting the raw dictionary reported a change on
+            // every tick for as long as one sat in the map, rebuilding the dropdown and forcing a
+            // layout pass every frame, which is also what made an open list impossible to click.
+            int live = 1; // "Me"
+            foreach (var pair in remotes)
+            {
+                if (pair.Value != null) live++;
+            }
+
+            if (live != _followTargetIds.Count) return true;
 
             for (int index = 1; index < _followTargetIds.Count; index++)
             {
-                if (!remotes.ContainsKey(_followTargetIds[index])) return true;
+                if (!remotes.TryGetValue(_followTargetIds[index], out var remote) || remote == null) return true;
             }
 
             return false;
@@ -2081,17 +2176,15 @@ namespace Basis.BasisUI.HandHeldCamera
         // Aperture / focal length / blades only affect Bokeh; hide them in Off/Gaussian so the
         // section only offers controls that do something. Gaussian has no focus distance of its
         // own, so ApplyFocusDistance maps it onto the far-blur ramp and the slider works in both.
-        // Single owner of the focus mode. Follow = the depth of field tracks the subject's distance
-        // every frame (UpdateAutoFocus); Manual = the focus-distance slider. Follow needs DoF on to
-        // show anything, so it forces it on.
+        // The focus mode itself is owned by BasisHandHeldCameraUI, so the panel and the prop's own
+        // Auto/Manual buttons cannot leave the two halves of it disagreeing. Follow = the depth of
+        // field tracks the subject's distance every frame (UpdateAutoFocus); Manual = the
+        // focus-distance slider. Follow needs DoF on to show anything, so it forces it on.
         private void SetFocusFollowsSubject(bool follows)
         {
             if (_activeCamera == null) return;
 
-            _activeCamera.autoFocusFollowSubject = follows;
-            _activeCamera.HandHeld.SetDepthMode(follows
-                ? BasisHandHeldCameraUI.DepthMode.Auto
-                : BasisHandHeldCameraUI.DepthMode.Manual);
+            _activeCamera.HandHeld.SetFocusFollowsSubject(follows);
             if (follows) _activeCamera.BasisDOFInteractionHandler?.SetDoFState(true);
 
             _focusModeDropdown?.SetValueWithoutNotify(FocusModeLabels[follows ? 0 : 1]);

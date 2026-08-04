@@ -1,3 +1,4 @@
+﻿using Basis.Scripts.Networking.Receivers;
 using System;
 using Basis.Scripts.Drivers;
 using Basis.Scripts.TransformBinders.BoneControl;
@@ -264,19 +265,22 @@ namespace Basis.BasisUI
         /// </summary>
         public static BasisSettingsBinding<bool> VolumetricFogBakedAPV = new("volumetricfogbakedapv", new BasisPlatformDefault<bool>(true));
 
-        /// <summary>
-        /// When enabled, ReflectionProbe components in the scene whose mode is Realtime are
-        /// driven by Basis at the rate selected by <see cref="RealtimeReflectionProbeRate"/>.
-        /// When disabled, Basis does not modify any probe state.
-        /// </summary>
-        public static BasisSettingsBinding<bool> UseRealtimeReflectionProbes = new("userealtimereflectionprobes", new BasisPlatformDefault<bool>(false));
+        // Commented out 2026-08-04: the realtime-reflection-probe driver these described was
+        // never implemented — no UI exposes them and nothing reads them (the Performance Mode
+        // table only wrote the bool). Restore both together with the probe driver.
+        ///// <summary>
+        ///// When enabled, ReflectionProbe components in the scene whose mode is Realtime are
+        ///// driven by Basis at the rate selected by RealtimeReflectionProbeRate.
+        ///// When disabled, Basis does not modify any probe state.
+        ///// </summary>
+        //public static BasisSettingsBinding<bool> UseRealtimeReflectionProbes = new("userealtimereflectionprobes", new BasisPlatformDefault<bool>(false));
 
-        /// <summary>
-        /// Tick rate for realtime reflection probes when <see cref="UseRealtimeReflectionProbes"/>
-        /// is on. "Match Render" delegates to Unity's per-frame mode; the others use ViaScripting
-        /// and Basis calls RenderProbe at the chosen interval.
-        /// </summary>
-        public static BasisSettingsBinding<string> RealtimeReflectionProbeRate = new("realtimereflectionproberate", new BasisPlatformDefault<string>("30hz"));
+        ///// <summary>
+        ///// Tick rate for realtime reflection probes when UseRealtimeReflectionProbes
+        ///// is on. "Match Render" delegates to Unity's per-frame mode; the others use ViaScripting
+        ///// and Basis calls RenderProbe at the chosen interval.
+        ///// </summary>
+        //public static BasisSettingsBinding<string> RealtimeReflectionProbeRate = new("realtimereflectionproberate", new BasisPlatformDefault<string>("30hz"));
 
         public static BasisSettingsBinding<bool> MicrophoneDenoiser = new("voicedenoiser", new BasisPlatformDefault<bool>
         {
@@ -335,6 +339,15 @@ namespace Basis.BasisUI
         // Jiggle grab-and-pull debug: grabbed bone, pull target, per-point reach limit, and the
         // pick spheres a grab press searches from.
         public static BasisSettingsBinding<bool> GizmoJiggleGrab = new("gizmojigglegrab", new BasisPlatformDefault<bool>(false));
+
+        // Canonical hand frame held objects weld to, on every hand local and remote: palm point,
+        // frame axes, and the wrist-to-palm offset the weld applies.
+        public static BasisSettingsBinding<bool> GizmoHandGrip = new("gizmohandgrip", new BasisPlatformDefault<bool>(false));
+
+        // Center-eye and mouth face anchors on every avatar local and remote: the driven point, the
+        // forward the gaze selector and the voice AudioSource use, the offset back to the head, and
+        // a red leg out to where a head-parented anchor belongs when the two disagree.
+        public static BasisSettingsBinding<bool> GizmoMouthEye = new("gizmomoutheye", new BasisPlatformDefault<bool>(false));
 
         // Eye-gaze ray + endpoint-target gizmo. Off by default — only relevant on
         // headsets that surface gaze through OpenXR EyeGazeInteraction or a SteamVR
@@ -678,6 +691,13 @@ namespace Basis.BasisUI
         // Nothing wrote shadowCastingMode on a remote renderer before this, so a distant crowd was
         // paying a full extra skinned draw per shadow cascade each.
         public static BasisSettingsBinding<bool> UseAvatarShadowLod = new("useavatarshadowlod", new BasisPlatformDefault<bool>(true));
+        public static BasisSettingsBinding<bool> UseAvatarVisibilityCull = new("useavatarvisibilitycull", new BasisPlatformDefault<bool>(false));
+
+        // URP's GPU Resident Drawer occlusion test, for world geometry (MeshRenderer only — avatars
+        // are skinned and the drawer never sees them). Read at boot only: the drawer snapshots its
+        // settings when it is built, and rebuilding it re-registers every renderer in the scene, so
+        // changing this mid-session waits for a restart. See BasisGpuOcclusionCulling.
+        public static BasisSettingsBinding<bool> UseGpuOcclusionCulling = new("usegpuocclusionculling", new BasisPlatformDefault<bool>(false));
 
         // Shows the baked far avatar carried in a player's bundle (driven by the same
         // networked bone data) whenever their real avatar isn't loaded — past the max avatar
@@ -780,6 +800,14 @@ namespace Basis.BasisUI
         public const string SwapMode_Shutdown = "Shutdown Runtime";
         public const string SwapMode_AutoSwap = "Auto Swap";
 
+        /// <summary>
+        /// Whether the headset's presence sensor is allowed to drive the swap. Off leaves the sensor
+        /// readable but stops it changing modes, which is the way out when a headset reports presence
+        /// wrongly — a sensor stuck unworn otherwise drops the user to Desktop and keeps them there.
+        /// Only consulted under <see cref="SwapMode_AutoSwap"/>; manual mode switching is unaffected.
+        /// </summary>
+        public static BasisSettingsBinding<bool> UsePresenceSensor = new("use_presence_sensor", new BasisPlatformDefault<bool>(true));
+
         // ---------------- TRACKER VISUALS ----------------
         /// <summary>
         /// Chooses what is rendered for tracked input devices (controllers/trackers/etc.) while
@@ -858,9 +886,10 @@ namespace Basis.BasisUI
         /// </summary>
         public static BasisSettingsBinding<bool> ChatDisabled = new("chatdisabled", new BasisPlatformDefault<bool>(false));
 
-        public static BasisSettingsBinding<bool> FalseBinding = new("falsebinding", new BasisPlatformDefault<bool>(false));
+        // Commented out 2026-08-04: never referenced anywhere — leftover scaffolding.
+        //public static BasisSettingsBinding<bool> FalseBinding = new("falsebinding", new BasisPlatformDefault<bool>(false));
 
-        public static BasisSettingsBinding<bool> TrueBinding = new("truebinding", new BasisPlatformDefault<bool>(false));
+        //public static BasisSettingsBinding<bool> TrueBinding = new("truebinding", new BasisPlatformDefault<bool>(false));
 
         // ---------------- CAMERA / PHOTO ----------------
         public const string PhotoTagging_NoOne = "No One";
@@ -1249,6 +1278,11 @@ namespace Basis.BasisUI
         // AudioSource
         public static BasisSettingsBinding<float> RAMinDistance = new("ra_mindistance", new BasisPlatformDefault<float>(0.5f));
         public static BasisSettingsBinding<float> RASpread = new("ra_spread", new BasisPlatformDefault<float>(70f));
+        // Per-source doppler scale. Whether any pitch shift actually happens is
+        // decided globally by Doppler Factor in AudioManager.asset, which the project
+        // ships at 0 — so this is the per-source multiplier on a global that is
+        // currently off, not a live pitch shift. Note the prefab authors DopplerLevel
+        // 0 and this binding overwrites it at load; the two disagree by design.
         public static BasisSettingsBinding<float> RADopplerLevel = new("ra_dopplerlevel", new BasisPlatformDefault<float>(1f));
         public static BasisSettingsBinding<float> RASpatialBlend = new("ra_spatialblend", new BasisPlatformDefault<float>(1f));
 
@@ -1264,7 +1298,11 @@ namespace Basis.BasisUI
 
         // Steam Audio - Directivity
         public static BasisSettingsBinding<bool> RADirectivity = new("ra_directivity", new BasisPlatformDefault<bool>(true));
-        public static BasisSettingsBinding<float> RADipoleWeight = new("ra_dipoleweight", new BasisPlatformDefault<float>(0.25f));
+        // 0.25 broadband overshot measured speech directivity by up to 2 dB behind
+        // the talker. The mouth-directivity shelf now carries the frequency-dependent
+        // part, and 0.10 is what pairs with it to land on the measured curve.
+        // Key bumped so the retune actually reaches existing installs.
+        public static BasisSettingsBinding<float> RADipoleWeight = new("ra_dipoleweight_v2", new BasisPlatformDefault<float>(BasisVoiceAcoustics.DipoleWeight));
         public static BasisSettingsBinding<float> RADipolePower = new("ra_dipolepower", new BasisPlatformDefault<float>(1f));
 
         // Steam Audio - Occlusion
@@ -1294,7 +1332,7 @@ namespace Basis.BasisUI
 
         // AudioSource - Rolloff
         public static BasisSettingsBinding<string> RARolloffMode = new("ra_rolloffmode", new BasisPlatformDefault<string>("custom"));
-        public static BasisSettingsBinding<string> RARolloffCurvePreset = new("ra_rolloffcurvepreset", new BasisPlatformDefault<string>("default"));
+        public static BasisSettingsBinding<string> RARolloffCurvePreset = new("ra_rolloffcurvepreset_v2", new BasisPlatformDefault<string>("natural"));
         public static BasisSettingsBinding<float> RACurvePoint25 = new("ra_curvepoint25", new BasisPlatformDefault<float>(0.6f));
         public static BasisSettingsBinding<float> RACurvePoint50 = new("ra_curvepoint50", new BasisPlatformDefault<float>(0.3f));
         public static BasisSettingsBinding<float> RACurvePoint75 = new("ra_curvepoint75", new BasisPlatformDefault<float>(0.1f));
@@ -1302,7 +1340,27 @@ namespace Basis.BasisUI
 
         // Listener Directional Dampening
         public static BasisSettingsBinding<float> RAListenerConeAngle = new("ra_listenerconeangle", new BasisPlatformDefault<float>(150f));
-        public static BasisSettingsBinding<float> RAListenerDampenAmount = new("ra_listenerdampenamount", new BasisPlatformDefault<float>(75f));
+        // 75 % is 12 dB, roughly 3x a real head+torso shadow, and steep enough
+        // (1.9 dB per 10 deg of head rotation) to read as a fader tracking your head.
+        // 60 % is the deepest cone whose leftover broadband term stays under the
+        // ~1.2 dB/10 deg audibility threshold once the head-shadow shelf takes its
+        // share. Key bumped so the change reaches installs that never touched it.
+        public static BasisSettingsBinding<float> RAListenerDampenAmount = new("ra_listenerdampenamount_v2", new BasisPlatformDefault<float>(60f));
+
+        /// <summary>
+        /// Distance past which a voice stops getting quieter — the critical distance
+        /// of the space, where a room's reverberant field matches the talker's direct
+        /// field. Inside it you get the full inverse distance law, which is the level
+        /// cue the old hand-drawn rolloff curve had almost entirely flattened out.
+        /// </summary>
+        public static BasisSettingsBinding<float> RAReverbDistance = new("ra_reverbdistance", new BasisPlatformDefault<float>(BasisVoiceAcoustics.DefaultReverberantDistance));
+
+        /// <summary>
+        /// Frequency-dependent spatial shaping: mouth directivity and listener head
+        /// shadow, applied per remote voice on the audio thread. Costs two one-pole
+        /// filters per audible speaker.
+        /// </summary>
+        public static BasisSettingsBinding<bool> RAVoiceToneShaping = new("ra_voicetoneshaping", new BasisPlatformDefault<bool>(true));
 
         // Steam Audio - Attenuation Input
         public static BasisSettingsBinding<string> RADistanceAttenuationInput = new("ra_distanceattenuationinput", new BasisPlatformDefault<string>("curve driven"));
@@ -1451,6 +1509,14 @@ namespace Basis.BasisUI
         public static BasisSettingsBinding<float> FBIKSpineGazeFollow = new("fbikspinegazefollow", new BasisPlatformDefault<float>(0.25f));
         // Extra forward neck curve on a look-down (no chest tracker). 0 = lordosis only.
         public static BasisSettingsBinding<float> FBIKNeckGazeFollow = new("fbikneckgazefollow", new BasisPlatformDefault<float>(0.3f));
+        // How much of a look-UP's lever swing to REMOVE, when the torso is estimated by re-attaching the T-pose
+        // head->neck lever to the head (BasisNeckCueCore -- both the FBIK neck cue and the virtual spine's neck
+        // bone). Swinging that lever by the WHOLE gaze assumes a nod pivots at the neck bone; cervical extension
+        // is short and a look-up is mostly thoracic arching, so the skull barely slides back and the estimated
+        // neck walks forward and up instead, and the chest chord strung under it follows. Removing 0.65 leaves a
+        // 0.35 carry, matching DesktopHeadSwingBackward -- the same physiology measured from the eye end. 0 = the
+        // old rigid re-attachment (a true off switch). Look-down and pure yaw are untouched at any value.
+        public static BasisSettingsBinding<float> FBIKNeckExtensionDamp = new("fbikneckextensiondamp", new BasisPlatformDefault<float>(0.65f));
         // Spine relax: crouch counterweight (hips shift back as the head drops)
         public static BasisSettingsBinding<float> FBIKMoveBodyBackWhenCrouching = new("fbikmovebodybackwhencrouching", new BasisPlatformDefault<float>(1f));
         // Postural counterbalance: how far the pelvis travels BACK as the trunk folds forward, as a fraction
@@ -1569,6 +1635,12 @@ namespace Basis.BasisUI
         public static BasisSettingsBinding<float> FBIKLordosisExtremeRollBackwardMaxDeg = new("fbiklordosisextremerollbackwardmaxdeg", new BasisPlatformDefault<float>(4f));
         public static BasisSettingsBinding<float> FBIKLordosisExtremeHipsHorizontalMax = new("fbiklordosisextremehipshorizontalmax", new BasisPlatformDefault<float>(0.025f));
         public static BasisSettingsBinding<float> FBIKLordosisExtremeChestHorizontalMax = new("fbiklordosisextremechesthorizontalmax", new BasisPlatformDefault<float>(0.04f));
+        // The look-UP half of the pair above. A deep look-down sits the whole body back; a deep look-up is an
+        // ARCH, and in an arch the pelvis leads and the sternum stays over or behind it -- so the chest gets a
+        // much smaller number than the hips here, where on the look-down side it gets a larger one. Mirroring
+        // the look-down values put the chest 4 cm in front of the hips' 2.5 cm, i.e. out in front of the body.
+        public static BasisSettingsBinding<float> FBIKLordosisExtremeHipsHorizontalLookUp = new("fbiklordosisextremehipshorizontallookup", new BasisPlatformDefault<float>(0.025f));
+        public static BasisSettingsBinding<float> FBIKLordosisExtremeChestHorizontalLookUp = new("fbiklordosisextremechesthorizontallookup", new BasisPlatformDefault<float>(0.010f));
         public static BasisSettingsBinding<float> FBIKLordosisExtremeHipsDownMax = new("fbiklordosisextremehipsdownmax", new BasisPlatformDefault<float>(0.015f));
         public static BasisSettingsBinding<float> FBIKLordosisExtremeChestDownMax = new("fbiklordosisextremechestdownmax", new BasisPlatformDefault<float>(0.025f));
         public static BasisSettingsBinding<float> FBIKLordosisExtremeHipsDownLookUp = new("fbiklordosisextremehipsdownlookup", new BasisPlatformDefault<float>(0.0005f));
@@ -1614,6 +1686,15 @@ namespace Basis.BasisUI
         // that persisted 0.02 pick the new default up. (The former VSpineHipsXZFollowBlend setting
         // was removed in favor of a hard-coded counterbalance/pendulum model in the virtual spine
         // driver — see BasisLocalVirtualSpineDriver.ComputeRealisticHipsXZ.)
+        // How much of the gaze-induced eye swing is removed before the pelvis stance leash sees it. The leash
+        // estimates WHERE THE USER IS STANDING and tracks the eye, which is the only yaw-invariant point -- but
+        // the eye is not PITCH-invariant: a head pitches about the base of the neck, so a look-up carries the
+        // HMD ~8 cm backward and a look-down carries it forward, with the feet planted. The leash follows fast
+        // enough to adopt that in about a frame, so the pelvis rode the gaze and walked out from under the
+        // player. 1 = remove the whole modelled swing and leash only real travel; 0 = the old behaviour.
+        // Uses DesktopHeadSwingBackward for the look-up share, so the VR and desktop halves of the same model
+        // cannot drift apart. If a deep look-DOWN starts feeling different, this is the number to turn down.
+        public static BasisSettingsBinding<float> VSpineGazeSwingRemoval = new("vspinegazeswingremoval", new BasisPlatformDefault<float>(1f));
         public static BasisSettingsBinding<float> VSpineHipsForwardBias = new("vspinehipsforwardbias_v2", new BasisPlatformDefault<float>(0f));
 
         // Spine compression: the synthesized hips Y is neck - rigid spine length, so lowering the head
@@ -1938,8 +2019,8 @@ namespace Basis.BasisUI
             UseVolumetricFogOverride.LoadBindingValue();
             VolumetricFogDensity.LoadBindingValue();
             VolumetricFogBakedAPV.LoadBindingValue();
-            UseRealtimeReflectionProbes.LoadBindingValue();
-            RealtimeReflectionProbeRate.LoadBindingValue();
+            //UseRealtimeReflectionProbes.LoadBindingValue();
+            //RealtimeReflectionProbeRate.LoadBindingValue();
             ShowGizmos.LoadBindingValue();
             GizmoSkeletonLines.LoadBindingValue();
             GizmoCalibrationSpheres.LoadBindingValue();
@@ -1955,6 +2036,8 @@ namespace Basis.BasisUI
             GizmoFingerTouch.LoadBindingValue();
             GizmoSeatTargets.LoadBindingValue();
             GizmoJiggleGrab.LoadBindingValue();
+            GizmoHandGrip.LoadBindingValue();
+            GizmoMouthEye.LoadBindingValue();
             GizmoAudioRanges.LoadBindingValue();
             GizmoAudioListenerCone.LoadBindingValue();
             GizmoAudioLevels.LoadBindingValue();
@@ -2042,6 +2125,8 @@ namespace Basis.BasisUI
             AvatarMeshLOD.LoadBindingValue();
             UseAvatarSkinLod.LoadBindingValue();
             UseAvatarShadowLod.LoadBindingValue();
+            UseAvatarVisibilityCull.LoadBindingValue();
+            UseGpuOcclusionCulling.LoadBindingValue();
             UseAvatarFarLod.LoadBindingValue();
             //AvatarFarLodDistance.LoadBindingValue();
             GlobalMeshLOD.LoadBindingValue();
@@ -2099,6 +2184,7 @@ namespace Basis.BasisUI
 
             // Device Swap Mode
             SwapMode.LoadBindingValue();
+            UsePresenceSensor.LoadBindingValue();
 
             // Notifications
             JoinNotifications.LoadBindingValue();
@@ -2136,8 +2222,8 @@ namespace Basis.BasisUI
             PhotoEmbedPersonDetails.LoadBindingValue();
 
             // Misc
-            FalseBinding.LoadBindingValue();
-            TrueBinding.LoadBindingValue();
+            //FalseBinding.LoadBindingValue();
+            //TrueBinding.LoadBindingValue();
             LimitThreshold.LoadBindingValue();
             LimitKnee.LoadBindingValue();
             DisableSeats.LoadBindingValue();
@@ -2386,6 +2472,7 @@ namespace Basis.BasisUI
             FBIKSpineSquishBoost.LoadBindingValue();
             FBIKSpineGazeFollow.LoadBindingValue();
             FBIKNeckGazeFollow.LoadBindingValue();
+            FBIKNeckExtensionDamp.LoadBindingValue();
             FBIKMoveBodyBackWhenCrouching.LoadBindingValue();
             FBIKTrunkCounterbalance.LoadBindingValue();
             FBIKSwingSmoothRate.LoadBindingValue();
@@ -2419,6 +2506,8 @@ namespace Basis.BasisUI
             FBIKLordosisExtremeRollBackwardMaxDeg.LoadBindingValue();
             FBIKLordosisExtremeHipsHorizontalMax.LoadBindingValue();
             FBIKLordosisExtremeChestHorizontalMax.LoadBindingValue();
+            FBIKLordosisExtremeHipsHorizontalLookUp.LoadBindingValue();
+            FBIKLordosisExtremeChestHorizontalLookUp.LoadBindingValue();
             FBIKLordosisExtremeHipsDownMax.LoadBindingValue();
             FBIKLordosisExtremeChestDownMax.LoadBindingValue();
             FBIKLordosisExtremeHipsDownLookUp.LoadBindingValue();
@@ -2432,6 +2521,7 @@ namespace Basis.BasisUI
             VSpineSpineRotationSpeed.LoadBindingValue();
             VSpineHipsRotationSpeed.LoadBindingValue();
             VSpineHipsForwardBias.LoadBindingValue();
+            VSpineGazeSwingRemoval.LoadBindingValue();
             VSpineHipsCompressionStrength.LoadBindingValue();
             VSpineHipsMaxDropMeters.LoadBindingValue();
             VSpinePostureModel.LoadBindingValue();
@@ -2507,6 +2597,8 @@ namespace Basis.BasisUI
             RAApplyHRTFToReflections.LoadBindingValue();
             RAJitterBufferDepth.LoadBindingValue();
             RAClipBufferScalar.LoadBindingValue();
+            RAReverbDistance.LoadBindingValue();
+            RAVoiceToneShaping.LoadBindingValue();
 
             // UI Style Palette
             UIPaletteBG1.LoadBindingValue();
@@ -2548,6 +2640,10 @@ namespace Basis.BasisUI
             RaycastLineColor.LoadBindingValue();
             HighlightColor.LoadBindingValue();
             PickupLineColor.LoadBindingValue();
+
+            // Holds its binding privately (JSON blob, not a plain primitive) — reload
+            // through its own accessor so a pre-load touch can't pin the default blocklist.
+            Basis.Scripts.Avatar.BasisContentTagFilter.ReloadBinding();
 
             // Subscribers that read RawValue (Apply* in OnSettingsFinishedChanges)
             // ran during Initialize before bindings were refreshed from the file —

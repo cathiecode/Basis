@@ -555,7 +555,7 @@ public static class BasisRemoteNetworkDriver
 
     /// <summary>
     /// Overrides the filtered hips world position and rotation for a player so that
-    /// the combined BulkCopyHipsAndDeriveJob (and thus ApplyRootJob /
+    /// the combined BulkCopyHipsAndDeriveJob (and thus ApplyRootAndScaleJob /
     /// ApplyHipsWorldJob) pick up the override instead of the interpolated network
     /// data. Position/Rotation in the pipeline are hips world (not root world) —
     /// the override therefore teleports the visually anchored hips, and root is
@@ -633,6 +633,15 @@ public static class BasisRemoteNetworkDriver
     /// and composes them with cached T-pose locals into final localRotations in one pass.
     /// Iterates the flat [player0_bone0..bone(N-1), player1_bone0..] layout, so index →
     /// (playerIdx, boneIdx) is a divmod by BoneCount.
+    ///
+    /// Also decides, per bone, whether the transform needs writing at all: the composed rotation
+    /// is compared against the last value handed to that transform, and only a real change sets
+    /// WriteMask. The compare is far cheaper than the write it guards — a localRotation write
+    /// dirties the bone's whole subtree and feeds TransformChangeDispatch — and on a populated
+    /// instance most bones are bit-identical frame to frame: PoseLOD-skipped players hold their
+    /// filtered pose verbatim (see InterpolateBoneRotationsJob), fingers of players without hand
+    /// tracking sit at the identity delta, and a settled one-pole filter reproduces its own
+    /// output exactly. ValidMask is folded in here too, so the apply pass reads one array.
     /// </summary>
     [BurstCompile]
     struct ComputeSkeletonRotationsFromNetworkJob : IJobParallelFor
@@ -640,7 +649,13 @@ public static class BasisRemoteNetworkDriver
         [ReadOnly] public NativeArray<int> PlayerKeys;
         [ReadOnly, NativeDisableContainerSafetyRestriction] public NativeArray<quaternion> SrcBoneRotations;
         [ReadOnly] public NativeArray<quaternion> TposeLocal;
+        [ReadOnly] public NativeArray<byte> ValidMask;
         [WriteOnly] public NativeArray<quaternion> Rotations;
+        /// <summary>Last rotation given to each bone transform. Seeded to (0,0,0,0), which is a
+        /// distance of ~1 from any unit quaternion, so a fresh or re-pointed slot always writes
+        /// on its first frame.</summary>
+        public NativeArray<quaternion> LastWritten;
+        [WriteOnly] public NativeArray<byte> WriteMask;
         public int BoneCount;
         public int CapacityFixed;
 
@@ -654,7 +669,18 @@ public static class BasisRemoteNetworkDriver
                 ? SrcBoneRotations[playerKey * BoneCount + boneIdx]
                 : quaternion.identity;
 
-            Rotations[index] = math.mul(TposeLocal[index], delta);
+            quaternion q = math.mul(TposeLocal[index], delta);
+            Rotations[index] = q;
+
+            // Bit-exact on purpose, so the skip is provably behaviour-identical rather than a
+            // (small) quality tradeoff. An epsilon would buy almost nothing anyway: the cases that
+            // actually repeat are bit-identical — a PoseLOD-held value is the same float4 verbatim,
+            // an identity delta composes to the same T-pose local every frame, and a converged
+            // one-pole reproduces its own output. Anything genuinely in motion differs by far more
+            // than the last ULP, so it still writes.
+            bool write = ValidMask[index] != 0 && math.any(q.value != LastWritten[index].value);
+            WriteMask[index] = write ? (byte)1 : (byte)0;
+            if (write) LastWritten[index] = q;
         }
     }
 
@@ -711,7 +737,8 @@ public static class BasisRemoteNetworkDriver
     /// </summary>
     public static JobHandle ScheduleComputeSkeletonRotations(
         NativeArray<int> playerKeys, int totalBones, int boneCount,
-        NativeArray<quaternion> tposeLocal, NativeArray<quaternion> rotations,
+        NativeArray<quaternion> tposeLocal, NativeArray<byte> validMask,
+        NativeArray<quaternion> rotations, NativeArray<quaternion> lastWritten, NativeArray<byte> writeMask,
         int batch, JobHandle deps = default)
     {
         if (!_initialized || totalBones == 0) return deps;
@@ -721,7 +748,10 @@ public static class BasisRemoteNetworkDriver
             PlayerKeys = playerKeys,
             SrcBoneRotations = _outBoneRotations,
             TposeLocal = tposeLocal,
+            ValidMask = validMask,
             Rotations = rotations,
+            LastWritten = lastWritten,
+            WriteMask = writeMask,
             BoneCount = boneCount,
             CapacityFixed = FixedCapacity,
         }.Schedule(totalBones, batch, deps);

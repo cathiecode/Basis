@@ -27,6 +27,54 @@
       "value": "Camera"
     },
     {
+      "key": "camera.modePreset",
+      "value": "Mode"
+    },
+    {
+      "key": "camera.modePreset.description",
+      "value": "What this camera is for. Picking a mode sets it up for that job and colours each section below: brightly for settings the mode chose, dimly for ones that do nothing here. Change anything and the mode becomes Custom — nothing is ever locked."
+    },
+    {
+      "key": "camera.modePreset.custom",
+      "value": "Custom"
+    },
+    {
+      "key": "camera.modePreset.custom.description",
+      "value": "Your own setup. Shown whenever the settings no longer match a mode, so it is not something you switch to — it is where you end up once you start tuning. Pick a mode to go back to a known starting point."
+    },
+    {
+      "key": "camera.modePreset.photo",
+      "value": "Photo"
+    },
+    {
+      "key": "camera.modePreset.photo.description",
+      "value": "The ordinary handheld camera, set up exactly as it ships. Stays in your hand, normal lens, no effects added. The follow and cinematic sections do nothing in this mode."
+    },
+    {
+      "key": "camera.modePreset.flyingPuck",
+      "value": "Flying Puck"
+    },
+    {
+      "key": "camera.modePreset.flyingPuck.description",
+      "value": "Streaming. The camera parks in the world and you fly it by hand — levelled, stabilised, wide enough to hold a room, and deep-focus so nothing on screen goes soft."
+    },
+    {
+      "key": "camera.modePreset.followMe",
+      "value": "Follow Me"
+    },
+    {
+      "key": "camera.modePreset.followMe.description",
+      "value": "The camera flies itself and keeps you in frame, staying focused on you as you move. Use the Follow section to place it around you and to point it at someone else instead."
+    },
+    {
+      "key": "camera.modePreset.cinematic",
+      "value": "Cinematic"
+    },
+    {
+      "key": "camera.modePreset.cinematic.description",
+      "value": "The shot rig drives the camera along your dolly, orbit and framing moves. A longer lens, shallower focus and a little motion blur for the filmic look. Follow does nothing here — the rig owns where the camera goes."
+    },
+    {
       "key": "camera.noCamerasOpen",
       "value": "No Cameras Open"
     },
@@ -815,6 +863,14 @@
       "value": "Show live jiggle grabs: the held bone, where it is being pulled to, that bone's reach limit, and the pick spheres your hands search when you press grab."
     },
     {
+      "key": "settings.developer.handGrip.tooltip",
+      "value": "Show the hand frame held objects weld to, on your hands and everyone else's: the palm point an object seats onto, the frame's axes, and the offset out from the wrist bone. Hands whose avatar has no finger bones are marked WRIST — those fall back to the rig's own bind pose and cannot reproduce another player's grip exactly."
+    },
+    {
+      "key": "settings.developer.mouthEye.tooltip",
+      "value": "Show the eye and mouth anchors on your avatar and everyone else's: where each one sits, the forward that decides who you look at and where a voice comes from, and the offset back to the head. An anchor that has drifted off the face turns red and prints how far out it is."
+    },
+    {
       "key": "settings.developer.audioRanges.tooltip",
       "value": "Show your hearing-distance sphere and each speaker's full-volume range."
     },
@@ -1257,6 +1313,14 @@
     {
       "key": "settings.bodyTracking.lordosisExtremeHipsHoriz.title.tooltip",
       "value": "Sideways hip shift allowed during extreme back curves."
+    },
+    {
+      "key": "settings.bodyTracking.lordosisExtremeHipsHorizLookUp.title.tooltip",
+      "value": "Maximum forward hips shift at a full look UP, in meters. In an arch the pelvis leads. Default: 0.025"
+    },
+    {
+      "key": "settings.bodyTracking.lordosisExtremeChestHorizLookUp.title.tooltip",
+      "value": "Maximum forward chest shift at a full look UP, in meters. Kept well under the hips value so the chest does not lead the body. Default: 0.01"
     },
     {
       "key": "settings.bodyTracking.lordosisExtremeChestHoriz.title.tooltip",
@@ -3889,6 +3953,162 @@
     {
       "key": "library.bonesCount",
       "value": "Bones Count"
+    },
+    {
+      "key": "library.details",
+      "value": "{0} Statistics"
+    },
+    {
+      "key": "library.details.tooltip",
+      "value": "Open a full breakdown of this item's metadata and components."
+    },
+    {
+      "key": "library.dialog.details.body",
+      "value": "Everything stored about this item."
+    },
+    {
+      "key": "library.dialog.details.noMetadata",
+      "value": "This item carries no bundle metadata."
+    },
+    {
+      "key": "library.dialog.details.section.content",
+      "value": "Content"
+    },
+    {
+      "key": "library.dialog.details.section.metrics",
+      "value": "Metrics"
+    },
+    {
+      "key": "library.dialog.details.section.bounds",
+      "value": "Bounds"
+    },
+    {
+      "key": "library.dialog.details.section.bounds.description",
+      "value": "Size measured when the item was built, in meters."
+    },
+    {
+      "key": "library.dialog.details.section.components",
+      "value": "Components"
+    },
+    {
+      "key": "library.dialog.details.section.components.description",
+      "value": "{0} kinds, {1} in total."
+    },
+    {
+      "key": "library.dialog.details.section.components.none",
+      "value": "This item was built before component metadata existed."
+    },
+    {
+      "key": "library.dialog.details.section.propSpawn",
+      "value": "Spawn Request"
+    },
+    {
+      "key": "library.dialog.details.section.propSpawn.description",
+      "value": "How this prop asks to be placed when spawned."
+    },
+    {
+      "key": "library.dialog.details.section.platform.description",
+      "value": "Bundle section stored for this platform."
+    },
+    {
+      "key": "library.dialog.details.name",
+      "value": "Name"
+    },
+    {
+      "key": "library.dialog.details.description",
+      "value": "Description"
+    },
+    {
+      "key": "library.dialog.details.contentType",
+      "value": "Content Type"
+    },
+    {
+      "key": "library.dialog.details.tags",
+      "value": "Tags"
+    },
+    {
+      "key": "library.dialog.details.contentGroup",
+      "value": "Content Group"
+    },
+    {
+      "key": "library.dialog.details.uniqueVersion",
+      "value": "Unique Version"
+    },
+    {
+      "key": "library.dialog.details.textureMemory",
+      "value": "Texture Memory"
+    },
+    {
+      "key": "library.dialog.details.graphicsPipeline",
+      "value": "Render Pipeline"
+    },
+    {
+      "key": "library.dialog.details.farLod",
+      "value": "Far LOD"
+    },
+    {
+      "key": "library.dialog.details.boundsCenter",
+      "value": "Center"
+    },
+    {
+      "key": "library.dialog.details.boundsSize",
+      "value": "Size"
+    },
+    {
+      "key": "library.dialog.details.boundsExtents",
+      "value": "Extents"
+    },
+    {
+      "key": "library.dialog.details.assetMode",
+      "value": "Asset Mode"
+    },
+    {
+      "key": "library.dialog.details.assetName",
+      "value": "Asset Name"
+    },
+    {
+      "key": "library.dialog.details.size",
+      "value": "Download Size"
+    },
+    {
+      "key": "library.dialog.details.encrypted",
+      "value": "Encrypted"
+    },
+    {
+      "key": "library.dialog.details.crc",
+      "value": "CRC"
+    },
+    {
+      "key": "library.dialog.details.hash",
+      "value": "Hash"
+    },
+    {
+      "key": "library.dialog.details.graphicsAPIs",
+      "value": "Graphics APIs"
+    },
+    {
+      "key": "library.dialog.details.hand",
+      "value": "Hand"
+    },
+    {
+      "key": "library.dialog.details.distance",
+      "value": "Distance"
+    },
+    {
+      "key": "library.dialog.details.scale",
+      "value": "Scale"
+    },
+    {
+      "key": "library.dialog.details.alignToSurface",
+      "value": "Align To Surface"
+    },
+    {
+      "key": "library.dialog.details.faceThePlayer",
+      "value": "Face The Player"
+    },
+    {
+      "key": "library.dialog.details.none",
+      "value": "(none)"
     },
     {
       "key": "library.uniqueVersion",
@@ -6803,6 +7023,22 @@
       "value": "Maximum horizontal chest counter-shift at full extreme look, in meters. Default: 0.04"
     },
     {
+      "key": "settings.bodyTracking.lordosisExtremeHipsHorizLookUp.title",
+      "value": "Lordosis Extreme Hips Shift, Look Up (m)"
+    },
+    {
+      "key": "settings.bodyTracking.lordosisExtremeHipsHorizLookUp.description",
+      "value": "Maximum forward hips shift at a full look UP, in meters. In an arch the pelvis leads. Default: 0.025"
+    },
+    {
+      "key": "settings.bodyTracking.lordosisExtremeChestHorizLookUp.title",
+      "value": "Lordosis Extreme Chest Shift, Look Up (m)"
+    },
+    {
+      "key": "settings.bodyTracking.lordosisExtremeChestHorizLookUp.description",
+      "value": "Maximum forward chest shift at a full look UP, in meters. Kept well under the hips value so the chest does not lead the body. Default: 0.01"
+    },
+    {
       "key": "settings.bodyTracking.lordosisExtremeHipsDown.title",
       "value": "Lordosis Extreme Hips Drop (m)"
     },
@@ -7375,6 +7611,14 @@
       "value": "VR Runtime"
     },
     {
+      "key": "settings.platform.usePresenceSensor",
+      "value": "Use Presence Sensor"
+    },
+    {
+      "key": "settings.platform.usePresenceSensor.tooltip",
+      "value": "Let the headset's presence sensor swap you between VR and Desktop when you put it on or take it off. Turn this off if your headset reports presence incorrectly — you can still switch modes manually."
+    },
+    {
       "key": "settings.platform.switchTo",
       "value": "Switch To {0}"
     },
@@ -7393,6 +7637,54 @@
     {
       "key": "settings.platform.swapMode.dropdown.description",
       "value": "Shutdown Runtime: full XR restart on swap.\nAuto Swap: automatically swap based on headset presence."
+    },
+    {
+      "key": "settings.platform.mode.desktop",
+      "value": "Desktop"
+    },
+    {
+      "key": "settings.platform.mode.openvr",
+      "value": "OpenVR (SteamVR)"
+    },
+    {
+      "key": "settings.platform.mode.openxr",
+      "value": "OpenXR"
+    },
+    {
+      "key": "settings.platform.vrFailed.title",
+      "value": "VR Runtime Unavailable"
+    },
+    {
+      "key": "settings.platform.vrFailed.body",
+      "value": "{0} could not start.\n\n{2}\n\nContinuing in {1}."
+    },
+    {
+      "key": "settings.platform.vrFailed.noRuntime",
+      "value": "No XR runtime accepted the request. The headset software may not be installed, may not be running, or may not support the graphics API this build uses."
+    },
+    {
+      "key": "settings.platform.vrFailed.noPlugin",
+      "value": "This build does not include that XR plug-in."
+    },
+    {
+      "key": "settings.platform.vrFailed.steamvr",
+      "value": "SteamVR did not finish initializing."
+    },
+    {
+      "key": "settings.platform.vrSubstituted.title",
+      "value": "Started A Different VR Runtime"
+    },
+    {
+      "key": "settings.platform.vrSubstituted.body",
+      "value": "{0} could not start, so {1} was started instead.\n\nRestart Basis to try {0} again."
+    },
+    {
+      "key": "settings.platform.vrBlocked.title",
+      "value": "Cannot Switch VR Runtime"
+    },
+    {
+      "key": "settings.platform.otherRuntimeLive",
+      "value": "{0} is already running. Restart Basis to use {1} instead."
     },
     {
       "key": "settings.remoteAudio.remotePlayers",
@@ -7733,6 +8025,14 @@
     {
       "key": "settings.developer.jiggleGrab",
       "value": "Jiggle Grab"
+    },
+    {
+      "key": "settings.developer.handGrip",
+      "value": "Hand Grip Frame"
+    },
+    {
+      "key": "settings.developer.mouthEye",
+      "value": "Mouth & Eye Anchors"
     },
     {
       "key": "settings.developer.audioRanges",
@@ -9799,6 +10099,42 @@
       "value": "Reduce shadow detail on distant avatars."
     },
     {
+      "key": "settings.graphics.avatarVisibilityCull",
+      "value": "Avatar Visibility Culling"
+    },
+    {
+      "key": "settings.graphics.avatarVisibilityCull.tooltip",
+      "value": "Skip drawing avatars that no camera can see. Only applies to avatars already far enough away to have their shadows disabled."
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling",
+      "value": "GPU Occlusion Culling"
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling.tooltip",
+      "value": "Let the GPU skip world geometry hidden behind other geometry. Trades a little GPU time on the occlusion test for the draws it removes, so it wins in dense worlds and loses in open ones. World meshes only — avatars are not covered. Applies on restart."
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling.restart",
+      "value": "GPU Occlusion Culling (restart required)"
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling.restart.title",
+      "value": "Restart Required"
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling.restart.prompt",
+      "value": "GPU occlusion culling is set up when Basis starts. Restart and reconnect now to apply it?"
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling.restart.now",
+      "value": "Restart Now"
+    },
+    {
+      "key": "settings.graphics.gpuOcclusionCulling.restart.later",
+      "value": "Later"
+    },
+    {
       "key": "settings.microphone.mode.onActivation",
       "value": "On Activation"
     },
@@ -9965,6 +10301,30 @@
     {
       "key": "settings.remoteAudio.curve.default",
       "value": "Default"
+    },
+    {
+      "key": "settings.remoteAudio.curve.natural",
+      "value": "Natural"
+    },
+    {
+      "key": "settings.remoteAudio.curve.legacy",
+      "value": "Legacy"
+    },
+    {
+      "key": "settings.remoteAudio.reverbDistance",
+      "value": "Reverberant Distance"
+    },
+    {
+      "key": "settings.remoteAudio.reverbDistance.tooltip",
+      "value": "Distance past which voices stop getting quieter. Closer than this, level follows the real inverse distance law; beyond it, a room's reflected sound takes over and level flattens out. Smaller values feel like a small, dry room; larger values carry voices further."
+    },
+    {
+      "key": "settings.remoteAudio.toneShaping",
+      "value": "Natural Tone Shaping"
+    },
+    {
+      "key": "settings.remoteAudio.toneShaping.tooltip",
+      "value": "Makes voices change tone, not just volume, with direction. A player facing away sounds muffled the way a real person does, and someone behind you sounds shadowed by your own head instead of simply turned down."
     },
     {
       "key": "settings.remoteAudio.curve.sharp",
@@ -10303,6 +10663,30 @@
       "value": "How much the neck turns toward where you are looking."
     },
     {
+      "key": "settings.bodyTracking.vspineGazeSwingRemoval.title",
+      "value": "Ignore Gaze Swing For Stance"
+    },
+    {
+      "key": "settings.bodyTracking.vspineGazeSwingRemoval.title.tooltip",
+      "value": "How much of the headset movement caused by simply looking up or down is ignored when deciding where you are standing. Higher keeps the hips under you instead of walking backwards when you look up. 0 restores the old behaviour. Default: 1"
+    },
+    {
+      "key": "settings.bodyTracking.vspineGazeSwingRemoval.description",
+      "value": "How much of the headset movement caused by simply looking up or down is ignored when deciding where you are standing. Higher keeps the hips under you instead of walking backwards when you look up. 0 restores the old behaviour. Default: 1"
+    },
+    {
+      "key": "settings.bodyTracking.neckExtensionDamp.title",
+      "value": "Look-Up Neck Damping"
+    },
+    {
+      "key": "settings.bodyTracking.neckExtensionDamp.title.tooltip",
+      "value": "How much of a look-up the neck is assumed NOT to carry. Higher keeps the chest and hips from drifting forward when you look at the ceiling. 0 restores the old behaviour. Default: 0.65"
+    },
+    {
+      "key": "settings.bodyTracking.neckExtensionDamp.description",
+      "value": "How much of a look-up the neck is assumed NOT to carry. Higher keeps the chest and hips from drifting forward when you look at the ceiling. 0 restores the old behaviour. Default: 0.65"
+    },
+    {
       "key": "settings.bodyTracking.neckGazeFollowMax.title",
       "value": "Neck Gaze Limit"
     },
@@ -10577,6 +10961,18 @@
     {
       "key": "settings.admin.title.lockPropGrabbing.description",
       "value": "Stops non-admin players from picking up or grabbing props. Separate from the prop lock above, which blocks loading new props rather than handling ones already spawned. Admins are unaffected."
+    },
+    {
+      "key": "settings.admin.title.safeDisplayNames",
+      "value": "Safe Display Names"
+    },
+    {
+      "key": "settings.admin.title.safeDisplayNames.tooltip",
+      "value": "Show other players' names as plain text, stripping rich-text formatting. Applies to everyone, including admins."
+    },
+    {
+      "key": "settings.admin.title.safeDisplayNames.description",
+      "value": "Renders every player's name as plain text, removing rich-text tags such as size, colour and offset. Turn this on if names are being used to draw over your view. Applies to everyone, including admins, since it controls what you are shown rather than what others may do."
     },
     {
       "key": "settings.admin.minAvatarHeight",
@@ -11847,6 +12243,258 @@
     {
       "key": "settings.admin.playerOpusBitrate.clear.tooltip",
       "value": "Drop the override and return the player to the server-wide bitrate."
+    },
+    {
+      "key": "settings.admin.confirm.ban.body",
+      "value": "Ban the player with this UUID? This may be irreversible depending on server policy."
+    },
+    {
+      "key": "settings.admin.confirm.ban.confirm",
+      "value": "Ban"
+    },
+    {
+      "key": "settings.admin.confirm.ban.title",
+      "value": "Ban player?"
+    },
+    {
+      "key": "settings.admin.confirm.bitrateApply.body",
+      "value": "Force the selected player's Opus encoder to this bitrate for the rest of the session?"
+    },
+    {
+      "key": "settings.admin.confirm.bitrateApply.confirm",
+      "value": "Override"
+    },
+    {
+      "key": "settings.admin.confirm.bitrateApply.title",
+      "value": "Override this player's voice bitrate?"
+    },
+    {
+      "key": "settings.admin.confirm.bitrateClear.body",
+      "value": "Return the selected player to the server-wide bitrate?"
+    },
+    {
+      "key": "settings.admin.confirm.bitrateClear.confirm",
+      "value": "Clear"
+    },
+    {
+      "key": "settings.admin.confirm.bitrateClear.title",
+      "value": "Clear the bitrate override?"
+    },
+    {
+      "key": "settings.admin.confirm.fullQualityDisable.body",
+      "value": "Return this player to the normal distance reduction system?"
+    },
+    {
+      "key": "settings.admin.confirm.fullQualityDisable.confirm",
+      "value": "Disable"
+    },
+    {
+      "key": "settings.admin.confirm.fullQualityDisable.title",
+      "value": "Disable full-quality broadcast?"
+    },
+    {
+      "key": "settings.admin.confirm.fullQualityEnable.body",
+      "value": "Send this player's full-quality avatar data to everyone, bypassing the distance reduction system? Uses more bandwidth."
+    },
+    {
+      "key": "settings.admin.confirm.fullQualityEnable.confirm",
+      "value": "Enable"
+    },
+    {
+      "key": "settings.admin.confirm.fullQualityEnable.title",
+      "value": "Enable full-quality broadcast?"
+    },
+    {
+      "key": "settings.admin.confirm.ipBan.body",
+      "value": "IP-ban the player with this UUID? This can affect multiple accounts on the same connection."
+    },
+    {
+      "key": "settings.admin.confirm.ipBan.confirm",
+      "value": "IP Ban"
+    },
+    {
+      "key": "settings.admin.confirm.ipBan.title",
+      "value": "IP ban player?"
+    },
+    {
+      "key": "settings.admin.confirm.kick.body",
+      "value": "Kick the player with this UUID?"
+    },
+    {
+      "key": "settings.admin.confirm.kick.confirm",
+      "value": "Kick"
+    },
+    {
+      "key": "settings.admin.confirm.kick.title",
+      "value": "Kick player?"
+    },
+    {
+      "key": "settings.admin.confirm.sendAll.body",
+      "value": "Send this message to ALL players?"
+    },
+    {
+      "key": "settings.admin.confirm.sendAll.confirm",
+      "value": "Broadcast"
+    },
+    {
+      "key": "settings.admin.confirm.sendAll.title",
+      "value": "Broadcast message?"
+    },
+    {
+      "key": "settings.admin.confirm.sendMessage.body",
+      "value": "Send this message to the target player?"
+    },
+    {
+      "key": "settings.admin.confirm.sendMessage.confirm",
+      "value": "Send"
+    },
+    {
+      "key": "settings.admin.confirm.sendMessage.title",
+      "value": "Send message?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutDisable.body",
+      "value": "Disable non-spatialized broadcast voice for this player?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutDisable.confirm",
+      "value": "Disable"
+    },
+    {
+      "key": "settings.admin.confirm.shoutDisable.title",
+      "value": "Disable shout mode?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutEnable.body",
+      "value": "Enable non-spatialized broadcast voice for this player?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutEnable.confirm",
+      "value": "Enable"
+    },
+    {
+      "key": "settings.admin.confirm.shoutEnable.title",
+      "value": "Enable shout mode?"
+    },
+    {
+      "key": "settings.admin.confirm.teleportAll.body",
+      "value": "This will teleport ALL players to the selected target's location. Continue?"
+    },
+    {
+      "key": "settings.admin.confirm.teleportAll.confirm",
+      "value": "Teleport"
+    },
+    {
+      "key": "settings.admin.confirm.teleportAll.title",
+      "value": "Teleport everyone?"
+    },
+    {
+      "key": "settings.admin.confirm.teleportHere.body",
+      "value": "Teleport the selected player to your location?"
+    },
+    {
+      "key": "settings.admin.confirm.teleportHere.confirm",
+      "value": "Teleport"
+    },
+    {
+      "key": "settings.admin.confirm.teleportHere.title",
+      "value": "Teleport player to you?"
+    },
+    {
+      "key": "settings.admin.confirm.teleportTo.body",
+      "value": "Teleport you to the selected player's location?"
+    },
+    {
+      "key": "settings.admin.confirm.teleportTo.confirm",
+      "value": "Teleport"
+    },
+    {
+      "key": "settings.admin.confirm.teleportTo.title",
+      "value": "Teleport to player?"
+    },
+    {
+      "key": "settings.admin.confirm.unIpBan.body",
+      "value": "Lift the IP ban recorded for this UUID? Every account banned on that address is unbanned."
+    },
+    {
+      "key": "settings.admin.confirm.unIpBan.confirm",
+      "value": "Remove IP Ban"
+    },
+    {
+      "key": "settings.admin.confirm.unIpBan.title",
+      "value": "Remove IP ban?"
+    },
+    {
+      "key": "settings.admin.confirm.unban.body",
+      "value": "Remove the ban for this UUID?"
+    },
+    {
+      "key": "settings.admin.confirm.unban.confirm",
+      "value": "Unban"
+    },
+    {
+      "key": "settings.admin.confirm.unban.title",
+      "value": "Unban player?"
+    },
+    {
+      "key": "settings.remoteAudio.bufferedFrames.description",
+      "value": "Each frame is 20 ms. 1 = ~20 ms (default, low latency, more dropouts).\n5 = ~100 ms. 15 = ~300 ms (max resilience)."
+    },
+    {
+      "key": "settings.remoteAudio.clipBuffer.description",
+      "value": "Multiplier on the per-player AudioClip length used by Unity's AudioSource.\nLower = tighter coupling to the decoded queue (less latency, more sensitive\nto underruns). Default: 2. Live audio sources reload in place when changed."
+    },
+    {
+      "key": "settings.remoteAudio.lipSyncSlots.description",
+      "value": "Number of concurrent OpenLipSync (neural viseme) instances.\nHigher = better lip sync on more players, but more CPU.\nDefault: 30. Players beyond this get no visemes until a slot frees up."
+    },
+    {
+      "key": "settings.slimevr.fullReset",
+      "value": "Full Reset"
+    },
+    {
+      "key": "settings.slimevr.fullReset.description",
+      "value": "Full reset — stand straight during the countdown."
+    },
+    {
+      "key": "settings.slimevr.poseCountdown",
+      "value": "Pose Countdown"
+    },
+    {
+      "key": "settings.slimevr.poseCountdown.description",
+      "value": "Seconds the buttons below give you to get into pose before they fire. 0 fires instantly."
+    },
+    {
+      "key": "settings.slimevr.recalibrate",
+      "value": "Recalibrate Full Body"
+    },
+    {
+      "key": "settings.slimevr.recalibrate.description",
+      "value": "Recapture tracker offsets — stand straight during the countdown."
+    },
+    {
+      "key": "settings.slimevr.trackerSource.auto",
+      "value": "Auto (fallback)"
+    },
+    {
+      "key": "settings.slimevr.trackerSource.force",
+      "value": "Force (override)"
+    },
+    {
+      "key": "settings.slimevr.trackerSource.off",
+      "value": "Off"
+    },
+    {
+      "key": "settings.slimevr.yawReset",
+      "value": "Yaw Reset"
+    },
+    {
+      "key": "settings.slimevr.yawReset.description",
+      "value": "Straighten the trackers. Fires after the pose countdown."
+    },
+    {
+      "key": "menu.individualPlayer.uuid",
+      "value": "UUID"
     }
   ]
 }

@@ -714,9 +714,10 @@ namespace Basis.BasisUI
 
                 Bools(BasisSettingsDefaults.UseAvatarSkinLod, true, true, true),
                 Bools(BasisSettingsDefaults.UseAvatarShadowLod, true, true, true),
+                Bools(BasisSettingsDefaults.UseAvatarVisibilityCull, true, true, true),
                 Bools(BasisSettingsDefaults.UseAvatarFarLod, true, true, true),
 
-                Bools(BasisSettingsDefaults.UseRealtimeReflectionProbes, false, false, false),
+                //Bools(BasisSettingsDefaults.UseRealtimeReflectionProbes, false, false, false), // commented out 2026-08-04 with the unimplemented probe-driver bindings
                 Bools(BasisSettingsDefaults.LimitHandHeldCameraRate, true, true, true),
                 Bools(BasisSettingsDefaults.LimitAvatarPreviewRate, true, true, true),
                 Bools(BasisSettingsDefaults.LocalHeadBlendShapes, null, false, false),

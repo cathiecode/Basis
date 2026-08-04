@@ -250,6 +250,13 @@ namespace Basis.EventDriver
                 using (Prof.VisemeSimulate.Auto())
                 {
                     BasisLocalPlayer.Instance.LocalVisemeDriver.Simulate(DeltaTime);
+
+                    // Dispatch here rather than leaving it to the remote-audio stage further
+                    // down: that stage runs AFTER the local viseme Apply, so the local mouth
+                    // could never pick up work queued in the same frame and was permanently a
+                    // frame behind the mic. The batch task drains anything the remote stage
+                    // adds later, so starting early costs the remote players nothing.
+                    BasisOpenLipSyncContext.ProcessAllPending();
                 }
             }
             // Drain everything that arrived from worker threads
@@ -581,6 +588,17 @@ namespace Basis.EventDriver
             }
             BasisFiniteWatchdog.CheckpointRemote("PostRemoteBoneJobs (skeleton / hips / mouth / nameplate write)");
 
+            // The beacon reads a remote MouthTransform's world position on the main thread, so it
+            // has to sit in the one window where that hierarchy carries no in-flight job: the mouth
+            // pose is final as of the join above, and the schedule cluster below re-covers remote
+            // hierarchies (face eye-write, nameplate, billboard) until their completes late in the
+            // frame. Downstream of those it also landed after the jiggle pose dispatch, where the
+            // read stalled on the pose jobs for as long as a player stayed highlighted.
+            using (Prof.SimulateBeacon.Auto())
+            {
+                IndividualPlayerProvider.SimulateBeacon(DeltaTime);
+            }
+
             // Finger apply + eye schedule run inside the solve window: the head is the solve's
             // INPUT (head-pinned), and the eye driver reads only the render-latched camera statics
             // plus remote gaze-target positions (remote bones joined just above) — never the solved
@@ -679,6 +697,21 @@ namespace Basis.EventDriver
                 // ready its previously scheduled transform jobs would otherwise stay in
                 // flight across frames, with remote pucks free to be destroyed under them.
                 BasisNetworkPIPCameraDriver.CompletePending();
+            }
+
+            // ── Transmit range/distance schedule ──
+            // The transmit tick's distance/reduce/avatar-cap/audio-cap/dampen chain is kicked here
+            // and joined down in the AfterAvatarChanges block. Its inputs are final as of this
+            // line — remote mouth positions came off the bone job join above, the head position
+            // and gaze off the camera simulate immediately preceding — and nothing between here
+            // and the join reads the range/LOD arrays it writes, so the chain runs through the
+            // SteamAudio schedule, remote audio apply, blendshape read, authored motion,
+            // constraints and the jiggle prepare instead of being fenced a few microseconds
+            // after it was scheduled.
+            using (Prof.TransmitSchedule.Auto())
+            {
+                try { BasisNetworkTransmitter.ScheduleTransmitJobs?.Invoke(); }
+                catch (Exception ex) { BasisDebug.LogErrorOnce($"ScheduleTransmitJobs failed: {ex}", BasisDebug.LogTag.Event); }
             }
 
 #if STEAMAUDIO_ENABLED
@@ -855,6 +888,20 @@ namespace Basis.EventDriver
             // Touch reporting reads the same posed bones. Returns on a count check when no content
             // has asked for jiggle events, which is the usual case.
             Basis.Scripts.BasisSdk.Interactions.BasisJiggleInteractionEvents.FrameTick();
+            // Avatar visibility schedules here and is joined at the LateUpdate tail. Bounds come off
+            // the avatar roots through a TransformAccessArray job, so the main thread only packs the
+            // camera frusta; this is the earliest that transform job can go — it needs the same
+            // free-of-in-flight-transform-jobs window as the frame sync above — and the join is the
+            // latest point still ahead of every Application.onBeforeRender handler, which is where
+            // mirrors render. Everything between the two overlaps the cull.
+            if (Basis.Scripts.Rendering.BasisVisibilitySystem.Enabled)
+            {
+                using (Prof.AvatarVisibilitySchedule.Auto())
+                {
+                    Basis.Scripts.Rendering.BasisVisibilitySystem.Schedule(default);
+                    JobHandle.ScheduleBatchedJobs();
+                }
+            }
             BasisFiniteWatchdog.Checkpoint("PostFrameSync (pre jiggle dispatch)");
             BasisFiniteWatchdog.CheckpointRemote("PostFrameSync (pre jiggle dispatch)");
 
@@ -902,10 +949,6 @@ namespace Basis.EventDriver
             using (Prof.JoinLeaveNotification.Auto())
             {
                 BasisJoinLeaveNotification.Simulate(TimeAsDouble);
-            }
-            using (Prof.SimulateBeacon.Auto())
-            {
-                IndividualPlayerProvider.SimulateBeacon(DeltaTime);
             }
 
             bool drawJiggle = SMModuleDebugOptions.UseGizmos && SMModuleDebugOptions.UseJiggleVisuals;
@@ -979,6 +1022,14 @@ namespace Basis.EventDriver
                 BasisTrackerMarkerGizmos.Tick();
                 BasisGizmoManager.Render(BasisLocalCameraDriver.Position);
             }
+            // Join the avatar cull scheduled back at the frame-sync window and write the changed
+            // renderers. Returns immediately when nothing was scheduled, so the toggle can flip
+            // mid-frame. Last stop before rendering: mirrors read these flags in onBeforeRender.
+            using (Prof.AvatarVisibilityApply.Auto())
+            {
+                Basis.Scripts.Rendering.BasisVisibilitySystem.CompleteAndApply();
+            }
+
             // One-shot NaN hunter for the Invalid AABB / IsFinite(distanceForSort) spam: names
             // the first non-finite camera/renderer and disarms. Armed from Basis/Debug/Finite
             // Watchdog; costs nothing while off.
