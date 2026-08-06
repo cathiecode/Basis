@@ -73,6 +73,7 @@ namespace Basis.Scripts.Boot_Sequence
             {
                 HasEvents = true;
                 Application.quitting += OnApplicationQuitting;
+                BasisGracefulShutdown.Setup();
 
 #if UNITY_EDITOR
                 // Release Addressables when leaving Play Mode.
