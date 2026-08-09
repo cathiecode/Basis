@@ -360,6 +360,19 @@ namespace BasisServerHandle
                     uuid = meta.playerUUID;
                 }
             }
+
+            NetworkServer.AuthIdentity.RemoveConnection(id, peer);
+
+            // A predecessor's disconnect can land after a reconnect has already taken the same id.
+            // Every teardown below is keyed by id alone, so running it for a peer that no longer
+            // owns the slot dismantles the live peer's state instead — the "direct connect works,
+            // then dies after a rejoin" symptom. An id held by nobody still cleans up, so a peer
+            // rejected before auth completed keeps releasing whatever partial state it made.
+            if (NetworkServer.AuthenticatedPeers.TryGetValue(id, out NetPeer holder) && !Equals(holder, peer))
+            {
+                return false;
+            }
+
             if (!string.IsNullOrEmpty(uuid))
             {
                 PermissionIntegration.RemovePlayerMeta(uuid);
@@ -368,7 +381,6 @@ namespace BasisServerHandle
                 BasisNetworkResourceManagement.RemovePeerResources(uuid);
             }
 
-            NetworkServer.AuthIdentity.RemoveConnection(id);
             BasisNetworkOwnership.RemovePlayerOwnership(id);
             BasisSavedState.RemovePlayer(id);
             BasisServerReductionSystemEvents.RemovePlayer(id);
@@ -381,7 +393,10 @@ namespace BasisServerHandle
             BasisServerMessageRegistry.ClearSubscription(id);
             JoinBroadcast.UnregisterPeer(id);
 
-            return NetworkServer.AuthenticatedPeers.TryRemove(id, out _);
+            // Value-matched, mirroring RejectWithReason(NetPeer): the guard above raced against a
+            // reconnect that may have claimed the id since.
+            return ((ICollection<KeyValuePair<int, NetPeer>>)NetworkServer.AuthenticatedPeers)
+                .Remove(new KeyValuePair<int, NetPeer>(id, peer));
         }
 
         public static void HandlePeerDisconnected(NetPeer peer, DisconnectInfo info)
@@ -630,7 +645,7 @@ namespace BasisServerHandle
                 // stale because LNL will not hand us two live peers with the same Id —
                 // evict it synchronously and retry the insert.
                 if (NetworkServer.AuthenticatedPeers.TryGetValue(PeerId, out NetPeer stale) &&
-                    !ReferenceEquals(stale, newPeer))
+                    !Equals(stale, newPeer))
                 {
                     BNL.Log($"Reconnect collision on peer id {PeerId}; evicting stale entry and accepting new connection.");
                     CleanupPeerSubsystems(stale, PeerId);
@@ -1173,11 +1188,10 @@ namespace BasisServerHandle
                 // player's quality tier; a zero here simply means everyone is measured from the origin,
                 // which is the same answer the reduction system would reach a tick later.
                 Basis.Scripts.Networking.Compression.Vector3 viewerPosition = default;
-                // Only High carries the position as 3 float32; the lower tiers use int24 millimetres,
-                // which would decode as garbage here and produce nonsense distances. Clients send High,
-                // so anything else means fall back to the origin (and therefore to High for everyone).
+                // Every quality tier carries the position in the same int24-millimetre form, so
+                // this decodes correctly whatever tier the joiner's pose arrived on. A short/absent
+                // payload falls back to the origin (and therefore to High for everyone).
                 if (joinerPose.array != null
-                    && joinerPose.DataQualityLevel == (byte)Basis.Network.Core.Compression.BasisAvatarBitPacking.BitQuality.High
                     && joinerPose.array.Length >= Basis.Network.Core.Compression.BasisAvatarBitPacking.WritePosition)
                 {
                     byte[] poseBytes = joinerPose.array;

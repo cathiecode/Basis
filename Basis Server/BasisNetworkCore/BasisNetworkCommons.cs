@@ -904,6 +904,35 @@ namespace Basis.Network.Core
         /// 1000 players still get 48,000 packets.
         /// </summary>
         public const int PacketPoolSize = 8192;
+
+        // ── Single-datagram budget ───────────────────────────────────────────
+        /// <summary>
+        /// Largest payload a caller may hand to a send that the transport cannot fragment
+        /// (see <see cref="CanFragment"/>). Over this, the send THROWS rather than truncating or
+        /// dropping, so anything sizing a packet has to check first.
+        ///
+        /// Deliberately derived from the smallest MTU any peer can be at, not the negotiated one.
+        /// A peer starts at its initial MTU and only grows through discovery, and one broadcast
+        /// fans out to peers at different points in that — including P2P links that negotiated
+        /// separately from the server link. Sizing against a live <c>peer.Mtu</c> would produce a
+        /// payload that fits the peer it was measured on and throws on the one still probing.
+        /// The slack absorbs the packet header plus any per-message framing above it.
+        /// </summary>
+        public const int MinimumPeerMtu = 1024;
+        /// <summary>Headroom held back from <see cref="MinimumPeerMtu"/> for transport headers and framing.</summary>
+        public const int UnfragmentedHeadroom = 36;
+        /// <summary>Payload ceiling for one unfragmentable datagram, framing included.</summary>
+        public const int MaxUnfragmentedPayload = MinimumPeerMtu - UnfragmentedHeadroom;
+
+        /// <summary>
+        /// True if the transport will split an over-MTU payload across datagrams for this delivery
+        /// method. Only the two reliable non-sequenced methods can: sequencing is a per-datagram
+        /// property, so a fragmented sequenced packet has no coherent meaning and the transport
+        /// throws instead.
+        /// </summary>
+        public static bool CanFragment(DeliveryMethod method) =>
+            method == DeliveryMethod.ReliableOrdered || method == DeliveryMethod.ReliableUnordered;
+
         /// <summary>
         /// when adding a new message we need to increase this
         /// will function up to 64
@@ -1153,10 +1182,16 @@ namespace Basis.Network.Core
         /// <summary>
         /// Server-only outbound channel carrying multiple avatar quality messages
         /// to a single receiver, LZ4-compressed into one UDP datagram that fits the peer MTU.
-        /// Wire format:
-        ///   [count:1][rawLen:2-LE][LZ4 block( [origChannel:1][msgLen:2-LE][bytes]* )]
-        /// Each inner [origChannel] is the byte-id or ushort-id avatar quality channel
-        /// the message would have been sent on individually (channels 6-13 / 41-48).
+        /// Wire format (v50):
+        ///   [count:1][rawLen:2-LE][LZ4 block( group* )]
+        ///   group := [origChannel:1][n:1][msgLen:2-LE] x n [bodies]
+        /// Each [origChannel] is the byte-id or ushort-id avatar quality channel the message would
+        /// have been sent on individually (channels 6-13 / 41-48), or DeltaAvatarChannel. One
+        /// channel byte per RUN, not per entry — the server channel-sorts a receiver's pending
+        /// messages first so the runs are long, but decoding does not depend on that.
+        /// The DeltaAvatarChannel group's bodies are COLUMN-TRANSPOSED (byte j of every body, then
+        /// byte j+1 of every body); no other group is. See BasisAvatarBundleCodec, which is the
+        /// shared reader, and BundleCompressionExperiment for why.
         /// Compression: LZ4Codec.Encode at LZ4Level.L00_FAST (K4os.Compression.LZ4 1.3.x).
         /// </summary>
         public const byte CompressedAvatarBundleChannel = 52;

@@ -85,10 +85,20 @@ namespace Basis.Scripts.Networking.Receivers
         }
 
         /// <summary>
-        /// T-pose local rotations for this receiver's avatar bones.
-        /// Set during calibration and passed to RemoteBoneJobSystem for the skeleton apply job.
+        /// Folded operators that turn the incoming RIG-NEUTRAL bone rotations into THIS avatar's
+        /// bone local rotations: <c>localRotation = BoneDecodePre[slot] * generic * BoneDecodePost[slot]</c>.
+        /// Slot order is BasisBoneRotationCompression.BONE_WRITE_ORDER.
+        ///
+        /// Built during calibration from this rig's own rest pose — see
+        /// <see cref="Basis.Network.Core.Compression.BasisGenericBoneRotation"/>. Because they are
+        /// derived purely from the LOCAL avatar's rest data, the sender's rig never enters into it,
+        /// which is what lets any incoming pose play back on whatever avatar is worn here.
+        /// Passed to RemoteBoneJobSystem for the skeleton compose job.
         /// </summary>
-        [System.NonSerialized] public NativeArray<quaternion> TposeLocalRotations;
+        [System.NonSerialized] public NativeArray<quaternion> BoneDecodePre;
+
+        /// <summary>Right factor of the pair above; see <see cref="BoneDecodePre"/>.</summary>
+        [System.NonSerialized] public NativeArray<quaternion> BoneDecodePost;
 
         /// <summary>
         /// Bone transforms for this receiver's avatar.
@@ -590,6 +600,16 @@ namespace Basis.Scripts.Networking.Receivers
                     // Catmull-Rom tangents one-sided — the spline stays bounded, no branch needed.
                     var p0 = HasPreviousBuffer ? Previous : p1;
                     var p3 = _stagedRing.TryPeekOldest(out var peek) ? peek : p2;
+
+                    // Expand the finger channels through THIS avatar's grid before the window is
+                    // handed to the interpolator. It happens here, not in the decompressor, because
+                    // a P2P frame is decoded on the socket thread and the grid belongs to the
+                    // avatar — its lifetime is only ours to reason about on the frame path.
+                    ExpandFingerChannels(p0);
+                    ExpandFingerChannels(p1);
+                    ExpandFingerChannels(p2);
+                    ExpandFingerChannels(p3);
+
                     BasisRemoteNetworkDriver.SetFrameInputs(
                         playerId,
                         CachedHumanScale,
@@ -607,6 +627,24 @@ namespace Basis.Scripts.Networking.Receivers
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             UnityEngine.Profiling.Profiler.EndSample();
 #endif
+        }
+
+        /// <summary>
+        /// Fills this buffer's finger slots from its ten curl/splay channels, once per avatar
+        /// generation. Cheap to call repeatedly — the four window buffers overlap heavily frame to
+        /// frame, and re-sampling settled fingers would defeat the apply path's write mask.
+        /// </summary>
+        private void ExpandFingerChannels(BasisAvatarBuffer buffer)
+        {
+            if (buffer == null) return;
+
+            var driver = RemotePlayer != null ? RemotePlayer.RemoteAvatarDriver : null;
+            if (driver == null || !driver.HandGrid.IsCreated) return;
+            if (buffer.FingerExpansionGeneration == driver.HandGridGeneration) return;
+
+            driver.HandGrid.ExpandInto(buffer.FingerPercentages, buffer.BoneRotations,
+                Basis.Network.Core.Compression.BasisBoneRotationCompression.WireBoneSlotCount);
+            buffer.FingerExpansionGeneration = driver.HandGridGeneration;
         }
 
         /// <summary>
@@ -830,7 +868,8 @@ namespace Basis.Scripts.Networking.Receivers
 
             ClearAndRelease();
 
-            if (TposeLocalRotations.IsCreated) TposeLocalRotations.Dispose();
+            if (BoneDecodePre.IsCreated) BoneDecodePre.Dispose();
+            if (BoneDecodePost.IsCreated) BoneDecodePost.Dispose();
             BoneTransforms = null;
 
             if (hasEvents && RemotePlayer != null && RemotePlayer.RemoteAvatarDriver != null)

@@ -67,11 +67,14 @@ public struct TposeAndOffsetDataJob
     /// <summary>Unscaled offset from head to mouth.</summary>
     public float3 offsets_unscaled_Mouth;
 
-
     /// <summary>
-    /// default scale
+    /// Hips → nameplate-bottom distance for THIS avatar, in model units (the frame the per-frame
+    /// solve multiplies by the live root scale). Measured once at registration from the avatar's own
+    /// crown — see <see cref="Basis.Scripts.UI.NamePlate.BasisNamePlateAnchorMath"/>, which also
+    /// documents the fixed 1.2 m constant this replaced and why that constant read as a different
+    /// bug on every body plan.
     /// </summary>
-    public float3 TposeScale;
+    public float NamePlateHeightAboveHips;
 }
 
 /// <summary>
@@ -105,9 +108,12 @@ public struct RemoteFrameOutput
     /// <summary>World rotations for the pose.</summary>
     public quaternion rot_Head, rot_Neck, rot_Chest, rot_Spine, rot_Hips, rot_CenterEye, rot_Mouth;
     /// <summary>
-    /// Vertical delta between hips and mouth in scaled TPose space (used for UI placement).
+    /// Distance from the hips to the bottom edge of the nameplate, in world metres at the avatar's
+    /// live scale. Add it to <see cref="pos_Hips"/>.y (plus the plate's own half-height, which is
+    /// viewer-scaled, not avatar-scaled) to get the plate's world Y —
+    /// <see cref="Basis.Scripts.UI.NamePlate.BasisNamePlateAnchorMath.AnchorWorldY"/> is that sum.
     /// </summary>
-    public float HeightAvatarHipCoord;
+    public float NamePlateHeightAboveHips;
 }
 
 /// <summary>
@@ -192,9 +198,6 @@ public struct BasisRemoteBoneJob : IJobParallelFor
             sc.offsets_scaled_Neck, sc.offsets_scaled_Chest, sc.offsets_scaled_Spine, sc.offsets_scaled_CenterEye, sc.offsets_scaled_Mouth,
             out float3 neckP, out float3 chestP, out float3 spineP, out float3 eyeP, out float3 mouthP);
 
-
-        float3 difference = SafeDivide(nowScale, a.TposeScale);
-
         Out[i] = new RemoteFrameOutput
         {
             pos_Head = headP,
@@ -212,20 +215,14 @@ public struct BasisRemoteBoneJob : IJobParallelFor
             rot_CenterEye = headR,
             rot_Mouth = headR,
 
-
-            // Used for vertical offsetting of the nameplate UI
-            HeightAvatarHipCoord = difference.y * 1.2f,
+            // Nameplate height. The stored value is model units — the avatar's own measured
+            // hips→crown distance plus its clearance gap — so a live resize is the same single
+            // multiply the eye/mouth anchors take, and an avatar nobody resized still gets its own
+            // height rather than a constant.
+            NamePlateHeightAboveHips = a.NamePlateHeightAboveHips * nowScale.y,
         };
         MouthPositions[i] = mouthP;
         MouthForwards[i] = math.mul(headR, new float3(0f, 0f, 1f));
-    }
-    private readonly float3 SafeDivide(float3 numerator, float3 denominator)
-    {
-        const float eps = 1e-6f;
-
-        float3 safeDenom = math.select(denominator,math.sign(denominator) * eps, math.abs(denominator) < eps);
-
-        return numerator / safeDenom;
     }
 }
 
@@ -314,7 +311,8 @@ struct ApplyMouthJob : IJobParallelForTransform
 
 /// <summary>
 /// Positions the floating nameplate relative to the avatar and rotates it to face the camera (yaw only).
-/// Uses derived TPose vertical delta to place the plate above the head.
+/// Height comes from the avatar's own measured crown (see
+/// <see cref="Basis.Scripts.UI.NamePlate.BasisNamePlateAnchorMath"/>), not a shared constant.
 /// </summary>
 [BurstCompile(FloatMode = FloatMode.Fast, FloatPrecision = FloatPrecision.Low)]
 public struct MappedNameplateApplyJob : IJobParallelForTransform
@@ -322,17 +320,36 @@ public struct MappedNameplateApplyJob : IJobParallelForTransform
     /// <summary>Camera world position used to bill-board the plate (yaw-only).</summary>
     public float3 CameraPosition;
 
+    /// <summary>
+    /// Half the plate's rendered height, in world metres. The plate's origin is the centre of its
+    /// panel, so without this the bottom half of every plate hangs below the point we aim it at.
+    /// It is a per-frame uniform rather than part of the per-avatar measurement because plate size
+    /// tracks the VIEWER's scale and nameplate-size setting.
+    /// </summary>
+    public float PanelHalfHeightWorld;
+
     /// <summary>Input pose data (per-avatar) for nameplate placement.</summary>
     [ReadOnly] public NativeArray<RemoteFrameOutput> NamePlateIn;
+
+    /// <summary>SoA slot → player ID, used to look this slot's plate up in <see cref="PlateActive"/>.</summary>
+    [ReadOnly] public NativeArray<int> PlayerKeys;
+
+    /// <summary>Per-player-ID nameplate active mirror; 0 = the plate is not being displayed.</summary>
+    [ReadOnly] public NativeArray<byte> PlateActive;
 
     /// <summary>Computes position above hips and rotates toward camera.</summary>
     public void Execute(int jobIndex, TransformAccess tx)
     {
+        int key = PlayerKeys[jobIndex];
+        if ((uint)key >= (uint)PlateActive.Length || PlateActive[key] == 0) return;
+
         var data = NamePlateIn[jobIndex];
         float3 hips = data.pos_Hips;
 
-        // y = hips.y + diff * 1.8
-        float3 nameplatePos = new float3(hips.x, hips.y + data.HeightAvatarHipCoord, hips.z);
+        float3 nameplatePos = new float3(
+            hips.x,
+            Basis.Scripts.UI.NamePlate.BasisNamePlateAnchorMath.AnchorWorldY(hips.y, data.NamePlateHeightAboveHips, PanelHalfHeightWorld),
+            hips.z);
 
         // Face the camera (yaw only) with zero-distance guard.
         float3 toCam = CameraPosition - nameplatePos;
@@ -535,9 +552,17 @@ public static class RemoteBoneJobSystem
     static NativeList<quaternion> sTPoseHipsRot;
     /// <summary>TPose hips localPosition per avatar — base for the hips delta apply.</summary>
     static NativeList<float3> sTPoseHipsLocalPos;
-    /// <summary>TPose hips localRotation per avatar — base for the hips rotation delta apply
-    /// (final hips.localRotation = this × received rotation delta).</summary>
-    static NativeList<quaternion> sTPoseHipsLocalRot;
+    /// <summary>
+    /// Generic→rig decode operators for the HIPS rotation, per avatar:
+    /// <c>hips.localRotation = sHipsDecodePre[i] * networkHipsRotation * sHipsDecodePost[i]</c>.
+    /// Hips is excluded from the bone packet and rides in the packet tail, but it is carried in
+    /// the same rig-neutral space as the bone block, so it needs the same pair. Built from the
+    /// avatar's own TposeLocal[Hips] and TposeFromRoot[Hips] — see
+    /// <see cref="Basis.Network.Core.Compression.BasisGenericBoneRotation"/>.
+    /// </summary>
+    static NativeList<quaternion> sHipsDecodePre;
+    /// <summary>Right factor of the pair above; see <see cref="sHipsDecodePre"/>.</summary>
+    static NativeList<quaternion> sHipsDecodePost;
 
     // Transform access arrays (roots / heads / hips)
     /// <summary>Root transforms per avatar.</summary>
@@ -559,11 +584,20 @@ public static class RemoteBoneJobSystem
     // Layout: [player0_bone0..bone(N-1), player1_bone0..bone(N-1), ...]
     // where N = BasisBoneRotationCompression.SyncBoneCount (51).
     static TransformAccessArray sSkeletonBones;
-    /// <summary>T-pose local rotations, flat parallel to sSkeletonBones.</summary>
-    static NativeList<quaternion> sSkeletonTpose;
+    /// <summary>
+    /// Left factor of the generic→rig decode, flat parallel to sSkeletonBones:
+    /// <c>localRotation = sSkeletonDecodePre[i] * networkRotation * sSkeletonDecodePost[i]</c>.
+    /// Built per avatar from that avatar's own rest pose — see
+    /// <see cref="Basis.Network.Core.Compression.BasisGenericBoneRotation"/>. With an identity rest
+    /// frame the pair reduces to (T-pose local, identity), i.e. the plain T-pose × delta compose
+    /// this used to be.
+    /// </summary>
+    static NativeList<quaternion> sSkeletonDecodePre;
+    /// <summary>Right factor of the pair above; see <see cref="sSkeletonDecodePre"/>.</summary>
+    static NativeList<quaternion> sSkeletonDecodePost;
     /// <summary>Valid mask (1 = bone exists, 0 = null/skip), flat parallel to sSkeletonBones.</summary>
     static NativeList<byte> sSkeletonValid;
-    /// <summary>Precomputed local rotations (T-pose × network delta) consumed by <see cref="ApplySkeletonRotationsJob"/>.</summary>
+    /// <summary>Precomputed local rotations (decode operators × network rotation) consumed by <see cref="ApplySkeletonRotationsJob"/>.</summary>
     static NativeArray<quaternion> sSkeletonRotations;
     /// <summary>Last rotation actually written to each bone transform, parallel to
     /// <see cref="sSkeletonRotations"/>. Owned by the compute pass and refreshed by the
@@ -623,6 +657,53 @@ public static class RemoteBoneJobSystem
     /// so Schedule does not need to snapshot a managed List each frame. Sized to the high-water
     /// mark of <see cref="AuthoringLength"/>; consumers always pair it with an explicit count.</summary>
     static NativeArray<int> sKeyArray;
+    /// <summary>
+    /// Native mirror of each remote player's face visibility, indexed by ushort player ID — the
+    /// same key space as <see cref="sKeyToIndex"/>, so entries never move when the SoA
+    /// swap-compacts on removal. Written from the managed setter (visibility only flips when a
+    /// face mesh enters or leaves view) so Burst selection passes can filter candidates
+    /// themselves instead of the main thread walking the receiver list to marshal one bool per
+    /// player. 0 = hidden, 1 = visible.
+    /// </summary>
+    static NativeArray<byte> sFaceVisible;
+    /// <summary>
+    /// Native mirror of whether each player's nameplate is currently being displayed, indexed by
+    /// ushort player ID like <see cref="sFaceVisible"/>. Owned entirely by
+    /// <c>BasisRemoteNamePlate</c> — the plate pushes its own active state — so a plate that is
+    /// disabled, blocked, out of range, face-hidden or switched off in settings costs no
+    /// transform write in <see cref="MappedNameplateApplyJob"/>. 0 = not displayed.
+    /// </summary>
+    static NativeArray<byte> sNamePlateActive;
+    /// <summary>Key space of <see cref="sFaceVisible"/> and <see cref="sKeyToIndex"/>.</summary>
+    const int KeySpace = 65536;
+
+    /// <summary>
+    /// The visibility mirror is allocated on demand and deliberately does NOT live under
+    /// <see cref="sInitialized"/>: avatar setup writes visibility, and that can run before the
+    /// bone system initializes. Keying by player ID rather than SoA slot means there is never
+    /// anything to rebuild, so lazy allocation is the whole lifecycle.
+    /// </summary>
+    static NativeArray<byte> FaceVisibleMap()
+    {
+        if (!sFaceVisible.IsCreated)
+        {
+            sFaceVisible = new NativeArray<byte>(KeySpace, Allocator.Persistent);
+        }
+        return sFaceVisible;
+    }
+
+    /// <summary>
+    /// Same lifecycle as <see cref="FaceVisibleMap"/>: allocated on demand and keyed by player ID,
+    /// because the nameplate registers itself before the bone system may be initialized.
+    /// </summary>
+    static NativeArray<byte> NamePlateActiveMap()
+    {
+        if (!sNamePlateActive.IsCreated)
+        {
+            sNamePlateActive = new NativeArray<byte>(KeySpace, Allocator.Persistent);
+        }
+        return sNamePlateActive;
+    }
     /// <summary>Pending job handle chain.</summary>
     static JobHandle sPending;
     static JobHandle sGatherRoot;
@@ -667,14 +748,16 @@ public static class RemoteBoneJobSystem
         public quaternion TposeHeadRot;
         public quaternion TposeHipsRot;
         public float3 TposeHipsLocalPos;
-        public quaternion TposeHipsLocalRot;
+        public quaternion HipsDecodePre;
+        public quaternion HipsDecodePost;
         public Transform Root;
         public Transform Head;
         public Transform Hips;
         public Transform NamePlate;
         public Transform AvatarScale;
         public Transform Mouth;
-        public quaternion[] BoneTpose;
+        public quaternion[] BoneDecodePre;
+        public quaternion[] BoneDecodePost;
         public Transform[] BoneTransforms;
     }
 
@@ -708,7 +791,8 @@ public static class RemoteBoneJobSystem
         sTPoseHeadRot = new NativeList<quaternion>(initialCapacity, Allocator.Persistent);
         sTPoseHipsRot = new NativeList<quaternion>(initialCapacity, Allocator.Persistent);
         sTPoseHipsLocalPos = new NativeList<float3>(initialCapacity, Allocator.Persistent);
-        sTPoseHipsLocalRot = new NativeList<quaternion>(initialCapacity, Allocator.Persistent);
+        sHipsDecodePre = new NativeList<quaternion>(initialCapacity, Allocator.Persistent);
+        sHipsDecodePost = new NativeList<quaternion>(initialCapacity, Allocator.Persistent);
 
         sRoots = new TransformAccessArray(initialCapacity);
         sHeads = new TransformAccessArray(initialCapacity);
@@ -719,7 +803,8 @@ public static class RemoteBoneJobSystem
         sMouth = new TransformAccessArray(initialCapacity);
 
         sSkeletonBones = new TransformAccessArray(initialCapacity * BasisBoneRotationCompression.SyncBoneCount);
-        sSkeletonTpose = new NativeList<quaternion>(initialCapacity * BasisBoneRotationCompression.SyncBoneCount, Allocator.Persistent);
+        sSkeletonDecodePre = new NativeList<quaternion>(initialCapacity * BasisBoneRotationCompression.SyncBoneCount, Allocator.Persistent);
+        sSkeletonDecodePost = new NativeList<quaternion>(initialCapacity * BasisBoneRotationCompression.SyncBoneCount, Allocator.Persistent);
         sSkeletonValid = new NativeList<byte>(initialCapacity * BasisBoneRotationCompression.SyncBoneCount, Allocator.Persistent);
 
         // Create a dummy transform for null bone slots (TAA can't hold null)
@@ -727,8 +812,13 @@ public static class RemoteBoneJobSystem
         dummyGO.SetActive(false);
         sDummyBone = dummyGO.transform;
 
-        sKeyToIndex = new int[65536];
+        sKeyToIndex = new int[KeySpace];
         Array.Fill(sKeyToIndex, -1);
+        // Force the visibility mirror into existence here, before any player can join, so the
+        // lazy path in FaceVisibleMap is never the one that races two first-touches. Writers are
+        // all main-thread today; this keeps that from being load-bearing.
+        FaceVisibleMap();
+        NamePlateActiveMap();
         EnsureKeyArrayCapacity(math.max(initialCapacity, 16));
 
         sPendingAdds.Clear();
@@ -752,7 +842,8 @@ public static class RemoteBoneJobSystem
         if (sTPoseHeadRot.IsCreated) sTPoseHeadRot.Dispose();
         if (sTPoseHipsRot.IsCreated) sTPoseHipsRot.Dispose();
         if (sTPoseHipsLocalPos.IsCreated) sTPoseHipsLocalPos.Dispose();
-        if (sTPoseHipsLocalRot.IsCreated) sTPoseHipsLocalRot.Dispose();
+        if (sHipsDecodePre.IsCreated) sHipsDecodePre.Dispose();
+        if (sHipsDecodePost.IsCreated) sHipsDecodePost.Dispose();
 
         if (sRoots.isCreated) sRoots.Dispose();
         if (sHeads.isCreated) sHeads.Dispose();
@@ -763,7 +854,8 @@ public static class RemoteBoneJobSystem
         if (sMouth.isCreated) sMouth.Dispose();
 
         if (sSkeletonBones.isCreated) sSkeletonBones.Dispose();
-        if (sSkeletonTpose.IsCreated) sSkeletonTpose.Dispose();
+        if (sSkeletonDecodePre.IsCreated) sSkeletonDecodePre.Dispose();
+        if (sSkeletonDecodePost.IsCreated) sSkeletonDecodePost.Dispose();
         if (sSkeletonValid.IsCreated) sSkeletonValid.Dispose();
         if (sSkeletonRotations.IsCreated) sSkeletonRotations.Dispose();
         if (sSkeletonLastWritten.IsCreated) sSkeletonLastWritten.Dispose();
@@ -778,6 +870,10 @@ public static class RemoteBoneJobSystem
         DisposeTempBuffers();
 
         if (sKeyArray.IsCreated) sKeyArray.Dispose();
+        // Freed here rather than left for process exit so the editor's leak detector stays quiet.
+        // A write after this point simply reallocates it — see FaceVisibleMap.
+        if (sFaceVisible.IsCreated) sFaceVisible.Dispose();
+        if (sNamePlateActive.IsCreated) sNamePlateActive.Dispose();
 
         if (sKeyToIndex != null) Array.Fill(sKeyToIndex, -1);
         sPendingAdds.Clear();
@@ -818,9 +914,13 @@ public static class RemoteBoneJobSystem
     /// <param name="NamePlate">Nameplate transform to be driven.</param>
     /// <param name="AvatarScale">Transform used for avatar scaling (if any).</param>
     /// <param name="MouthTransform">Mouth transform to be driven.</param>
+    /// <param name="namePlateHeightAboveHipsModel">Hips → nameplate-bottom distance in model units,
+    /// measured from this avatar's own crown by
+    /// <see cref="Basis.Scripts.UI.NamePlate.BasisNamePlateAnchorMath"/>.</param>
     /// <returns>The provided <paramref name="key"/>.</returns>
-    public static int AddRemotePlayer(int key, Transform remotePlayerRoot, Transform head, Transform hips,BasisCalibratedCoords tposeHead, BasisCalibratedCoords tposeHips, float3 tposeHipsLocalPos, quaternion tposeHipsLocalRot, float3 authoredCenterEyeLocal,float3 authoredMouthLocal, float3 tposeHeadWorld, float3 tposeRootScale, Transform NamePlate, Transform AvatarScale, Transform MouthTransform,float3 TposedScale,
-        NativeArray<quaternion> boneTPoseLocal = default, Transform[] boneTransforms = null)
+    public static int AddRemotePlayer(int key, Transform remotePlayerRoot, Transform head, Transform hips,BasisCalibratedCoords tposeHead, BasisCalibratedCoords tposeHips, float3 tposeHipsLocalPos, quaternion hipsDecodePre, quaternion hipsDecodePost, float3 authoredCenterEyeLocal,float3 authoredMouthLocal, float3 tposeHeadWorld, float3 tposeRootScale, Transform NamePlate, Transform AvatarScale, Transform MouthTransform,float namePlateHeightAboveHipsModel,
+        NativeArray<quaternion> boneDecodePre = default, NativeArray<quaternion> boneDecodePost = default,
+        Transform[] boneTransforms = null)
     {
         if (!sInitialized) Initialize();
 
@@ -864,18 +964,20 @@ public static class RemoteBoneJobSystem
             offsets_unscaled_Spine = offSpine,
             offsets_unscaled_CenterEye = offEye,
             offsets_unscaled_Mouth = offMouth,
-             TposeScale = TposedScale
+            NamePlateHeightAboveHips = namePlateHeightAboveHipsModel,
         };
 
-        bool hasBoneSource = boneTransforms != null && boneTPoseLocal.IsCreated;
+        bool hasBoneSource = boneTransforms != null && boneDecodePre.IsCreated && boneDecodePost.IsCreated;
         bool isUpdate = sInitialized && (uint)key < (uint)sKeyToIndex.Length && sKeyToIndex[key] >= 0;
 
-        // Snapshot the bone TPose rotations for the DEFERRED path only: the source NativeArray is
-        // owned by the receiver and may be disposed/recreated on a recalibration before the add
-        // commits, so the reference can't be held across the defer. The in-place update below
-        // consumes it synchronously and reads the source directly, skipping a SyncBoneCount
-        // managed array per avatar swap.
-        quaternion[] boneTpose = (hasBoneSource && !isUpdate) ? boneTPoseLocal.ToArray() : null;
+        // Snapshot the generic->rig decode operators for the DEFERRED path only: the source
+        // NativeArrays are owned by the receiver and may be disposed/recreated on a recalibration
+        // before the add commits, so the references can't be held across the defer. The in-place
+        // update below consumes them synchronously and reads the sources directly, skipping two
+        // SyncBoneCount managed arrays per avatar swap.
+        bool snapshot = hasBoneSource && !isUpdate;
+        quaternion[] decodePre = snapshot ? boneDecodePre.ToArray() : null;
+        quaternion[] decodePost = snapshot ? boneDecodePost.ToArray() : null;
 
         PendingAdd pending = new PendingAdd
         {
@@ -884,14 +986,16 @@ public static class RemoteBoneJobSystem
             TposeHeadRot = (quaternion)tposeHead.rotation,
             TposeHipsRot = (quaternion)tposeHips.rotation,
             TposeHipsLocalPos = tposeHipsLocalPos,
-            TposeHipsLocalRot = tposeHipsLocalRot,
+            HipsDecodePre = hipsDecodePre,
+            HipsDecodePost = hipsDecodePost,
             Root = remotePlayerRoot,
             Head = head,
             Hips = hips,
             NamePlate = NamePlate,
             AvatarScale = AvatarScale,
             Mouth = MouthTransform,
-            BoneTpose = boneTpose,
+            BoneDecodePre = decodePre,
+            BoneDecodePost = decodePost,
             BoneTransforms = boneTransforms,
         };
 
@@ -914,7 +1018,8 @@ public static class RemoteBoneJobSystem
             ClearPreScheduled();
             // Any add still queued for this key is an older calibration than this one.
             RemovePendingAdd(key);
-            if (!CommitUpdateInternal(pending, sKeyToIndex[key], hasBoneSource ? boneTPoseLocal : default))
+            if (!CommitUpdateInternal(pending, sKeyToIndex[key],
+                    hasBoneSource ? boneDecodePre : default, hasBoneSource ? boneDecodePost : default))
             {
                 // The incoming transforms are unusable, so the row cannot be re-pointed and
                 // would otherwise keep pointing at the outgoing avatar's dying hierarchy.
@@ -933,7 +1038,8 @@ public static class RemoteBoneJobSystem
     /// sKeyToIndex. Caller must have fenced the bone jobs. Returns false when the incoming
     /// transforms are unusable, in which case nothing was written.
     /// </summary>
-    static bool CommitUpdateInternal(in PendingAdd p, int idx, NativeArray<quaternion> boneTpose)
+    static bool CommitUpdateInternal(in PendingAdd p, int idx,
+        NativeArray<quaternion> boneDecodePre, NativeArray<quaternion> boneDecodePost)
     {
         if (p.Root == null || p.Head == null || p.Hips == null)
         {
@@ -953,7 +1059,8 @@ public static class RemoteBoneJobSystem
         sTPoseHeadRot[idx] = p.TposeHeadRot;
         sTPoseHipsRot[idx] = p.TposeHipsRot;
         sTPoseHipsLocalPos[idx] = p.TposeHipsLocalPos;
-        sTPoseHipsLocalRot[idx] = p.TposeHipsLocalRot;
+        sHipsDecodePre[idx] = p.HipsDecodePre;
+        sHipsDecodePost[idx] = p.HipsDecodePost;
 
         sRoots[idx] = p.Root;
         sHeads[idx] = p.Head;
@@ -964,7 +1071,7 @@ public static class RemoteBoneJobSystem
 
         int boneCount = BasisBoneRotationCompression.SyncBoneCount;
         int baseIdx = idx * boneCount;
-        bool hasBones = p.BoneTransforms != null && boneTpose.IsCreated;
+        bool hasBones = p.BoneTransforms != null && boneDecodePre.IsCreated && boneDecodePost.IsCreated;
         for (int b = 0; b < boneCount; b++)
         {
             Transform bone = hasBones ? p.BoneTransforms[b] : null;
@@ -972,13 +1079,15 @@ public static class RemoteBoneJobSystem
             if (bone != null)
             {
                 sSkeletonBones[slot] = bone;
-                sSkeletonTpose[slot] = boneTpose[b];
+                sSkeletonDecodePre[slot] = boneDecodePre[b];
+                sSkeletonDecodePost[slot] = boneDecodePost[b];
                 sSkeletonValid[slot] = 1;
             }
             else
             {
                 sSkeletonBones[slot] = sDummyBone;
-                sSkeletonTpose[slot] = quaternion.identity;
+                sSkeletonDecodePre[slot] = quaternion.identity;
+                sSkeletonDecodePost[slot] = quaternion.identity;
                 sSkeletonValid[slot] = 0;
             }
         }
@@ -1021,7 +1130,8 @@ public static class RemoteBoneJobSystem
         sTPoseHeadRot.Add(p.TposeHeadRot);
         sTPoseHipsRot.Add(p.TposeHipsRot);
         sTPoseHipsLocalPos.Add(p.TposeHipsLocalPos);
-        sTPoseHipsLocalRot.Add(p.TposeHipsLocalRot);
+        sHipsDecodePre.Add(p.HipsDecodePre);
+        sHipsDecodePost.Add(p.HipsDecodePost);
 
         sRoots.Add(p.Root);
 
@@ -1034,7 +1144,7 @@ public static class RemoteBoneJobSystem
 
         // Register skeleton bones for the parallel apply job
         int boneCount = BasisBoneRotationCompression.SyncBoneCount;
-        if (p.BoneTransforms != null && p.BoneTpose != null)
+        if (p.BoneTransforms != null && p.BoneDecodePre != null && p.BoneDecodePost != null)
         {
             for (int b = 0; b < boneCount; b++)
             {
@@ -1042,13 +1152,15 @@ public static class RemoteBoneJobSystem
                 if (bone != null)
                 {
                     sSkeletonBones.Add(bone);
-                    sSkeletonTpose.Add(p.BoneTpose[b]);
+                    sSkeletonDecodePre.Add(p.BoneDecodePre[b]);
+                    sSkeletonDecodePost.Add(p.BoneDecodePost[b]);
                     sSkeletonValid.Add(1);
                 }
                 else
                 {
                     sSkeletonBones.Add(sDummyBone);
-                    sSkeletonTpose.Add(quaternion.identity);
+                    sSkeletonDecodePre.Add(quaternion.identity);
+                    sSkeletonDecodePost.Add(quaternion.identity);
                     sSkeletonValid.Add(0);
                 }
             }
@@ -1059,7 +1171,8 @@ public static class RemoteBoneJobSystem
             for (int b = 0; b < boneCount; b++)
             {
                 sSkeletonBones.Add(sDummyBone);
-                sSkeletonTpose.Add(quaternion.identity);
+                sSkeletonDecodePre.Add(quaternion.identity);
+                sSkeletonDecodePost.Add(quaternion.identity);
                 sSkeletonValid.Add(0);
             }
         }
@@ -1115,7 +1228,8 @@ public static class RemoteBoneJobSystem
             sTPoseHeadRot[idx] = sTPoseHeadRot[last];
             sTPoseHipsRot[idx] = sTPoseHipsRot[last];
             sTPoseHipsLocalPos[idx] = sTPoseHipsLocalPos[last];
-            sTPoseHipsLocalRot[idx] = sTPoseHipsLocalRot[last];
+            sHipsDecodePre[idx] = sHipsDecodePre[last];
+            sHipsDecodePost[idx] = sHipsDecodePost[last];
 
             sNamePlate.RemoveAtSwapBack(idx);
             sAvatarScale.RemoveAtSwapBack(idx);
@@ -1154,7 +1268,8 @@ public static class RemoteBoneJobSystem
             {
                 int dst = boneIdxStart + b;
                 int src = boneLastStart + b;
-                sSkeletonTpose[dst] = sSkeletonTpose[src];
+                sSkeletonDecodePre[dst] = sSkeletonDecodePre[src];
+                sSkeletonDecodePost[dst] = sSkeletonDecodePost[src];
                 sSkeletonValid[dst] = sSkeletonValid[src];
                 // TAA: overwrite the removed slot's transform with the last player's transform
                 sSkeletonBones[dst] = sSkeletonBones[src];
@@ -1167,7 +1282,8 @@ public static class RemoteBoneJobSystem
         for (int b = boneCount - 1; b >= 0; b--)
         {
             sSkeletonBones.RemoveAtSwapBack(sSkeletonBones.length - 1);
-            sSkeletonTpose.RemoveAt(sSkeletonTpose.Length - 1);
+            sSkeletonDecodePre.RemoveAt(sSkeletonDecodePre.Length - 1);
+            sSkeletonDecodePost.RemoveAt(sSkeletonDecodePost.Length - 1);
             sSkeletonValid.RemoveAt(sSkeletonValid.Length - 1);
         }
 
@@ -1179,8 +1295,14 @@ public static class RemoteBoneJobSystem
         sTPoseHeadRot.RemoveAt(last);
         sTPoseHipsRot.RemoveAt(last);
         sTPoseHipsLocalPos.RemoveAt(last);
-        sTPoseHipsLocalRot.RemoveAt(last);
+        sHipsDecodePre.RemoveAt(last);
+        sHipsDecodePost.RemoveAt(last);
         sKeyToIndex[key] = -1;
+        // Drop the departing player's visibility bit. Selection jobs gate on AuthoringLength so
+        // they can't reach this key any more, but a rejoin reuses the ID and would otherwise
+        // inherit a stale "visible" before its avatar sets up.
+        if (sFaceVisible.IsCreated) sFaceVisible[key] = 0;
+        if (sNamePlateActive.IsCreated) sNamePlateActive[key] = 0;
         // sKeyArray's slot at `last` is now stale, but consumers gate on AuthoringLength
         // (count), so the unused tail slot is harmless. No truncation needed.
         AuthoringLength = sAuthoring.Length;
@@ -1319,9 +1441,13 @@ public static class RemoteBoneJobSystem
         {
             sSkeletonBones.capacity = math.max(skeletonNeeded, sSkeletonBones.capacity * 2);
         }
-        if (sSkeletonTpose.IsCreated && sSkeletonTpose.Capacity < skeletonNeeded)
+        if (sSkeletonDecodePre.IsCreated && sSkeletonDecodePre.Capacity < skeletonNeeded)
         {
-            sSkeletonTpose.Capacity = math.max(skeletonNeeded, sSkeletonTpose.Capacity * 2);
+            sSkeletonDecodePre.Capacity = math.max(skeletonNeeded, sSkeletonDecodePre.Capacity * 2);
+        }
+        if (sSkeletonDecodePost.IsCreated && sSkeletonDecodePost.Capacity < skeletonNeeded)
+        {
+            sSkeletonDecodePost.Capacity = math.max(skeletonNeeded, sSkeletonDecodePost.Capacity * 2);
         }
         if (sSkeletonValid.IsCreated && sSkeletonValid.Capacity < skeletonNeeded)
         {
@@ -1452,17 +1578,17 @@ public static class RemoteBoneJobSystem
     }
 
     /// <summary>
-    /// Kicks the skeleton delta compose (network bone deltas × cached T-pose locals) as soon as
-    /// the interpolation output is readable — i.e. straight after
+    /// Kicks the skeleton decode (rig-neutral network rotations mapped onto this rig by its cached
+    /// operator pair) as soon as the interpolation output is readable — i.e. straight after
     /// <c>BasisRemoteNetworkDriver.BeginRead()</c>, AHEAD of the per-receiver loop. It reads
-    /// <c>_outBoneRotations</c> and the T-pose cache and writes its own buffer; the receiver loop
+    /// <c>_outBoneRotations</c> and the decode tables and writes its own buffer; the receiver loop
     /// touches neither (it writes the skip flags, which only the NEXT frame's Compute reads, the
     /// filtered hips overrides, which only the hips derive reads, and the effector inputs). This
     /// is the largest independent job in the stretch — players × SyncBoneCount elements — so it
     /// is what actually fills the window instead of leaving workers parked.
     ///
     /// Requires the gathers to have been pre-scheduled: that call owns DrainPendingAdds, and
-    /// without it Schedule()'s fallback could resize sSkeletonTpose under the in-flight job.
+    /// without it Schedule()'s fallback could resize sSkeletonDecodePre under the in-flight job.
     /// </summary>
     public static void ScheduleSkeletonCompute(int maxBatchSize = 64)
     {
@@ -1472,7 +1598,7 @@ public static class RemoteBoneJobSystem
             return;
         }
 
-        int totalBones = sSkeletonTpose.Length;
+        int totalBones = sSkeletonDecodePre.Length;
         if (totalBones == 0)
         {
             return;
@@ -1485,7 +1611,7 @@ public static class RemoteBoneJobSystem
 
         sSkeletonCompute = BasisRemoteNetworkDriver.ScheduleComputeSkeletonRotations(
             sKeyArray, totalBones, BasisBoneRotationCompression.SyncBoneCount,
-            sSkeletonTpose.AsDeferredJobArray(), sSkeletonValid.AsDeferredJobArray(),
+            sSkeletonDecodePre.AsDeferredJobArray(), sSkeletonDecodePost.AsDeferredJobArray(), sSkeletonValid.AsDeferredJobArray(),
             sSkeletonRotations, sSkeletonLastWritten, sSkeletonWriteMask,
             boneBatch);
 
@@ -1512,7 +1638,7 @@ public static class RemoteBoneJobSystem
 
         sHipsDerive = BasisRemoteNetworkDriver.ScheduleBulkCopyHipsAndDerive(
             sKeyArray, AuthoringLength,
-            sTPoseHipsLocalPos.AsDeferredJobArray(), sTPoseHipsLocalRot.AsDeferredJobArray(),
+            sTPoseHipsLocalPos.AsDeferredJobArray(), sHipsDecodePre.AsDeferredJobArray(), sHipsDecodePost.AsDeferredJobArray(),
             sTmpHipsWorldPos, sTmpHipsWorldRot,
             sTmpAvatarScales, sTmpScaleChanged,
             sTmpRootDerivedPos, sTmpRootDerivedRot);
@@ -1618,7 +1744,7 @@ public static class RemoteBoneJobSystem
         {
             bulkAndDeriveJob = BasisRemoteNetworkDriver.ScheduleBulkCopyHipsAndDerive(
                 sKeyArray, AuthoringLength,
-                sTPoseHipsLocalPos.AsDeferredJobArray(), sTPoseHipsLocalRot.AsDeferredJobArray(),
+                sTPoseHipsLocalPos.AsDeferredJobArray(), sHipsDecodePre.AsDeferredJobArray(), sHipsDecodePost.AsDeferredJobArray(),
                 sTmpHipsWorldPos, sTmpHipsWorldRot,
                 sTmpAvatarScales, sTmpScaleChanged,
                 sTmpRootDerivedPos, sTmpRootDerivedRot);
@@ -1659,7 +1785,7 @@ public static class RemoteBoneJobSystem
         // reading the network array in the compute job drops both. The compute pass has no job
         // dep — it runs concurrently with scale / sim / hips / mouth / nameplate.
         JobHandle skeletonJob = default;
-        int totalBones = sSkeletonTpose.Length;
+        int totalBones = sSkeletonDecodePre.Length;
         if (totalBones > 0)
         {
             // Normally already in flight — ScheduleSkeletonCompute kicked it right after
@@ -1682,7 +1808,7 @@ public static class RemoteBoneJobSystem
 
                 computeRotationsJob = BasisRemoteNetworkDriver.ScheduleComputeSkeletonRotations(
                     sKeyArray, totalBones, BasisBoneRotationCompression.SyncBoneCount,
-                    sSkeletonTpose.AsDeferredJobArray(), sSkeletonValid.AsDeferredJobArray(),
+                    sSkeletonDecodePre.AsDeferredJobArray(), sSkeletonDecodePost.AsDeferredJobArray(), sSkeletonValid.AsDeferredJobArray(),
                     sSkeletonRotations, sSkeletonLastWritten, sSkeletonWriteMask,
                     boneBatch);
             }
@@ -1704,7 +1830,10 @@ public static class RemoteBoneJobSystem
         var nameplateJob = new MappedNameplateApplyJob
         {
             CameraPosition = CameraPosition,
+            PanelHalfHeightWorld = Basis.Scripts.UI.NamePlate.BasisRemoteNamePlateDriver.PanelHalfHeightWorld(),
             NamePlateIn = sOut.AsDeferredJobArray(),
+            PlayerKeys = sKeyArray,
+            PlateActive = NamePlateActiveMap(),
         }.Schedule(sNamePlate, simAndRoot);
 
         var mouthJob = new ApplyMouthJob
@@ -1802,7 +1931,7 @@ public static class RemoteBoneJobSystem
         total = 0;
         if (!sInitialized || !sSkeletonWriteMask.IsCreated) return;
 
-        total = math.min(sSkeletonTpose.Length, sSkeletonWriteMask.Length);
+        total = math.min(sSkeletonDecodePre.Length, sSkeletonWriteMask.Length);
         for (int i = 0; i < total; i++)
         {
             if (sSkeletonWriteMask[i] != 0) written++;
@@ -1886,6 +2015,58 @@ public static class RemoteBoneJobSystem
     /// Returns null when the system isn't initialized. Valid for the current frame only.
     /// </summary>
     public static int[] GetSOutIndexMap() => sInitialized ? sKeyToIndex : null;
+
+    /// <summary>
+    /// Records a player's face visibility in the native mirror consumed by Burst selection
+    /// passes. Called from the managed <c>FaceIsVisible</c> setter — visibility only flips when
+    /// a face mesh enters or leaves view, so this is a cold path despite being a blind write.
+    /// </summary>
+    public static void SetFaceVisible(int key, bool visible)
+    {
+        if ((uint)key >= (uint)KeySpace) return;
+        // Via a local: NativeArray<T> is a struct, so indexing the returned temporary directly
+        // is a CS1612. The copy still writes through to the same unmanaged buffer.
+        NativeArray<byte> map = FaceVisibleMap();
+        map[key] = visible ? (byte)1 : (byte)0;
+    }
+
+    /// <summary>
+    /// Native face-visibility mirror indexed by ushort player ID; pair it with
+    /// <see cref="GetPlayerKeyArray"/> to filter SoA slots from inside a job. Always created.
+    /// Read-only for consumers — write through <see cref="SetFaceVisible"/>.
+    /// </summary>
+    public static NativeArray<byte> GetFaceVisibleMap() => FaceVisibleMap();
+
+    /// <summary>
+    /// Records whether a player's nameplate is currently displayed. Called by
+    /// <c>BasisRemoteNamePlate</c> whenever it applies its active state; while this is false
+    /// <see cref="MappedNameplateApplyJob"/> leaves that plate's transform alone. Defaults to
+    /// false, so a player with no live nameplate is never posed.
+    /// </summary>
+    public static void SetNamePlateActive(int key, bool active)
+    {
+        if ((uint)key >= (uint)KeySpace) return;
+        NativeArray<byte> map = NamePlateActiveMap();
+        map[key] = active ? (byte)1 : (byte)0;
+    }
+
+    /// <summary>
+    /// Native nameplate-pose gate indexed by ushort player ID. Always created. Read-only for
+    /// consumers — write through <see cref="SetNamePlateActive"/>.
+    /// </summary>
+    public static NativeArray<byte> GetNamePlateActiveMap() => NamePlateActiveMap();
+
+    /// <summary>
+    /// Exposes the SoA index → player ID reverse map so a job can walk the dense slot range
+    /// itself instead of the main thread resolving one index per receiver. Only the first
+    /// <see cref="AuthoringLength"/> entries are live; the tail holds stale keys after a
+    /// removal. Returns a default (uncreated) array when the system isn't initialized.
+    ///
+    /// Valid for the current frame only — the backing array is reallocated when the player
+    /// count grows, so callers must re-acquire it rather than cache it, exactly as with
+    /// <see cref="GetRemoteFrameArray"/>.
+    /// </summary>
+    public static NativeArray<int> GetPlayerKeyArray() => sInitialized ? sKeyArray : default;
 
     /// <summary>
     /// Returns <c>sOut</c> as a NativeArray for Burst-job consumption.
