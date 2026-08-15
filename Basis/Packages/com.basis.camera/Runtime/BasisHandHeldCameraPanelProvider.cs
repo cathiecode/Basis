@@ -127,6 +127,9 @@ namespace Basis.BasisUI.HandHeldCamera
         private PanelToggle _autoFollowToggle;
         private PanelDropdown _followMarkerDropdown;
         private PanelDropdown _followTargetDropdown;
+        // Networked members only, in dropdown order. Row 0 of the dropdown is always "Me", so row
+        // n maps to _followTargetIds[n - 1]. The local player is not an id: net id 0 is a real
+        // player, so "Me" cannot be represented as a reserved value in here.
         private readonly List<ushort> _followTargetIds = new List<ushort>();
         private PanelDropdown _focusModeDropdown;
         private PanelToggle _followPlayspaceToggle;
@@ -142,9 +145,15 @@ namespace Basis.BasisUI.HandHeldCamera
         private PanelDropdown _resolutionDropdown;
         private PanelDropdown _formatDropdown;
         private PanelToggle _recordToggle;
+        private PanelToggle _flyToggle;
         private PanelToggle _autoLevelToggle;
         private PanelToggle _vrStabToggle;
         private PanelToggle _capture360Toggle;
+        private PanelToggle _printPhotoToggle;
+        private PanelElementDescriptor _photoStatus;
+        private PanelButton _revealPhotoButton;
+        private string _lastPhotoStatusText;
+        private bool? _lastRevealPhotoInteractable;
         private PanelToggle _previewScreenToggle;
         private PanelToggle _audioListenerToggle;
         private PanelToggle _selfieToggle;
@@ -179,6 +188,7 @@ namespace Basis.BasisUI.HandHeldCamera
         private float _lastAperture = float.NaN;
         private float _lastFocus = float.NaN;
         private bool? _lastSelfie;
+        private bool? _lastFly;
         private bool? _lastAutoLevel;
         private bool? _lastVrStab;
         private bool? _lastCloseHides;
@@ -230,7 +240,10 @@ namespace Basis.BasisUI.HandHeldCamera
             BoundButton?.BindActiveStateToAddressablesInstance(panel);
             _panel = panel;
 
-            panel.OnInstanceReleased += OnPanelClosed;
+            panel.OnInstanceReleased += () =>
+            {
+                if (_panel == null || _panel == panel) OnPanelClosed();
+            };
 
             // Search lives on the header. The popup must not outlive this panel — it navigates into
             // tabs that go away with it.
@@ -271,6 +284,12 @@ namespace Basis.BasisUI.HandHeldCamera
 
                 BuildEffectsGroup(content);
                 PanelSectionToggleHelpers.FinalizeCollapsibleGroup(_effectsSection, _effectsGroup, false, OnSectionExpanded);
+
+                BuildGifGroup(content);
+                PanelSectionToggleHelpers.FinalizeCollapsibleGroup(_gifSection, _gifGroup, false, OnSectionExpanded);
+
+                BuildVideoGroup(content);
+                PanelSectionToggleHelpers.FinalizeCollapsibleGroup(_videoSection, _videoGroup, false, OnSectionExpanded);
             });
 
             AddTab("camera.output", content =>
@@ -358,7 +377,18 @@ namespace Basis.BasisUI.HandHeldCamera
             if (element == null) return;
 
             if (element.IconBackground != null) element.IconBackground.SetActive(false);
-            if (!releaseControlSlot || element.Header == null) return;
+            if (releaseControlSlot) ReleaseControlSlot(element);
+        }
+
+        /// <summary>
+        /// Hands back the control slot a card reserves beside its title whether or not it puts a
+        /// control in it. Text-only cards need it back: the title and the description share what is
+        /// left over, so a card that keeps the reservation wraps a long readout into a narrow
+        /// column with 300 units of nothing beside it.
+        /// </summary>
+        private static void ReleaseControlSlot(PanelElementDescriptor element)
+        {
+            if (element == null || element.Header == null) return;
 
             Transform slot = element.Header.Find("Title/Element");
             if (slot != null) slot.gameObject.SetActive(false);
@@ -634,6 +664,8 @@ namespace Basis.BasisUI.HandHeldCamera
             SetPanelTickSubscription(false);
             ClearCinematicReferences();
             ClearModeReferences();
+            ClearGifReferences();
+            ClearVideoReferences();
             _panel = null;
             _tabGroup = null;
             _navColumn = null;
@@ -721,8 +753,10 @@ namespace Basis.BasisUI.HandHeldCamera
             _resolutionDropdown = null;
             _formatDropdown = null;
             _recordToggle = null;
+            _flyToggle = null;
             _autoLevelToggle = null;
             _vrStabToggle = null;
+            _lastFly = null;
             _lastAutoLevel = null;
             _lastVrStab = null;
             _lastFov = float.NaN;
@@ -730,6 +764,11 @@ namespace Basis.BasisUI.HandHeldCamera
             _lastAperture = float.NaN;
             _lastFocus = float.NaN;
             _capture360Toggle = null;
+            _printPhotoToggle = null;
+            _photoStatus = null;
+            _revealPhotoButton = null;
+            _lastPhotoStatusText = null;
+            _lastRevealPhotoInteractable = null;
             _previewScreenToggle = null;
             _audioListenerToggle = null;
             _selfieToggle = null;
@@ -851,7 +890,7 @@ namespace Basis.BasisUI.HandHeldCamera
 
             _focusModeDropdown = PanelDropdown.CreateNewEntry(content);
             _focusModeDropdown.Descriptor.SetTitle(BasisLocalization.Get("camera.focus"));
-            _focusModeDropdown.Descriptor.SetDescription(BasisLocalization.Get("camera.focus.description"));
+            _focusModeDropdown.Descriptor.SetTooltip(BasisLocalization.Get("camera.focus.description"));
             _focusModeDropdown.AssignEntries(new List<string>(FocusModeLabels));
             _focusModeDropdown.OnValueChanged = _ =>
             {
@@ -1222,9 +1261,13 @@ namespace Basis.BasisUI.HandHeldCamera
             {
                 if (_activeCamera == null || _followTargetDropdown == null) return;
                 int index = _followTargetDropdown.Index;
-                if (index >= 0 && index < _followTargetIds.Count)
+                if (index == 0)
                 {
-                    _activeCamera.SetFollowTargetPlayer(_followTargetIds[index]);
+                    _activeCamera.ClearFollowTargetPlayer();
+                }
+                else if (index > 0 && index <= _followTargetIds.Count)
+                {
+                    _activeCamera.SetFollowTargetPlayer(_followTargetIds[index - 1]);
                 }
             };
 
@@ -1342,6 +1385,14 @@ namespace Basis.BasisUI.HandHeldCamera
             _capture360Toggle.Descriptor.SetTitle(BasisLocalization.Get("camera.n360Capture"));
             _capture360Toggle.OnValueChanged = v => _activeCamera?.HandHeld.SetCapture360State(v);
 
+            _printPhotoToggle = PanelToggle.CreateNewEntry(content);
+            _printPhotoToggle.Descriptor.SetTitle(BasisLocalization.Get("camera.printPhoto"));
+            _printPhotoToggle.Descriptor.SetDescription(BasisLocalization.Get("camera.printPhoto.description"));
+            _printPhotoToggle.OnValueChanged = v =>
+            {
+                if (_activeCamera != null) _activeCamera.printPhotoEnabled = v;
+            };
+
             _selfieToggle = PanelToggle.CreateNewEntry(content);
             _selfieToggle.Descriptor.SetTitle(BasisLocalization.Get("camera.selfie"));
             _selfieToggle.Descriptor.SetDescription(BasisLocalization.Get("camera.selfie.description"));
@@ -1350,6 +1401,15 @@ namespace Basis.BasisUI.HandHeldCamera
                 if (_activeCamera == null) return;
                 if (_activeCamera.HandHeld.IsSelfieMode != v) _activeCamera.HandHeld.ToggleSelfie();
             };
+
+            // Sits with Auto Level and VR Stabilization because those two only do anything while
+            // the camera is flying, and this is the switch that puts it there. Until now flight
+            // was reachable only by holding middle click or clicking the VR thumbstick, neither of
+            // which is written down anywhere the user can find.
+            _flyToggle = PanelToggle.CreateNewEntry(content);
+            _flyToggle.Descriptor.SetTitle(BasisLocalization.Get("camera.flyMode"));
+            _flyToggle.Descriptor.SetTooltip(BasisLocalization.Get("camera.flyMode.description"));
+            _flyToggle.OnValueChanged = v => _activeCamera?.SetFlyModeEnabled(v);
 
             _autoLevelToggle = PanelToggle.CreateNewEntry(content);
             _autoLevelToggle.Descriptor.SetTitle(BasisLocalization.Get("camera.autoLevel"));
@@ -1371,10 +1431,63 @@ namespace Basis.BasisUI.HandHeldCamera
             // browsable Pictures folder rather than the app's sandboxed data path.
             if (BasisHandHeldCamera.CanOpenPhotosFolder)
             {
+                // Names the shot that just landed and gives it a one-click way back. Nothing else
+                // tells the shooter where a photo went, and the shutter is on the prop, so the
+                // answer has to survive until they come looking for it here.
+                _photoStatus = BuildRecordingStatusCard(content, "camera.photo.status", "camera.photo.status.idle");
+
                 RectTransform folderRow = PanelElementDescriptor.BuildActionRow(content, "CameraPhotosRow");
+
+                _revealPhotoButton = PanelButton.CreateNew(folderRow);
+                _revealPhotoButton.Descriptor.SetTitle(BasisLocalization.Get("camera.openSavedPhoto"));
+                _revealPhotoButton.OnClicked += () => _activeCamera?.RevealLastPhoto();
+
                 PanelButton openFolderButton = PanelButton.CreateNew(folderRow);
                 openFolderButton.Descriptor.SetTitle(BasisLocalization.Get("camera.openPhotosFolder"));
                 openFolderButton.OnClicked += () => BasisHandHeldCamera.OpenPhotosFolder();
+            }
+        }
+
+        /// <summary>
+        /// Keeps the last-photo card and its reveal button honest. Photos are taken from the prop
+        /// while this panel is open, so the state is polled rather than pushed; edge-gated, so an
+        /// unchanged label never restarts the widget's tweens.
+        /// </summary>
+        private void TickPhotoStatus()
+        {
+            if (_activeCamera == null || _photoStatus == null) return;
+
+            string failure = _activeCamera.LastPhotoFailure;
+            string fileName = _activeCamera.LastPhotoFileName;
+
+            string statusText;
+            if (failure != null)
+            {
+                statusText = BasisLocalization.Get("camera.photo.status.failed", failure);
+            }
+            else if (fileName != null)
+            {
+                statusText = BasisLocalization.Get("camera.photo.status.saved", fileName);
+            }
+            else
+            {
+                statusText = BasisLocalization.Get("camera.photo.status.idle");
+            }
+
+            if (statusText != _lastPhotoStatusText)
+            {
+                _lastPhotoStatusText = statusText;
+                _photoStatus.SetDescription(statusText);
+            }
+
+            // A failed save can still leave an earlier photo worth revealing, so the button
+            // follows the path rather than the failure.
+            bool canReveal = fileName != null;
+            if (_revealPhotoButton != null && canReveal != _lastRevealPhotoInteractable)
+            {
+                _lastRevealPhotoInteractable = canReveal;
+                _revealPhotoButton.SetInteractable(
+                    canReveal, canReveal ? null : BasisLocalization.Get("camera.openSavedPhoto.none"));
             }
         }
 
@@ -1706,6 +1819,14 @@ namespace Basis.BasisUI.HandHeldCamera
             RefreshModeVisuals(force: true);
 
             SeedCinematicCameraControls();
+            SeedGifControls();
+            SeedVideoControls();
+
+            // The bound camera changed, so the cached labels describe someone else's last shot.
+            _lastPhotoStatusText = null;
+            _lastRevealPhotoInteractable = null;
+            TickPhotoStatus();
+
             RefreshShotList();
             RefreshWaypointList();
 
@@ -1807,9 +1928,11 @@ namespace Basis.BasisUI.HandHeldCamera
             SyncToggle(_audioListenerToggle, _activeCamera.IsAudioListener, ref _lastAudioListener);
             SyncToggle(_selfieToggle, _activeCamera.HandHeld.IsSelfieMode, ref _lastSelfie);
             SyncToggle(_closeHidesToggle, _activeCamera.HandHeld.CloseHidesCamera, ref _lastCloseHides);
+            SyncToggle(_flyToggle, _activeCamera.IsFlyModeEnabled, ref _lastFly);
             _autoLevelToggle?.SetValueWithoutNotify(_activeCamera.useAutoLeveling);
             _vrStabToggle?.SetValueWithoutNotify(_activeCamera.useVRHandheldSmoothing);
             _capture360Toggle?.SetValueWithoutNotify(_activeCamera.capture360Enabled);
+            _printPhotoToggle?.SetValueWithoutNotify(_activeCamera.printPhotoEnabled);
             _formatDropdown?.SetValueWithoutNotify(
                 _activeCamera.HandHeld.FormatIndex == BasisHandHeldCameraUI.FORMAT_EXR ? "EXR" : "PNG");
 
@@ -2040,6 +2163,9 @@ namespace Basis.BasisUI.HandHeldCamera
             RefreshFollowTargets();
             TickModeState();
             TickCinematicSections();
+            TickGifSection();
+            TickVideoSection();
+            TickPhotoStatus();
             RefreshTimerLabel();
             RefreshHiddenState();
         }
@@ -2066,6 +2192,10 @@ namespace Basis.BasisUI.HandHeldCamera
 
 
             SyncToggle(_selfieToggle, _activeCamera.HandHeld.IsSelfieMode, ref _lastSelfie);
+            // Fly is still reachable from middle click and the VR thumbstick, and auto-follow and
+            // the mode presets switch it off from underneath — so the toggle has to follow the
+            // camera rather than assume it is the only writer.
+            SyncToggle(_flyToggle, _activeCamera.IsFlyModeEnabled, ref _lastFly);
             SyncToggle(_autoLevelToggle, _activeCamera.useAutoLeveling, ref _lastAutoLevel);
             SyncToggle(_vrStabToggle, _activeCamera.useVRHandheldSmoothing, ref _lastVrStab);
 
@@ -2103,10 +2233,10 @@ namespace Basis.BasisUI.HandHeldCamera
             _followTargetIds.Clear();
             // Entries are the net ids, not the names: PanelDropdown resolves its selection by
             // string-matching the entry, so two players sharing a display name (or one named "Me")
-            // would both resolve to the first match and follow the wrong player.
-            var keys = new List<string> { "0" };
+            // would both resolve to the first match and follow the wrong player. "Me" is keyed
+            // "local" rather than "0" because 0 is the net id of the first player to join.
+            var keys = new List<string> { "local" };
             var labels = new List<string> { "Me" };
-            _followTargetIds.Add(0);
 
             foreach (var pair in remotes)
             {
@@ -2117,9 +2247,9 @@ namespace Basis.BasisUI.HandHeldCamera
             // A ConcurrentDictionary enumerates in bucket order, which reshuffles as players come
             // and go — so the same roster could list in a different order on every rebuild and
             // move a name out from under the cursor. Net id is stable and is join order.
-            _followTargetIds.Sort(1, _followTargetIds.Count - 1, null);
+            _followTargetIds.Sort();
 
-            for (int index = 1; index < _followTargetIds.Count; index++)
+            for (int index = 0; index < _followTargetIds.Count; index++)
             {
                 ushort id = _followTargetIds[index];
                 keys.Add(id.ToString());
@@ -2130,8 +2260,12 @@ namespace Basis.BasisUI.HandHeldCamera
 
             _followTargetDropdown.AssignEntries(keys, labels);
 
-            int selected = _followTargetIds.IndexOf(_activeCamera.followTargetPlayerId);
-            if (selected < 0) selected = 0;
+            int selected = 0;
+            if (_activeCamera.TryGetFollowTargetPlayer(out ushort bound))
+            {
+                int row = _followTargetIds.IndexOf(bound);
+                if (row >= 0) selected = row + 1;
+            }
             _followTargetDropdown.SetValueWithoutNotify(keys[selected]);
             ForceLayoutRebuild(_followGroup);
         }
@@ -2143,7 +2277,7 @@ namespace Basis.BasisUI.HandHeldCamera
             // part-way through teardown — so counting the raw dictionary reported a change on
             // every tick for as long as one sat in the map, rebuilding the dropdown and forcing a
             // layout pass every frame, which is also what made an open list impossible to click.
-            int live = 1; // "Me"
+            int live = 0;
             foreach (var pair in remotes)
             {
                 if (pair.Value != null) live++;
@@ -2151,7 +2285,7 @@ namespace Basis.BasisUI.HandHeldCamera
 
             if (live != _followTargetIds.Count) return true;
 
-            for (int index = 1; index < _followTargetIds.Count; index++)
+            for (int index = 0; index < _followTargetIds.Count; index++)
             {
                 if (!remotes.TryGetValue(_followTargetIds[index], out var remote) || remote == null) return true;
             }

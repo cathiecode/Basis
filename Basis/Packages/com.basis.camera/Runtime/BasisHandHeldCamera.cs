@@ -1,5 +1,6 @@
 using Basis;
 using Basis.BasisUI;
+using Basis.ImagePickup;
 using Basis.Scripts.Audio;
 using Basis.Scripts.BasisSdk.Helpers;
 using Basis.Scripts.BasisSdk.Interactions;
@@ -77,6 +78,13 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     /// <summary>“EXR” or “PNG” (affects RT format and encoding).</summary>
     [Tooltip("Capture format (EXR/PNG)")]
     public string captureFormat = "EXR";
+
+    /// <summary>
+    /// When on, every photo saved to disk is also printed into the world as a shared image
+    /// pickup — the same card a file drag-and-dropped onto the window makes.
+    /// </summary>
+    [Tooltip("Also spawn each saved photo in the world as an image pickup")]
+    public bool printPhotoEnabled = false;
 
     /// <summary>Depth buffer bits for the render texture (e.g., 24).</summary>
     [Tooltip("Depth buffer bits for render texture")]
@@ -336,6 +344,8 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         // the next camera come up as "Basis Camera 2".
         StopWebStream();
         StopVideoOutput();
+        ShutdownGifRecorder();
+        ShutdownVideoRecorder();
         SetAudioListener(false);
         DespawnFollowPip();
         DestroyDetachedGizmo();
@@ -567,8 +577,9 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
 
     /// <summary>
     /// Layers the render-layers UI must not expose, because the camera manages them itself.
-    /// OverlayUI carries the camera's own world markers — the detached preview screen, the
-    /// follow-PIP puck and the dolly waypoints — which would leak the rig into every shot.
+    /// OverlayUI carries the camera's own world markers — the detached preview screen, both
+    /// detached markers (follow-PIP puck and wireframe gizmo) and the dolly waypoints — which
+    /// would leak the rig into every shot.
     /// The UI layer (players' nameplates) is exposed there as its own toggle, so there is no
     /// separate "Show Nameplates" control, and HandHeldCameraUI (the prop's HUD) is exposed
     /// as its own toggle too, off by default.
@@ -672,16 +683,7 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         {
             string folder = PhotosDirectory;
             if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-            // explorer wants backslashes and does not accept a file:// URI.
-            System.Diagnostics.Process.Start("explorer.exe", $"\"{folder.Replace('/', '\\')}\"");
-#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
-            System.Diagnostics.Process.Start("open", $"\"{folder}\"");
-#else
-            System.Diagnostics.Process.Start("xdg-open", $"\"{folder}\"");
-#endif
-            return true;
+            return BasisFileBrowserUtility.Reveal(folder);
         }
         catch (Exception e)
         {
@@ -691,6 +693,53 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
 #else
         return false;
 #endif
+    }
+
+    /// <summary>Full path of the last photo this camera wrote, or null until one lands.</summary>
+    public string LastPhotoPath { get; private set; }
+
+    /// <summary>File name of the last photo this camera wrote, or null.</summary>
+    public string LastPhotoFileName => LastPhotoPath == null ? null : Path.GetFileName(LastPhotoPath);
+
+    /// <summary>Why the last save failed, or null. Cleared by the next successful save.</summary>
+    public string LastPhotoFailure { get; private set; }
+
+    /// <summary>
+    /// Opens the OS file browser on the photo this camera saved most recently, with the file
+    /// itself highlighted, so "where did that shot go" is one click rather than a hunt through
+    /// Pictures. Falls back to the plain folder when nothing has been shot yet, when the file has
+    /// since been moved, or when the highlighting launcher is refused — some Windows setups block
+    /// the explorer.exe spawn that selecting a file requires, and the folder still opens there.
+    /// </summary>
+    public bool RevealLastPhoto()
+    {
+#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX || UNITY_STANDALONE_LINUX || UNITY_EDITOR
+        string path = LastPhotoPath;
+        if (!string.IsNullOrEmpty(path) && BasisFileBrowserUtility.Reveal(path, true)) return true;
+        return OpenPhotosFolder();
+#else
+        return false;
+#endif
+    }
+
+    /// <summary>
+    /// Records where a photo just landed. The single write point for both the flat and the 360
+    /// save paths, so the panel has one place to read regardless of which one took the shot.
+    /// </summary>
+    private void RecordPhotoSaved(string path)
+    {
+        LastPhotoPath = path;
+        LastPhotoFailure = null;
+    }
+
+    /// <summary>
+    /// Records a failed write. The previous photo's path is deliberately kept — it is still on
+    /// disk and still worth revealing — so only the failure text changes.
+    /// </summary>
+    private void RecordPhotoFailed(Exception e)
+    {
+        LastPhotoFailure = $"{e.GetType().Name}: {e.Message}";
+        BasisDebug.LogError($"Could not save photo: {LastPhotoFailure}", BasisDebug.LogTag.Camera);
     }
 
     /// <summary>Stores the UI layer bit as a culling mask for toggling nameplates.</summary>
@@ -1263,6 +1312,8 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
 
         UpdatePreviewScreenTexture();
         TickVideoOutput();
+        TickGifRecorder();
+        TickVideoRecorder();
         UpdateOnPropUIVisibility();
         UpdateAutoFocus();
         UpdateFollowPip();
@@ -1318,14 +1369,45 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         string filename = $"Screenshot_{timestamp}_{captureWidth}x{captureHeight}.{extension}";
         string path = GetSavePath(filename);
 
-        byte[] imageData = captureFormat == "EXR"
-            ? screenshot.EncodeToEXR(Texture2D.EXRFlags.CompressZIP)
-            : screenshot.EncodeToPNG();
+        // async void: anything thrown out of here surfaces as an unhandled exception rather than
+        // as something the shooter can act on, so encode-and-write is captured and reported on
+        // the panel instead — a full disk or a locked file is a normal thing to hit.
+        try
+        {
+            byte[] imageData = captureFormat == "EXR"
+                ? screenshot.EncodeToEXR(Texture2D.EXRFlags.CompressZIP)
+                : screenshot.EncodeToPNG();
 
-        if (photoMetadata != null)
-            imageData = BasisHandHeldCameraPhotoMetadata.Embed(imageData, captureFormat, photoMetadata, screenshot.width, screenshot.height);
+            if (photoMetadata != null)
+                imageData = BasisHandHeldCameraPhotoMetadata.Embed(imageData, captureFormat, photoMetadata, screenshot.width, screenshot.height);
 
-        await File.WriteAllBytesAsync(path, imageData);
+            await File.WriteAllBytesAsync(path, imageData);
+        }
+        catch (Exception e)
+        {
+            RecordPhotoFailed(e);
+            return;
+        }
+
+        RecordPhotoSaved(path);
+        PrintPhotoIfEnabled(path);
+    }
+
+    /// <summary>
+    /// Hands a photo that just landed on disk to the image pickup service, spawning it in front
+    /// of the player as the same shareable, replicated card a drag-and-dropped image file makes.
+    /// PNG only: EXR is a float format the pickup pipeline cannot decode, so those saves stay on
+    /// disk rather than raising a rejection popup for every shot.
+    /// </summary>
+    private void PrintPhotoIfEnabled(string path)
+    {
+        if (!printPhotoEnabled) return;
+        if (!path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+        {
+            BasisDebug.Log("Print Photo skipped: only PNG photos can become image pickups.", BasisDebug.LogTag.Camera);
+            return;
+        }
+        BasisImagePickupManager.SpawnFromFile(path);
     }
 
     /// <summary>Builds a platform-appropriate save path for a screenshot filename.</summary>
@@ -1418,7 +1500,7 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     /// freezes on whatever frame the prop was last on screen for.
     /// </summary>
     private bool HasOffPropFeedConsumer =>
-        IsOverridingDesktopView || IsAnyVideoOutputActive || panelPreviewActive || IsPreviewScreenVisible;
+        IsOverridingDesktopView || IsAnyVideoOutputActive || IsGifRecording || IsVideoRecording || panelPreviewActive || IsPreviewScreenVisible;
 
     /// <summary>
     /// Told by the settings panel while it is open on this camera. Its preview is a second window
@@ -1472,6 +1554,17 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         if (IsAnyVideoOutputActive && VideoOutputSettings.FrameRate > 0f)
         {
             targetHz = Mathf.Max(targetHz, VideoOutputSettings.FrameRate);
+        }
+
+        // A recording is a consumer the same way: capturing 15 distinct frames a second needs
+        // the camera rendering at least that often.
+        if (IsGifRecording && gifRecorder.FrameRate > 0)
+        {
+            targetHz = Mathf.Max(targetHz, gifRecorder.FrameRate);
+        }
+        if (IsVideoRecording && videoRecorder.FrameRate > 0)
+        {
+            targetHz = Mathf.Max(targetHz, videoRecorder.FrameRate);
         }
 
         captureCamera.enabled = renderRateLimiter.AllowThisFrame(Time.unscaledDeltaTime, targetHz, limitEnabled);

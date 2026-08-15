@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Basis.Scripts.BasisCharacterController;
 using Basis.Scripts.BasisSdk.Players;
+using Basis.Scripts.Drivers;
 using Basis.Scripts.Networking;
 using Basis.Scripts.Networking.NetworkedAvatar;
 using Basis.Scripts.Networking.Receivers;
@@ -125,7 +127,8 @@ namespace Basis.BasisUI
                     BasisLocalization.Get("menu.individualPlayer.block.dialog.body", player.DisplayName),
                     BasisLocalization.Get("menu.individualPlayer.blockButton"),
                     BasisLocalization.Get("ui.cancel"),
-                    confirmed => tcs.SetResult(confirmed));
+                    confirmed => tcs.SetResult(confirmed),
+                    category: BasisNotificationCategory.Player);
 
                 if (!await tcs.Task) return current.IsBlocked;
             }
@@ -471,6 +474,21 @@ namespace Basis.BasisUI
             // came here to do rather than on a page of read-only metadata.
             const string actionsTabKey = "menu.individualPlayer.actions";
             PanelTabPage actionsPage = NewPage(actionsTabKey, AddressableAssets.Sprites.List);
+
+            // Ahead of every action, because the usual reason for opening this panel off a
+            // nameplate is "why can I not see this person?" — that answer leads instead of being
+            // spread across the Avatar tab's load-error card, its performance card, and the range
+            // readouts on Debug. Built before the action grid so it is the first row on the page,
+            // and repainted by IndividualPlayerPanelUpdater because everything it reads (range,
+            // a download finishing, the far avatar swapping in) moves without the panel being
+            // touched.
+            var avatarStatusField = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, actionsPage.Descriptor.ContentParent);
+            // Before the first paint: the card quotes AvatarLoadErrorMessage and
+            // PerformanceBlockReason verbatim, and neither is ours to trust as markup.
+            avatarStatusField.DisableRichText();
+            BasisPanelTint.Handle avatarStatusTint = BasisPanelTint.Capture(avatarStatusField);
+            PaintAvatarStatus(remotePlayer, avatarStatusField, avatarStatusTint, false);
+
             BuildActionsPage(actionsPage, remotePlayer, settings, sync);
             AddPage(actionsTabKey, actionsPage);
 
@@ -1306,7 +1324,8 @@ namespace Basis.BasisUI
                         BasisLocalization.Get("menu.individualPlayer.kick.dialog.body", remotePlayer.DisplayName),
                         BasisLocalization.Get("menu.individualPlayer.kick"),
                         BasisLocalization.Get("ui.cancel"),
-                        confirmed => { if (confirmed) BasisNetworkModeration.SendKick(targetUUID, ""); });
+                        confirmed => { if (confirmed) BasisNetworkModeration.SendKick(targetUUID, ""); },
+                        category: BasisNotificationCategory.Player);
                 };
 
                 PanelButton banBtn = PanelButton.CreateNew(adminGroup.ContentParent);
@@ -1319,7 +1338,8 @@ namespace Basis.BasisUI
                         BasisLocalization.Get("menu.individualPlayer.ban.dialog.body", remotePlayer.DisplayName),
                         BasisLocalization.Get("menu.individualPlayer.ban"),
                         BasisLocalization.Get("ui.cancel"),
-                        confirmed => { if (confirmed) BasisNetworkModeration.SendBan(targetUUID, ""); });
+                        confirmed => { if (confirmed) BasisNetworkModeration.SendBan(targetUUID, ""); },
+                        category: BasisNotificationCategory.Player);
                 };
 
                 PanelButton ipBanBtn = PanelButton.CreateNew(adminGroup.ContentParent);
@@ -1332,7 +1352,8 @@ namespace Basis.BasisUI
                         BasisLocalization.Get("menu.individualPlayer.ipBan.dialog.body", remotePlayer.DisplayName),
                         BasisLocalization.Get("menu.individualPlayer.ipBan"),
                         BasisLocalization.Get("ui.cancel"),
-                        confirmed => { if (confirmed) BasisNetworkModeration.SendIPBan(targetUUID, ""); });
+                        confirmed => { if (confirmed) BasisNetworkModeration.SendIPBan(targetUUID, ""); },
+                        category: BasisNotificationCategory.Player);
                 };
 
                 PanelButton teleportToBtn = PanelButton.CreateNew(adminGroup.ContentParent);
@@ -1400,6 +1421,127 @@ namespace Basis.BasisUI
                     }
                 };
 
+                // ---- Force avatar ----
+                // Built once with the page: this panel is rebuilt each time it is opened, so the
+                // list is as fresh as the rest of what's on screen.
+                var forceAvatarGroup = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, adminGroup.ContentParent);
+                forceAvatarGroup.SetTitle(BasisLocalization.Get("settings.admin.forceAvatar"));
+                forceAvatarGroup.SetDescription(BasisLocalization.Get("menu.individualPlayer.forceAvatar.description"));
+
+                List<ForceAvatarCatalog.Entry> avatarEntries = ForceAvatarCatalog.Build();
+
+                PanelDropdown avatarDropdown = PanelDropdown.CreateNewEntry(forceAvatarGroup.ContentParent);
+                avatarDropdown.Descriptor.SetTitle(BasisLocalization.Get("settings.admin.forceAvatar.pick"));
+                avatarDropdown.Descriptor.SetDescription(BasisLocalization.Get("settings.admin.forceAvatar.pick.tooltip"));
+                ForceAvatarCatalog.Apply(avatarDropdown, avatarEntries);
+
+                PanelButton forceAvatarBtn = PanelButton.CreateNew(forceAvatarGroup.ContentParent);
+                forceAvatarBtn.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.forceAvatar"));
+                forceAvatarBtn.Descriptor.SetDescription(BasisLocalization.Get("menu.individualPlayer.forceAvatar.description"));
+                forceAvatarBtn.OnClicked += () =>
+                {
+                    if (!ForceAvatarCatalog.TryResolve(avatarEntries, avatarDropdown.Value, out ForceAvatarCatalog.Entry entry))
+                    {
+                        BasisDebug.LogError("No avatar selected.");
+                        return;
+                    }
+                    if (!BasisNetworkPlayers.PlayerToNetworkedPlayer(remotePlayer, out BasisNetworkPlayer np)) return;
+
+                    BasisMainMenu.Instance.OpenDialogue(
+                        BasisLocalization.Get("menu.individualPlayer.forceAvatar.dialog.title"),
+                        BasisLocalization.Get("menu.individualPlayer.forceAvatar.dialog.body", remotePlayer.DisplayName, entry.Label),
+                        BasisLocalization.Get("menu.individualPlayer.forceAvatar"),
+                        BasisLocalization.Get("ui.cancel"),
+                        confirmed => { if (confirmed) BasisNetworkModeration.ForceAvatar(np.playerId, entry.Item); },
+                        category: BasisNotificationCategory.Player);
+                };
+
+                // ---- Locomotion override ----
+                RectTransform adminContent = adminGroup.ContentParent;
+                PanelSectionToggle locomotionSection = PanelSectionToggle.CreateNewEntry(adminContent);
+                locomotionSection.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion"));
+                int locomotionStart = adminContent.childCount;
+
+                var locomotionGroup = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, adminContent);
+                locomotionGroup.SetDescription(BasisLocalization.Get("menu.individualPlayer.locomotion.description"));
+
+                PanelToggle jumpToggle = PanelToggle.CreateNew(locomotionGroup.ContentParent);
+                jumpToggle.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion.jumpHeight.override"));
+                PanelSlider jumpSlider = PanelSlider.CreateNew(locomotionGroup.ContentParent);
+                jumpSlider.SetSliderSettings(PanelSlider.SliderSettings.Advanced(
+                    BasisLocalization.Get("menu.individualPlayer.locomotion.jumpHeight"), 0.1f, 5f, false, 2, ValueDisplayMode.Raw));
+                jumpSlider.SetValueWithoutNotify(1f);
+
+                PanelToggle walkToggle = PanelToggle.CreateNew(locomotionGroup.ContentParent);
+                walkToggle.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion.walkSpeed.override"));
+                PanelSlider walkSlider = PanelSlider.CreateNew(locomotionGroup.ContentParent);
+                walkSlider.SetSliderSettings(PanelSlider.SliderSettings.Advanced(
+                    BasisLocalization.Get("menu.individualPlayer.locomotion.walkSpeed"), 0.1f, 15f, false, 2, ValueDisplayMode.Raw));
+                walkSlider.SetValueWithoutNotify(2.5f);
+
+                PanelToggle runToggle = PanelToggle.CreateNew(locomotionGroup.ContentParent);
+                runToggle.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion.runSpeed.override"));
+                PanelSlider runSlider = PanelSlider.CreateNew(locomotionGroup.ContentParent);
+                runSlider.SetSliderSettings(PanelSlider.SliderSettings.Advanced(
+                    BasisLocalization.Get("menu.individualPlayer.locomotion.runSpeed"), 0.1f, 20f, false, 2, ValueDisplayMode.Raw));
+                runSlider.SetValueWithoutNotify(4f);
+
+                List<string> modeEntries = SettingsProviderModeratorTab.BuildLocomotionModeEntries();
+                PanelDropdown modeDropdown = PanelDropdown.CreateNewEntry(locomotionGroup.ContentParent);
+                modeDropdown.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion.mode"));
+                modeDropdown.AssignEntries(modeEntries);
+                modeDropdown.SetValueWithoutNotify(modeEntries[0]);
+
+                void ApplyLocomotionSliderVisibility()
+                {
+                    jumpSlider.Descriptor.SetActive(jumpToggle.Value);
+                    walkSlider.Descriptor.SetActive(walkToggle.Value);
+                    runSlider.Descriptor.SetActive(runToggle.Value);
+                }
+
+                ApplyLocomotionSliderVisibility();
+                jumpToggle.OnValueChanged += _ => { ApplyLocomotionSliderVisibility(); locomotionGroup.ForceRebuild(); };
+                walkToggle.OnValueChanged += _ => { ApplyLocomotionSliderVisibility(); locomotionGroup.ForceRebuild(); };
+                runToggle.OnValueChanged += _ => { ApplyLocomotionSliderVisibility(); locomotionGroup.ForceRebuild(); };
+
+                PanelButton locomotionApplyBtn = PanelButton.CreateNew(locomotionGroup.ContentParent);
+                locomotionApplyBtn.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion.apply"));
+                locomotionApplyBtn.OnClicked += () =>
+                {
+                    if (!BasisNetworkPlayers.PlayerToNetworkedPlayer(remotePlayer, out BasisNetworkPlayer np)) return;
+
+                    BasisLocomotionValues values = SettingsProviderModeratorTab.ComposeLocomotionValues(
+                        jumpToggle.Value, jumpSlider.Value,
+                        walkToggle.Value, walkSlider.Value,
+                        runToggle.Value, runSlider.Value,
+                        modeEntries.IndexOf(modeDropdown.Value));
+
+                    if (values.Fields == BasisLocomotionField.None)
+                    {
+                        BasisDebug.LogError("No locomotion fields selected to override.");
+                        return;
+                    }
+
+                    BasisNetworkModeration.SetLocomotionOverride(np.playerId, values);
+                };
+
+                PanelButton locomotionClearBtn = PanelButton.CreateNew(locomotionGroup.ContentParent);
+                locomotionClearBtn.Descriptor.SetTitle(BasisLocalization.Get("menu.individualPlayer.locomotion.clear"));
+                locomotionClearBtn.OnClicked += () =>
+                {
+                    if (BasisNetworkPlayers.PlayerToNetworkedPlayer(remotePlayer, out BasisNetworkPlayer np))
+                    {
+                        BasisNetworkModeration.ClearLocomotionOverride(np.playerId);
+                    }
+                };
+
+                PanelSectionToggleHelpers.FinalizeFlatSectionFromIndex(locomotionSection, adminContent, locomotionStart, false,
+                    visible =>
+                    {
+                        if (visible) ApplyLocomotionSliderVisibility();
+                        locomotionGroup.ForceRebuild();
+                    });
+
                 // ---- Per-user permissions ----
                 var permGroup = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Group, adminGroup.ContentParent);
                 permGroup.SetTitle(BasisLocalization.Get("menu.individualPlayer.permissions"));
@@ -1418,6 +1560,8 @@ namespace Basis.BasisUI
                     PermNodes.ModerationMessageAll,
                     PermNodes.ModerationTeleport,
                     PermNodes.ModerationShout,
+                    PermNodes.ModerationForceAvatar,
+                    PermNodes.ModerationLocomotion,
                     PermNodes.PlayerModeration,
                     PermNodes.PermissionsView,
                     PermNodes.PermissionsEdit,
@@ -1632,6 +1776,8 @@ namespace Basis.BasisUI
             updater.DirectConnPingTint = directConnPingTint;
             updater.DirectConnRebuildFrom = p2pGroup.ContentParent;
             updater.DirectConnRebuildStopAt = networkPage.Descriptor.ContentParent;
+            updater.AvatarStatusField = avatarStatusField;
+            updater.AvatarStatusTint = avatarStatusTint;
 
             // Wire audio debug fields
             updater.AudioSourceField = audioSourceField;
