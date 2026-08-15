@@ -32,92 +32,83 @@ namespace Basis.IK
 
             Quaternion chestDesired = targetRotationChest * targetOffsetChest;
 
-            // Prone: the locomotion animation owns the pelvis. Every placement stage below models an
-            // upright body under the head (lock-mode restore, hips-under-head clamp, counterbalance,
-            // hip hinge, crouch sit-back) and would fold a lying pose back under the camera, so the
-            // hips stage stands down to a single yaw follow; the chain solve below still pins the
-            // head to the gaze.
-            if (proneBodyPose)
+            Vector3 headTargetPos = targetPositionHead;
+            Vector3 hipsTargetPos = targetPositionHips;
+
+            Quaternion headTargetRot = targetRotationHead;
+            Quaternion hipsTargetRot = targetRotationHips;
+            Quaternion offsetHips = offsetRotationHips;
+
+            Quaternion hipDesired = hipsTargetRot * offsetHips;
+
+            float restDist = minHeadSpineHeight;
+            BasisIKLockMode lockMode = ikLockMode;
+            Vector3 up = playerUp;
+
+            bool animationRelative = TryGetVirtualSpineBodyUp(out Vector3 animationBodyUp);
+            Vector3 lockUp = animationRelative ? animationBodyUp : up;
+
+            // NOTE: Prone process is remove due to conflict between animation-aware spine and prone correction
+
+            switch (lockMode)
             {
-                ApplyProneBodyYaw(stream);
-            }
-            else
-            {
-                Vector3 headTargetPos = targetPositionHead;
-                Vector3 hipsTargetPos = targetPositionHips;
+                case BasisIKLockMode.LockHips:
+                    break;
 
-                Quaternion headTargetRot = targetRotationHead;
-                Quaternion hipsTargetRot = targetRotationHips;
-                Quaternion offsetHips = offsetRotationHips;
-
-                Quaternion hipDesired = hipsTargetRot * offsetHips;
-
-                float restDist = minHeadSpineHeight;
-                BasisIKLockMode lockMode = ikLockMode;
-                Vector3 up = playerUp;
-
-                bool animationRelative = TryGetVirtualSpineBodyUp(out Vector3 animationBodyUp);
-                Vector3 lockUp = animationRelative ? animationBodyUp : up;
-
-                switch (lockMode)
-                {
-                    case BasisIKLockMode.LockHips:
-                        break;
-
-                    case BasisIKLockMode.LockHead: // head is the anchor; the spine may not compress below its rest length, allow stretching further
+                case BasisIKLockMode.LockHead: // head is the anchor; the spine may not compress below its rest length, allow stretching further
+                    {
+                        Vector3 headToHips = hipsTargetPos - headTargetPos;
+                        float spineLen = headToHips.magnitude;
+                        if (spineLen < restDist)
                         {
-                            Vector3 headToHips = hipsTargetPos - headTargetPos;
-                            float spineLen = headToHips.magnitude;
-                            if (spineLen < restDist)
-                            {
-                                Vector3 spineDir = spineLen > k_Epsilon ? headToHips / spineLen : hipsTargetRot * -lockUp;
-                                hipsTargetPos = headTargetPos + spineDir * restDist;
-                            }
-
-                            if (!hasHipsTracker)
-                            {
-                                hipsTargetPos = ClampHipsUnderHead(headTargetPos, hipsTargetPos, restDist * HipsUnderHeadMaxLeanFrac, up);
-                            }
+                            Vector3 spineDir = spineLen > k_Epsilon ? headToHips / spineLen : hipsTargetRot * -lockUp;
+                            hipsTargetPos = headTargetPos + spineDir * restDist;
                         }
-                        break;
 
-                    default:
-                        Quaternion lockHeadRotation = animationRelative
-                            ? headTargetRot * targetOffsetHead
-                            : headTargetRot;
+                        if (!hasHipsTracker)
+                        {
+                            hipsTargetPos = ClampHipsUnderHead(headTargetPos, hipsTargetPos, restDist * HipsUnderHeadMaxLeanFrac, up);
+                        }
+                    }
+                    break;
 
-                        hipsTargetPos = AntiContortionist(headTargetPos, lockHeadRotation, hipsTargetPos, hipsTargetRot, restDist);
-                        hipsTargetPos = MitigateSpineBuckling(headTargetPos, hipsTargetRot, hipsTargetPos, restDist, lockUp);
-                        float MaxBendDeg = maxBendDeg;
-                        hipsTargetPos = EnforceSpineBendLimit(headTargetPos, hipsTargetPos, MaxBendDeg, lockUp);
-                        hipsTargetPos = ClampHipsAroundHead(headTargetPos, hipsTargetPos, restDist, minFactor, maxFactor, lockUp);
-                        break;
-                }
-                Vector3 neckCue = ComputeNeckCue(headTargetPos);
-                float crouchFade = 1f;
-                if (!hasHipsTracker && !animationRelative)
-                {
-                    hipsTargetPos = ApplyTrunkCounterbalance(neckCue, hipsTargetPos, up, out float flexionFrac);
-                    crouchFade = 1f - flexionFrac;
-                }
-                if (!animationRelative)
-                {
-                    hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
-                }
+                default:
+                    Quaternion lockHeadRotation = animationRelative
+                        ? headTargetRot * targetOffsetHead
+                        : headTargetRot;
 
-                hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
-                targetPositionHips = hipsTargetPos;
-                if (!hasHipsTracker && !animationRelative)
-                {
-                    hipDesired = ApplyHipHinge(stream, neckCue, hipsTargetPos, hipDesired, up);
-                }
-
-                if (handleHips.IsValid(stream))
-                {
-                    handleHips.SetPosition(stream, hipsTargetPos);
-                    handleHips.SetRotation(stream, hipDesired);
-                }
+                    hipsTargetPos = AntiContortionist(headTargetPos, lockHeadRotation, hipsTargetPos, hipsTargetRot, restDist);
+                    hipsTargetPos = MitigateSpineBuckling(headTargetPos, hipsTargetRot, hipsTargetPos, restDist, lockUp);
+                    float MaxBendDeg = maxBendDeg;
+                    hipsTargetPos = EnforceSpineBendLimit(headTargetPos, hipsTargetPos, MaxBendDeg, lockUp);
+                    hipsTargetPos = ClampHipsAroundHead(headTargetPos, hipsTargetPos, restDist, minFactor, maxFactor, lockUp);
+                    break;
             }
+            Vector3 neckCue = ComputeNeckCue(headTargetPos);
+            float crouchFade = 1f;
+            if (!hasHipsTracker && !animationRelative)
+            {
+                hipsTargetPos = ApplyTrunkCounterbalance(neckCue, hipsTargetPos, up, out float flexionFrac);
+                crouchFade = 1f - flexionFrac;
+            }
+            if (!animationRelative)
+            {
+                hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
+            }
+
+            hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
+            targetPositionHips = hipsTargetPos;
+            if (!hasHipsTracker && !animationRelative)
+            {
+                hipDesired = ApplyHipHinge(stream, neckCue, hipsTargetPos, hipDesired, up);
+            }
+
+            if (handleHips.IsValid(stream))
+            {
+                handleHips.SetPosition(stream, hipsTargetPos);
+                handleHips.SetRotation(stream, hipDesired);
+            }
+
             sMarkerSpineHips.End();
             if (hasChestTracker && handleChest.IsValid(stream))
             {
