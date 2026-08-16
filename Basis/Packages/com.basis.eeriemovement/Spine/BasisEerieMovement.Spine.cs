@@ -96,7 +96,6 @@ namespace Basis.IK
                 hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
             }
 
-            hipsTargetPos = ApplyCrouchBodyOffset(stream, headTargetPos, hipsTargetPos, hipDesired, up, crouchFade);
             targetPositionHips = hipsTargetPos;
             if (!hasHipsTracker && !animationRelative)
             {
