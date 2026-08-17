@@ -37,7 +37,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     public float flyAcceleration = 10f;
 
     /// <summary>Deceleration factor when no input (used with momentum).</summary>
-    public float flyDeceleration = 8f;
+    public float flyDeceleration = 100f;
 
     /// <summary>Position smoothing factor while flying.</summary>
     public float flyMovementSmoothing = 12f;

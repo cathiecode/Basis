@@ -6426,6 +6426,7 @@ MonoBehaviour:
   CanSelfSteal: 1
   LerpToHandOnPickup: 1
   WeldToHand: 1
+  GripPoint: {fileID: 0}
   ShowHighlightOnHover: 1
   DesktopRotateSpeed: 0.1
   DesktopZoopSpeed: 0.2
@@ -6436,6 +6437,8 @@ MonoBehaviour:
   interactEndLinearVelocityMultiplier: 1
   minAngularVelocity: 0.5
   interactEndAngularVelocityMultiplier: 1
+  throwWindowSeconds: 0.05
+  throwLookbackSeconds: 0.15
   RigidRef: {fileID: 0}
   InputConstraint:
     rid: 1028902784308609428
@@ -6482,12 +6485,17 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+  cinematicEnabled: 0
+  useTargetGroup: 0
+  subjectFramingRadius: 0.45
+  occlusionProbeRadius: 0.12
+  targetGroupIncludesLocal: 0
   HHC: {fileID: 2752889367281480341}
   PinSpace: 0
   flySpeed: 2
   flyFastMultiplier: 3
   flyAcceleration: 10
-  flyDeceleration: 8
+  flyDeceleration: 100
   flyMovementSmoothing: 12
   mouseSensitivity: 0.5
   rotationSmoothing: 15
@@ -6567,6 +6575,7 @@ MonoBehaviour:
   PreviewCaptureWidth: 1920
   PreviewCaptureHeight: 1080
   captureFormat: EXR
+  printPhotoEnabled: 0
   depth: 24
   msaaSamples: 2
   InstanceID: 0
@@ -6583,12 +6592,16 @@ MonoBehaviour:
     filmGrain: {fileID: 0}
     whiteBalance: {fileID: 0}
     lensDistortion: {fileID: 0}
+    motionBlur: {fileID: 0}
   LastVisibilityState: 0
   capture360Enabled: 0
   capture360Stereo: 1
   pano360CubeFaceSize: 0
   pano360StereoSeparation: 0.064
-  showFollowPip: 1
+  backgroundMode: 0
+  backgroundCustomColor: {r: 0, g: 0.706, b: 0.239, a: 1}
+  backgroundKeepsWorld: 0
+  detachedMarker: 1
   previewScreenSideOffset: 0.35
   previewScreenWidth: 0.45
   previewScreenMinScalePercent: 40
