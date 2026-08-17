@@ -215,6 +215,7 @@ namespace Basis.Network.Core
                 BroadcastReceiveEnabled = false,
                 UseNativeSockets = lnl.UseNativeSockets,
                 MergeHoldMs = lnl.MergeHoldMs,
+                CompactMergeEnabled = lnl.CompactMerged,
                 PeerUpdateParallelism = lnl.PeerUpdateParallelism,
                 // This pool's share of the machine, decided centrally so it composes with the
                 // reduction system's overlapping pool instead of both claiming the whole box.
@@ -228,6 +229,13 @@ namespace Basis.Network.Core
                     peers => BasisPopulationScale.UnreliableQueuePerPeer(lnl.MaxUnreliableQueuePerPeer, peers),
                 ResolvePacketPoolMax =
                     peers => BasisPopulationScale.PacketPoolMax(lnl.PacketPoolSizeMax, peers, lnl.PacketPoolSizePerPeer),
+                // Voice is held apart from bulk avatar state so a backlog of position updates can
+                // neither delay it nor shed it. Fixed, not population-scaled: this queue holds one
+                // stream per talker, not one update per pair.
+                PriorityUnreliableChannels = BasisNetworkCommons.BuildPriorityUnreliableChannelMap(),
+                MaxPriorityUnreliableQueuePerPeer = lnl.MaxPriorityUnreliableQueuePerPeer,
+                ResolvePriorityUnreliableQueuePerPeer =
+                    peers => BasisPopulationScale.PriorityQueuePerPeer(lnl.MaxPriorityUnreliableQueuePerPeer, peers),
                 ChannelsCount = BasisNetworkCommons.TotalChannels,
                 EnableStatistics = configuration.EnableStatistics,
                 IPv6Enabled = lnl.IPv6Enabled,
@@ -289,6 +297,7 @@ namespace Basis.Network.Core
         public int ConnectedPeersCount => manager.ConnectedPeersCount;
 
         public long UnreliableDropped => manager.UnreliableDropped;
+        public long PriorityUnreliableDropped => manager.PriorityUnreliableDropped;
 
         public NetStatistics Statistics => new NetStatistics(manager.Statistics);
     }

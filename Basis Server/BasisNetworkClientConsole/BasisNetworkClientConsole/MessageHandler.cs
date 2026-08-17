@@ -16,7 +16,9 @@ namespace Basis.Network
         // (e.g. Unity builds under test) additional data is reaching the wire at all.
         public static bool ObserveOnly;
 
-        private static bool Sniffing => MovementSender.EmitFaceData || ObserveOnly;
+        // Bundle capture needs SniffBundle to run (that is where the decoded body exists), so it
+        // turns sniffing on by itself rather than making the operator remember to pair the flags.
+        private static bool Sniffing => MovementSender.EmitFaceData || ObserveOnly || BundleCaptureSink.Enabled;
         public static long PoseOnlyKeyframes;       // even avatar channels (no additional section)
         public static long FaceKeyframesSmall;      // odd byte-id channels (7/9/11/13)
         public static long FaceKeyframesLarge;      // odd ushort-id channels (42/44/46/48)
@@ -119,6 +121,12 @@ namespace Basis.Network
                         SniffBundle(clientIndex, reader);
                     }
                     break;
+                case BasisNetworkCommons.VoiceChannel:
+                    NoteVoiceDelivery(clientIndex, reader, largeId: false);
+                    break;
+                case BasisNetworkCommons.VoiceLargeChannel:
+                    NoteVoiceDelivery(clientIndex, reader, largeId: true);
+                    break;
                 case BasisNetworkCommons.AvatarChannel:
                     // HVR's reliable/low-frequency path (handshake, variable definitions,
                     // low-freq updates, high-frequency upgrades) — counting these splits
@@ -181,17 +189,39 @@ namespace Basis.Network
                 if (reader.AvailableBytes < 3) return;
                 byte[] raw = reader.RawData;
                 int pos = reader.Position;
+                byte flags = raw[pos];
                 ushort rawLen = (ushort)(raw[pos + 1] | (raw[pos + 2] << 8));
                 int compressedLen = reader.AvailableBytes - 3;
                 if (rawLen == 0 || compressedLen <= 0) return;
 
                 byte[] grouped = new byte[rawLen];
-                int decoded = LZ4Codec.Decode(raw.AsSpan(pos + 3, compressedLen), grouped.AsSpan(0, rawLen));
+                int decoded;
+                if (BasisAvatarBundleZstd.CodecOf(flags) == BasisAvatarBundleZstd.CodecZstdDict)
+                {
+                    if (BasisAvatarBundleZstd.DictGenerationOf(flags) != BasisAvatarBundleZstd.DictionaryGeneration)
+                    {
+                        // Wrong dictionary generation — the payload is undecodable here and
+                        // counting it as a parse failure is the point: it means the load-tester
+                        // and the server were built from different dictionaries.
+                        Interlocked.Increment(ref ParseFailures);
+                        return;
+                    }
+                    BasisAvatarBundleZstd.TryDecompress(raw.AsSpan(pos + 3, compressedLen), grouped.AsSpan(0, rawLen), out decoded);
+                }
+                else
+                {
+                    decoded = LZ4Codec.Decode(raw.AsSpan(pos + 3, compressedLen), grouped.AsSpan(0, rawLen));
+                }
                 if (decoded != rawLen)
                 {
                     Interlocked.Increment(ref ParseFailures);
                     return;
                 }
+
+                // The grouped body here is byte-for-byte what the server compressed, which makes
+                // this the natural place to harvest dictionary training samples — no server-side
+                // hot-path hook, and the distribution is exactly what a real client receives.
+                BundleCaptureSink.Capture(grouped, decoded, compressedLen, BasisAvatarBundleZstd.CodecOf(flags));
 
                 // Ungroup and un-transpose into the flat [chan][len:2][bytes]* stream below.
                 byte[] scratch = new byte[BasisAvatarBundleCodec.MaxFlatSize(decoded)];
@@ -419,6 +449,28 @@ namespace Basis.Network
             ushort playerId = large ? (ushort)(raw[pos] | (raw[pos + 1] << 8)) : raw[pos];
             Basis.Network.MovementSender.VoiceSender.NoteAudible(clientIndex, playerId);
             NoteSenderSeen(playerId);
+        }
+
+        /// <summary>
+        /// Books one relayed voice frame against its sender's sequence, which is what turns "the
+        /// server says it sent voice" into "this receiver could actually have played it".
+        ///
+        /// Wire, as written by BasisServerHandleEvents: [playerId:1|2][sequence:1][silence:1][opus].
+        /// Read straight out of the buffer rather than through the reader, matching NoteVoiceRange —
+        /// the reader is left untouched for anything downstream.
+        /// </summary>
+        private static void NoteVoiceDelivery(int clientIndex, NetPacketReader reader, bool largeId)
+        {
+            if (!VoiceDeliveryStats.Enabled) return;
+
+            int pos = reader.Position;
+            byte[] raw = reader.RawData;
+            int idBytes = largeId ? 2 : 1;
+            if (raw == null || pos + idBytes + 1 > raw.Length) return;
+
+            int senderId = largeId ? (raw[pos] | (raw[pos + 1] << 8)) : raw[pos];
+            byte sequence = raw[pos + idBytes];
+            VoiceDeliveryStats.Note(clientIndex, senderId, sequence);
         }
 
         // ── Per-sender delivery fairness ──────────────────────────────────────────────────────

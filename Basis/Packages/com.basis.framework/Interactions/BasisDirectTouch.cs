@@ -664,6 +664,7 @@ namespace Basis.Scripts.BasisSdk.Interactions
             WriteEventData(st, surf, cam);
 
             var ed = st.EventData;
+
             ed.pressPosition = ed.position;
             ed.pointerPressRaycast = ed.pointerCurrentRaycast;
             ed.eligibleForClick = true;

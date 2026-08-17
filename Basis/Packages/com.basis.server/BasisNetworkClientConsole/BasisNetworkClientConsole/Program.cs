@@ -31,6 +31,18 @@ namespace Basis
             //   BASIS_FACE_SPACING=<m>  pin client i at (i*m,1,0), no random walk (distance tiers)
             //   BASIS_UPLINK_DELTAS=0   legacy all-keyframe uploads (no v42 uplink deltas)
             //   BASIS_PACKET_LOSS=<pct> simulate inbound/outbound UDP loss on every client
+            //   BASIS_BUNDLE_CAPTURE=<path>  harvest decoded avatar-bundle bodies for Zstd
+            //                                dictionary training (see BundleCaptureSink)
+            //   BASIS_BUNDLE_CAPTURE_EVERY=<n>   keep 1 bundle in n (default 200)
+            //   BASIS_BUNDLE_CAPTURE_MAX=<n>     stop after n samples (default 20000)
+            string capturePath = Environment.GetEnvironmentVariable("BASIS_BUNDLE_CAPTURE");
+            if (!string.IsNullOrWhiteSpace(capturePath))
+            {
+                if (!int.TryParse(Environment.GetEnvironmentVariable("BASIS_BUNDLE_CAPTURE_EVERY"), out int captureEvery) || captureEvery < 1) captureEvery = 200;
+                if (!int.TryParse(Environment.GetEnvironmentVariable("BASIS_BUNDLE_CAPTURE_MAX"), out int captureMax) || captureMax < 1) captureMax = 20000;
+                BundleCaptureSink.Configure(capturePath, captureMax, captureEvery);
+                BNL.Log($"[BundleCapture] Capturing 1 bundle in {captureEvery} (max {captureMax}) to {capturePath}.");
+            }
             if (Environment.GetEnvironmentVariable("BASIS_EMIT_FACE") == "1")
             {
                 MovementSender.EmitFaceData = true;
@@ -63,6 +75,11 @@ namespace Basis
                 _running = false;
                 MicrophoneCapture.Stop();
                 clientManager.StopClientsAsync().GetAwaiter().GetResult();
+                // Close the capture file here rather than relying on the finalizer: a run is
+                // normally ended with Ctrl-C, and a half-written last record would make the
+                // whole capture unreadable to the trainer.
+                string captureSummary = BundleCaptureSink.Finish();
+                if (captureSummary != null) Console.WriteLine(captureSummary);
             };
 
             MovementSender.Initialize(clientManager.ClientCount);
@@ -84,6 +101,23 @@ namespace Basis
             }
 
             await clientManager.StartClientsAsync();
+
+            // Voice delivery accounting. On whenever voice is simulated: it is a per-frame dictionary
+            // touch on the receive path, which is nothing against the avatar traffic beside it, and
+            // without it a run can only report what the server chose to drop rather than what a
+            // listener would actually have heard.
+            if (Basis.Config.ConfigManager.SimulateVoice)
+            {
+                VoiceDeliveryStats.Enabled = true;
+                _ = Task.Run(async () =>
+                {
+                    while (_running)
+                    {
+                        await Task.Delay(5000);
+                        BNL.Log(VoiceDeliveryStats.Describe());
+                    }
+                });
+            }
 
             // Periodic observer summary so a timed run ends with machine-readable totals.
             if (MovementSender.EmitFaceData || MessageHandler.ObserveOnly)

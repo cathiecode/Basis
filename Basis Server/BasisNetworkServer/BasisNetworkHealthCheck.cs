@@ -1,9 +1,11 @@
 using Basis.Network.Core;
+using Basis.Network.Core.Compression;
 using BasisNetworkServer.BasisNetworkingReductionSystem;
 using System;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -141,6 +143,12 @@ namespace Basis.Network.Server
                     ? ",\"bsr\":" + BuildBsrJson()
                     : string.Empty;
 
+                // Always on, unlike the BSR block: these are a handful of counter reads, and GC
+                // behaviour is the one thing that was completely invisible here. Working set alone
+                // cannot distinguish a server holding live state from one drowning in collections,
+                // and those want opposite fixes.
+                string gc = ",\"gc\":" + BuildGcJson();
+
                 if (NetworkServer.Configuration.EnableStatistics && NetworkServer.Server != null)
                 {
                     int visitors = NetworkServer.Server.ConnectedPeersCount;
@@ -156,18 +164,34 @@ namespace Basis.Network.Server
                         $"\"capacity\":{capacity}," +
                         $"\"sent\":{sent}," +
                         $"\"recv\":{recv}," +
+                        // Datagram counts alongside the byte counts, so egress work can be read as
+                        // packet rate and not just volume - the two move independently.
+                        $"\"packetsSent\":{NetworkServer.Server.Statistics.PacketsSent}," +
+                        $"\"packetsRecv\":{NetworkServer.Server.Statistics.PacketsReceived}," +
                         // Zero on a healthy instance. Rising means the server is shedding position
                         // updates because it cannot drain what it produces — the one number that
                         // distinguishes "busy" from "past capacity", and there was no way to see it.
                         $"\"droppedUnreliable\":{NetworkServer.Server.UnreliableDropped}," +
+                        // Voice drops, counted apart from the line above. Bulk shedding is the
+                        // designed response to load and a busy instance will show plenty of it;
+                        // anything here is audio somebody did not hear, so the two must never be
+                        // read as one number. Non-zero means the priority queue overflowed, which
+                        // is a much louder signal than the same count of avatar updates.
+                        $"\"droppedVoice\":{NetworkServer.Server.PriorityUnreliableDropped}," +
                         // The bound those drops are measured against. Without it the drop count is
                         // unreadable — you cannot tell a server that is genuinely past capacity from
                         // one whose queue is simply sized too small, which is exactly the confusion
                         // that let a fixed 256 shed half of all avatar updates unnoticed.
                         $"\"queuePerPeer\":{(NetworkServer.Server as LNLNetManager)?.manager?.EffectiveUnreliableQueuePerPeer ?? 0}," +
+                        // The voice queue's own bound. Reported separately because it is sized on a
+                        // different budget and is expected to be the DEEPER of the two — reading a
+                        // voice drop against the bulk bound would make a correctly-tuned server look
+                        // misconfigured.
+                        $"\"voiceQueuePerPeer\":{(NetworkServer.Server as LNLNetManager)?.manager?.EffectivePriorityUnreliableQueuePerPeer ?? 0}," +
                         $"\"currentTime\":\"{nowUtc:O}\"," +
                         $"\"startTime\":\"{startTimeUtc:O}\"," +
                         $"\"version\":\"{BasisNetworkVersion.ServerVersion}\"" +
+                        gc +
                         bsr +
                         "}";
                 }
@@ -180,6 +204,7 @@ namespace Basis.Network.Server
                         $"\"currentTime\":\"{nowUtc:O}\"," +
                         $"\"startTime\":\"{startTimeUtc:O}\"," +
                         $"\"version\":\"{BasisNetworkVersion.ServerVersion}\"" +
+                        gc +
                         bsr +
                         "}";
                 }
@@ -205,6 +230,42 @@ namespace Basis.Network.Server
                 : value.ToString(format, CultureInfo.InvariantCulture);
 
         private static string Int(long value) => value.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// GC counters, so allocation pressure can be told apart from live state.
+        ///
+        /// <para><c>allocatedMb</c> is cumulative for the process; the useful reading is its slope
+        /// between two samples, which is the allocation RATE. <c>pauseTimePercent</c> is the runtime's
+        /// own figure for time spent paused in GC and is the single number that says whether
+        /// collections are costing throughput.</para>
+        ///
+        /// <para>Heap COUNT is deliberately absent: Server GC's heap count is adapted at runtime by
+        /// DATAS and the runtime exposes no supported way to read the current value, so any number
+        /// here would be inferred rather than measured. <c>committedMb</c> is the honest proxy —
+        /// DATAS scaling down shows up there.</para>
+        /// </summary>
+        private static string BuildGcJson()
+        {
+            // The richer counters are net5+; this assembly also targets netstandard2.1 for the Unity
+            // package, where the health endpoint does not run but still has to compile.
+            string extra = string.Empty;
+#if NET5_0_OR_GREATER
+            GCMemoryInfo info = GC.GetGCMemoryInfo();
+            extra = ",\"allocatedMb\":" + Num(GC.GetTotalAllocatedBytes(precise: false) / 1048576.0, "F1") +
+                    ",\"committedMb\":" + Num(info.TotalCommittedBytes / 1048576.0, "F1") +
+                    ",\"fragmentedMb\":" + Num(info.FragmentedBytes / 1048576.0, "F1") +
+                    ",\"pauseTimePercent\":" + Num(info.PauseTimePercentage, "F3");
+#endif
+            return "{" +
+                   "\"gen0\":" + Int(GC.CollectionCount(0)) +
+                   ",\"gen1\":" + Int(GC.CollectionCount(1)) +
+                   ",\"gen2\":" + Int(GC.CollectionCount(2)) +
+                   ",\"heapMb\":" + Num(GC.GetTotalMemory(forceFullCollection: false) / 1048576.0, "F1") +
+                   extra +
+                   ",\"serverGc\":" + (GCSettings.IsServerGC ? "true" : "false") +
+                   ",\"latencyMode\":\"" + GCSettings.LatencyMode + "\"" +
+                   "}";
+        }
 
         private static string BuildBsrJson()
         {
@@ -259,6 +320,27 @@ namespace Basis.Network.Server
               .Append(",\"avgMessages\":").Append(Num(s.BundlesEmitted > 0 ? (double)s.BundleMessages / s.BundlesEmitted : 0, "F2"))
               .Append(",\"deflateMsPerTick\":").Append(Num(s.BundleDeflateMs / ticks, "F4"))
               .Append(",\"avgDeflateUs\":").Append(Num(s.BundlesEmitted > 0 ? (s.BundleDeflateMs * 1000.0) / s.BundlesEmitted : 0, "F2"))
+              // Zstd half of the hybrid codec, broken out so a run can be judged on what the
+              // two codecs each cost and returned rather than on the blended average — which
+              // moves whenever the keyframe/delta traffic mix does, independently of either
+              // codec getting better or worse. "dictGeneration":0 means no dictionary is
+              // embedded and the Zstd path is inert.
+              .Append(",\"zstd\":{")
+              .Append("\"dictGeneration\":").Append(Int(BasisAvatarBundleZstd.DictionaryGeneration))
+              .Append(",\"emitted\":").Append(Int(s.BundleZstdEmitted))
+              .Append(",\"shareOfBundles\":").Append(Num(s.BundlesEmitted > 0 ? (double)s.BundleZstdEmitted / s.BundlesEmitted : 0, "F4"))
+              .Append(",\"rawBytes\":").Append(Int(s.BundleZstdRawBytes))
+              .Append(",\"compressedBytes\":").Append(Int(s.BundleZstdCompressedBytes))
+              .Append(",\"ratio\":").Append(Num(s.BundleZstdRawBytes > 0 ? (double)s.BundleZstdCompressedBytes / s.BundleZstdRawBytes : 0, "F4"))
+              .Append(",\"msPerTick\":").Append(Num(s.BundleZstdMs / ticks, "F4"))
+              .Append(",\"avgUs\":").Append(Num(s.BundleZstdEmitted > 0 ? (s.BundleZstdMs * 1000.0) / s.BundleZstdEmitted : 0, "F2"))
+              // LZ4's share is the remainder of the totals above, reported explicitly so the
+              // two codecs can be compared without the reader having to subtract.
+              .Append(",\"lz4Ratio\":").Append(Num(s.BundleRawBytes - s.BundleZstdRawBytes > 0
+                  ? (double)(s.BundleCompressedBytes - s.BundleZstdCompressedBytes) / (s.BundleRawBytes - s.BundleZstdRawBytes) : 0, "F4"))
+              .Append(",\"lz4AvgUs\":").Append(Num(s.BundlesEmitted - s.BundleZstdEmitted > 0
+                  ? ((s.BundleDeflateMs - s.BundleZstdMs) * 1000.0) / (s.BundlesEmitted - s.BundleZstdEmitted) : 0, "F2"))
+              .Append('}')
               .Append("}}}");
 
             return sb.ToString();

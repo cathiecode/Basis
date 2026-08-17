@@ -25,7 +25,11 @@ public static class SettingsProviderControllerConfig
             PanelDropdown dropdownDominantHand = PanelDropdown.CreateNewEntry(group);
             dropdownDominantHand.Descriptor.SetTitle(BasisLocalization.Get("settings.controls.dominantHand"));
             dropdownDominantHand.Descriptor.SetTooltip(BasisLocalization.Get("settings.controls.dominantHand.tooltip"));
-            dropdownDominantHand.AssignEntries(new List<string> { BasisDominantHand.Right, BasisDominantHand.Left });
+            dropdownDominantHand.AssignEntries(new List<string> { BasisDominantHand.Right, BasisDominantHand.Left }, null, new List<string>
+            {
+                BasisLocalization.Get("settings.controls.dominantHand.right.tooltip"),
+                BasisLocalization.Get("settings.controls.dominantHand.left.tooltip")
+            });
             dropdownDominantHand.AssignBinding(BasisSettingsDefaults.DominantHand);
 
             PanelDropdown dropdownDesktopInputInVR = PanelDropdown.CreateNewEntry(group);
@@ -252,6 +256,11 @@ public static class SettingsProviderControllerConfig
             clickReleaseSlider.OnValueChanged += _ => ClampReleaseToPress();
         });
 
+        // Joystick slider binding — hand a slider to a thumbstick and tune it away from the menu.
+        SettingsProviderKeyboardBindings.CreateCollapsibleSection(
+            container, BasisLocalization.Get("settings.controls.joystickBind.title"),
+            BasisLocalization.Get("settings.controls.joystickBind.description"), BuildJoystickBindSection);
+
         // Deadzone - General
         SettingsProviderKeyboardBindings.CreateCollapsibleSection(
             container, BasisLocalization.Get("settings.controls.generalDeadzone.title"), BasisLocalization.Get("settings.controls.generalDeadzone.description"), group =>
@@ -352,6 +361,7 @@ public static class SettingsProviderControllerConfig
         SettingsProvider.RegisterPageReset("settings.tab.controls", () =>
         {
             ResetControlsDefaults();
+            BasisPanelJoystickBind.Clear();
             BasisActionDriver.ResetBindingsToDefaultsAsyncIgnored();
             if (BasisLocalInputActions.Asset != null)
             {
@@ -366,6 +376,54 @@ public static class SettingsProviderControllerConfig
     private static void UpdatePreview()
     {
         // wire up to butterflygatepreview one day
+    }
+
+    /// <summary>
+    /// Shows the joystick slider bind (<see cref="BasisPanelJoystickBind"/>). Taking the bind
+    /// happens out on the pages themselves — a slider's own options window offers it — so all this
+    /// section holds is what is bound right now, a way to give it back, and how fast the stick
+    /// moves it.
+    /// </summary>
+    private static void BuildJoystickBindSection(PanelElementDescriptor group)
+    {
+        RectTransform parent = group.ContentParent;
+
+        PanelElementDescriptor status = PanelElementDescriptor.CreateNew(
+            PanelElementDescriptor.ElementStyles.Group, parent);
+        status.SetTitle(BasisLocalization.Get("settings.controls.joystickBind.status"));
+
+        PanelButton unbindButton = PanelButton.CreateNew(parent);
+        unbindButton.Descriptor.SetTitle(BasisLocalization.Get("settings.controls.joystickBind.unbind"));
+        unbindButton.Descriptor.SetTooltip(BasisLocalization.Get("settings.controls.joystickBind.unbind.tooltip"));
+        unbindButton.OnClicked += BasisPanelJoystickBind.Clear;
+
+        PanelSlider sweepSlider = PanelSlider.CreateEntryAndBind(
+            parent,
+            PanelSlider.SliderSettings.Advanced(BasisLocalization.Get("settings.controls.joystickBind.sweep"), 0.5f, 20f, false, 1, ValueDisplayMode.Raw),
+            BasisSettingsDefaults.JoystickBindSweepSeconds);
+        sweepSlider.Descriptor.SetTooltip(BasisLocalization.Get("settings.controls.joystickBind.sweep.tooltip"));
+
+        void Refresh()
+        {
+            // The page is rebuilt each time the tab opens; a build that has since been torn down
+            // drops itself here rather than needing a teardown hook of its own.
+            if (unbindButton == null)
+            {
+                BasisPanelJoystickBind.StateChanged -= Refresh;
+                return;
+            }
+
+            status.SetDescription(BasisPanelJoystickBind.StatusText);
+
+            // Greyed rather than hidden: expanding the section re-activates everything under it,
+            // which would put a hidden row back whether or not anything is bound.
+            bool bound = BasisPanelJoystickBind.HasBinding;
+            unbindButton.SetInteractable(bound, bound ? null : BasisLocalization.Get("settings.controls.joystickBind.status.none"));
+            group.ForceRebuild();
+        }
+
+        BasisPanelJoystickBind.StateChanged += Refresh;
+        Refresh();
     }
 
     private static void ResetControlsDefaults()
@@ -400,6 +458,7 @@ public static class SettingsProviderControllerConfig
         BasisSettingsDefaults.FingerTouchHaptics.ResetToDefault();
         BasisSettingsDefaults.UIClickPressThreshold.ResetToDefault();
         BasisSettingsDefaults.UIClickReleaseThreshold.ResetToDefault();
+        BasisSettingsDefaults.JoystickBindSweepSeconds.ResetToDefault();
     }
 
     private static void BuildBindingsUI(RectTransform container)

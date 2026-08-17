@@ -1181,10 +1181,14 @@ namespace Basis.Network.Core
         // ── Compressed avatar bundle (server → client only) ──────────────────
         /// <summary>
         /// Server-only outbound channel carrying multiple avatar quality messages
-        /// to a single receiver, LZ4-compressed into one UDP datagram that fits the peer MTU.
-        /// Wire format (v50):
-        ///   [count:1][rawLen:2-LE][LZ4 block( group* )]
+        /// to a single receiver, compressed into one UDP datagram that fits the peer MTU.
+        /// Wire format (v53):
+        ///   [flags:1][rawLen:2-LE][compressed( group* )]
         ///   group := [origChannel:1][n:1][msgLen:2-LE] x n [bodies]
+        /// flags: bits 0-2 codec id, bits 3-7 dictionary generation. Byte 0 was a message count
+        /// through v52 that every decoder documented as a hint and none read, so the hybrid codec
+        /// costs no wire bytes. A v52 client would ignore the byte and LZ4-decode a Zstd bundle
+        /// into garbage rather than rejecting it, which is why v53 is a hard version bump.
         /// Each [origChannel] is the byte-id or ushort-id avatar quality channel the message would
         /// have been sent on individually (channels 6-13 / 41-48), or DeltaAvatarChannel. One
         /// channel byte per RUN, not per entry — the server channel-sorts a receiver's pending
@@ -1192,7 +1196,11 @@ namespace Basis.Network.Core
         /// The DeltaAvatarChannel group's bodies are COLUMN-TRANSPOSED (byte j of every body, then
         /// byte j+1 of every body); no other group is. See BasisAvatarBundleCodec, which is the
         /// shared reader, and BundleCompressionExperiment for why.
-        /// Compression: LZ4Codec.Encode at LZ4Level.L00_FAST (K4os.Compression.LZ4 1.3.x).
+        /// Compression is hybrid, chosen per bundle by traffic class: delta-only bundles use LZ4
+        /// (LZ4Codec.Encode at LZ4Level.L00_FAST, K4os.Compression.LZ4 1.3.x); bundles carrying a
+        /// keyframe/full quality channel use Zstd against a trained dictionary. Zstd measured
+        /// 16.7-18.1% smaller on keyframes and 2.8-4.5% LARGER on deltas, which is why the split
+        /// exists. See BasisAvatarBundleZstd.
         /// </summary>
         public const byte CompressedAvatarBundleChannel = 52;
 
@@ -1327,6 +1335,31 @@ namespace Basis.Network.Core
         public const byte RejectKind_VersionMismatch = 1;
         /// <summary>RejectKind: the server has reached its player limit.</summary>
         public const byte RejectKind_ServerFull = 2;
+
+        /// <summary>
+        /// Channels whose unreliable traffic must not be queued behind, or shed alongside, bulk
+        /// avatar state. Indexed by channel number; handed to the transport, which keeps these in a
+        /// separate per-peer queue drained ahead of everything else.
+        ///
+        /// The distinction is whether a newer packet supersedes an older one. An avatar update does:
+        /// the position queued behind it is the same player a moment later, so discarding the stale
+        /// one costs nothing anybody can see, and that is what makes the bulk queue's drop-oldest
+        /// policy correct. Voice is the opposite — every packet is a distinct slice of audio, so a
+        /// dropped one is a hole in what somebody said and a late one is no better than a lost one.
+        /// Sharing a queue meant voice was shed at the bulk stream's drop rate, which at overload
+        /// removed roughly every second voice packet on the instance.
+        ///
+        /// Only the voice DATA channels belong here. The recipient-list channels are control traffic:
+        /// low-rate, and their newest message genuinely does supersede the last, so they are bulk.
+        /// </summary>
+        public static bool[] BuildPriorityUnreliableChannelMap()
+        {
+            bool[] map = new bool[TotalChannels];
+            map[VoiceChannel] = true;
+            map[ShoutVoiceChannel] = true;
+            map[VoiceLargeChannel] = true;
+            return map;
+        }
 
         /// <summary>
         /// Maps quality index (0‑3) + additional data presence → byte-ID channel.
