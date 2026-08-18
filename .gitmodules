@@ -6,4 +6,4 @@
 	url = https://github.com/yt-dlp/ejs
 [submodule "uniffi-bindgen-cs"]
 	path = uniffi-bindgen-cs
-	url = git@github.com:cathiecode/uuniffi-bindgen-cs
+	url = https://github.com/cathiecode/uuniffi-bindgen-cs.git
