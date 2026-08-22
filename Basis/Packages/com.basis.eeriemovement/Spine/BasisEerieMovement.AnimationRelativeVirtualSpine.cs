@@ -4,7 +4,7 @@ namespace Basis.IK
 {
     public partial struct BasisEerieMovement
     {
-        void ApplyAnimationRelativeVirtualSpine(BasisPoseStream stream)
+        void ApplyAnimationRelativeVirtualSpine()
         {
             virtualSpineApplied = false;
             if (!virtualSpineState.IsCreated || virtualSpineState.Length == 0)
@@ -18,20 +18,20 @@ namespace Basis.IK
                 virtualSpineState[0] = default;
                 return;
             }
-            if (!handleHead.IsValid(stream) || !handleHips.IsValid(stream))
+            if (!poseStream.IsValid(handleHead) || !poseStream.IsValid(handleHips))
             {
                 return;
             }
 
-            handleHead.GetPositionAndRotation(stream, out Vector3 animatedHeadPosition, out Quaternion animatedHeadRotation);
-            handleHips.GetPositionAndRotation(stream, out Vector3 animatedHipsPosition, out Quaternion animatedHipsRotation);
-            bool hasAnimatedChest = handleChest.IsValid(stream);
+            poseStream.GetPositionAndRotation(handleHead, out Vector3 animatedHeadPosition, out Quaternion animatedHeadRotation);
+            poseStream.GetPositionAndRotation(handleHips, out Vector3 animatedHipsPosition, out Quaternion animatedHipsRotation);
+            bool hasAnimatedChest = poseStream.IsValid(handleChest);
             Vector3 animatedChestPosition = Vector3.zero;
             Quaternion animatedChestRotation = Quaternion.identity;
             if (hasAnimatedChest)
             {
-                handleChest.GetPositionAndRotation(
-                    stream, out animatedChestPosition, out animatedChestRotation);
+                poseStream.GetPositionAndRotation(
+                    handleChest, out animatedChestPosition, out animatedChestRotation);
             }
 
             BasisAnimationRelativeVirtualSpineInput input;
@@ -43,10 +43,10 @@ namespace Basis.IK
             input.AnimatedChestRotation = animatedChestRotation;
             input.HasAnimatedChest = hasAnimatedChest;
             input.TrackedHeadPosition = targetPositionHead;
-            input.TrackedHeadRotation = targetRotationHead * targetOffsetHead;
+            input.TrackedHeadRotation = targetRotationHead * offsetRotationHead;
             input.ReferenceUp = playerUp;
             input.FallbackForward = targetRotationHead * Vector3.forward;
-            input.DeltaTime = stream.deltaTime;
+            input.DeltaTime = poseStream.deltaTime;
             input.YawDeadzoneDeg = virtualSpineYawDeadzoneDeg;
             input.YawBlendSpeed = virtualSpineYawBlendSpeed;
             input.IsLocomoting = virtualSpineIsLocomoting;
@@ -86,7 +86,7 @@ namespace Basis.IK
             }
 
             Vector3 candidate = virtualSpineState[0].BodyUp;
-            if (candidate.sqrMagnitude < k_SqrEpsilon)
+            if (candidate.sqrMagnitude < sqrEpsilon)
             {
                 return false;
             }
