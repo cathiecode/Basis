@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using UnityEngine;
-
 namespace Basis.IK.Mocap
 {
     // Real human motion, loaded from BVH, as ground truth for IK accuracy.
@@ -11,23 +10,12 @@ namespace Basis.IK.Mocap
     // assembly so the NUnit tests and the sweep windows can both reach it -- Basis.Framework.IK.Tests does not
     // reference BasisEditor, and putting it there would force the tests to hand-mirror the maths, which is the
     // drift trap the whole core/sweep/gate convention exists to avoid.
-    public enum BasisMocapJoint
-    {
-        Hips, Spine, Chest, UpperChest, Neck, Head,
-        LeftShoulder, LeftUpperArm, LeftLowerArm, LeftHand,
-        RightShoulder, RightUpperArm, RightLowerArm, RightHand,
-        LeftUpperLeg, LeftLowerLeg, LeftFoot, LeftToes,
-        RightUpperLeg, RightLowerLeg, RightFoot, RightToes,
-        Count
-    }
-
     public struct BasisMocapPose
     {
         public Vector3 Position;
         public Quaternion Rotation;
         public bool Valid;
     }
-
     public class BasisMotionClip
     {
         public string Name;
@@ -35,18 +23,15 @@ namespace Basis.IK.Mocap
         public int FrameCount;
         public BasisMocapPose[] Poses;   // FrameCount * BasisMocapJoint.Count, row-major
         public float SourceToMetres;     // the scale that was applied
-
         public BasisMocapPose Get(int frame, BasisMocapJoint j) => Poses[frame * (int)BasisMocapJoint.Count + (int)j];
         public bool Has(BasisMocapJoint j) => FrameCount > 0 && Get(0, j).Valid;
     }
-
     public static class BasisBvhLoader
     {
         // A CMU subject is a real person, so normalising every clip to one adult stature makes the centimetre
         // errors comparable across subjects. The solve is exactly scale-invariant (BasisBodyProportionTests),
         // so this changes the units of the answer, never the answer.
         public const float TargetLegLengthMetres = 0.85f;
-
         class Node
         {
             public string Name;
@@ -56,10 +41,9 @@ namespace Basis.IK.Mocap
             public int ChannelStart;
             public BasisMocapJoint Joint = BasisMocapJoint.Count;   // Count = not mapped
         }
-
         // CMU/Biovision joint names -> the joints we care about. CMU's LHipJoint/RHipJoint/Neck1/LowerBack are
         // structural in-betweens with no humanoid equivalent; they still contribute to FK, they just are not read.
-        static readonly Dictionary<string, BasisMocapJoint> k_NameMap = new Dictionary<string, BasisMocapJoint>
+        static readonly Dictionary<string, BasisMocapJoint> nameMap = new Dictionary<string, BasisMocapJoint>
         {
             { "Hips", BasisMocapJoint.Hips },
             { "LowerBack", BasisMocapJoint.Spine },
@@ -84,7 +68,6 @@ namespace Basis.IK.Mocap
             { "RightFoot", BasisMocapJoint.RightFoot },
             { "RightToeBase", BasisMocapJoint.RightToes },
         };
-
         public static bool TryLoad(string path, out BasisMotionClip clip, out string error)
         {
             clip = null;
@@ -95,12 +78,10 @@ namespace Basis.IK.Mocap
                 return false;
             }
 
-            string[] tokens = File.ReadAllText(path)
-                .Split(new[] { ' ', '\t', '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+            string[] tokens = File.ReadAllText(path).Split(new[] { ' ', '\t', '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
 
             var nodes = new List<Node>();
-            int cursor = 0;
-            int channelCount = 0;
+            int cursor = 0, channelCount = 0;
 
             try
             {
@@ -123,14 +104,12 @@ namespace Basis.IK.Mocap
                 return false;
             }
         }
-
         static bool Eat(string[] t, ref int i, string want)
         {
             if (i >= t.Length || t[i] != want) return false;
             i++;
             return true;
         }
-
         static void ParseJoint(string[] t, ref int i, List<Node> nodes, int parent, ref int channelCount)
         {
             // ROOT <name> | JOINT <name> | End Site
@@ -174,9 +153,8 @@ namespace Basis.IK.Mocap
             }
             Eat(t, ref i, "}");
 
-            if (!endSite && k_NameMap.TryGetValue(name, out BasisMocapJoint j)) node.Joint = j;
+            if (!endSite && nameMap.TryGetValue(name, out BasisMocapJoint j)) node.Joint = j;
         }
-
         // The mirror that takes a right-handed rotation into Unity's left-handed frame is q -> (x, -y, -z, w),
         // which is the same as negating the Y and Z Euler angles and keeping X. Channels compose in the order
         // they are declared (BVH: first listed is leftmost), so append on the right as we walk them.
@@ -195,7 +173,6 @@ namespace Basis.IK.Mocap
             }
             return r;
         }
-
         static Vector3 ChannelPosition(Node n, float[] frame)
         {
             Vector3 p = Vector3.zero;
@@ -211,7 +188,6 @@ namespace Basis.IK.Mocap
             }
             return p;
         }
-
         static BasisMotionClip Bake(List<Node> nodes, string[] t, int cursor, int frameCount, float frameTime, int channelCount, string name)
         {
             int jointCount = (int)BasisMocapJoint.Count;
@@ -266,7 +242,6 @@ namespace Basis.IK.Mocap
             Rescale(clip);
             return clip;
         }
-
         // Normalise to a standard adult so centimetre errors are comparable across subjects.
         static void Rescale(BasisMotionClip clip)
         {
@@ -284,7 +259,6 @@ namespace Basis.IK.Mocap
                 clip.Poses[i].Position *= s;   // rotations are scale-free
             }
         }
-
         // Handedness is the classic BVH bug, and it is SILENT: get it wrong and left/right swap, which would
         // quietly corrupt every chirality-sensitive number the accuracy harness reports. So assert the skeleton
         // is anatomically sane instead of trusting the conversion.
@@ -311,8 +285,7 @@ namespace Basis.IK.Mocap
             for (int f = 0; f < clip.FrameCount; f += step)
             {
                 Quaternion hips = clip.Get(f, BasisMocapJoint.Hips).Rotation;
-                Vector3 fwd = hips * Vector3.forward;
-                Vector3 up = hips * Vector3.up;
+                Vector3 fwd = hips * Vector3.forward, up = hips * Vector3.up;
                 Vector3 right = Vector3.Cross(up, fwd);   // Unity is left-handed: Cross(up, forward) == right
 
                 Vector3 chest = clip.Get(f, BasisMocapJoint.Chest).Position;
@@ -332,14 +305,12 @@ namespace Basis.IK.Mocap
             // A walking arm crosses the midline, so demand a clear majority, not unanimity.
             if (lefties * 2 <= checks)
             {
-                reason = $"the left hand is on the body's RIGHT in {checks - lefties}/{checks} sampled frames -- " +
-                         "the skeleton is mirrored, so the right-handed to left-handed conversion is wrong";
+                reason = $"the left hand is on the body's RIGHT in {checks - lefties}/{checks} sampled frames -- " + "the skeleton is mirrored, so the right-handed to left-handed conversion is wrong";
                 return false;
             }
             if (kneesForward * 2 <= checks)
             {
-                reason = $"the knee bends BACKWARD in {checks - kneesForward}/{checks} sampled frames -- " +
-                         "the skeleton is mirrored or the rotation channel order is wrong";
+                reason = $"the knee bends BACKWARD in {checks - kneesForward}/{checks} sampled frames -- " + "the skeleton is mirrored or the rotation channel order is wrong";
                 return false;
             }
             return true;

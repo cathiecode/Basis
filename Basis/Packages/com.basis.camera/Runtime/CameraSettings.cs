@@ -11,9 +11,10 @@ public partial class BasisHandHeldCameraUI
         /// Bumped whenever fields are added whose zero-fill value (JsonUtility leaves absent fields
         /// at 0/false) differs from their intended default. LoadSettings migrates older files.
         /// v2 added the auto-follow config, capture toggles and MSAA. v9 replaced the auto-follow
-        /// block and the shot list with the modifier stack.
+        /// block and the shot list with the modifier stack. v10 added the camera body. v11 added
+        /// the film grading — grain shape, halation tint, vignette colour, split toning and lift.
         /// </summary>
-        public const int CurrentVersion = 9;
+        public const int CurrentVersion = 11;
         public int settingsVersion = CurrentVersion;
 
         public CameraSettings()
@@ -21,6 +22,14 @@ public partial class BasisHandHeldCameraUI
             settingsVersion = CurrentVersion;
 
             cameraMode = (int)BasisCameraMode.Photo;
+
+            // A digital camera with a full load and its flash armed. The load matters: JsonUtility
+            // builds the object through this constructor before filling it, so a file written
+            // before bodies existed arrives with a fresh roll rather than an empty one — which is
+            // the difference between an older camera loading normally and one that will not fire.
+            cameraBody = (int)BasisCameraBodyKind.Digital;
+            exposuresRemaining = BasisHandHeldCamera.FullRoll;
+            flashEnabled = true;
 
             // Empty rather than null, and never allowed to become null again: JsonUtility writes a
             // null string as "" and reads it back as "", so a null here would be a field that
@@ -55,6 +64,21 @@ public partial class BasisHandHeldCameraUI
             // loads the look it was saved with instead of a hard-edged bloom and a flat vignette.
             bloomScatter = 0.7f;
             vignetteSmoothness = 0.2f;
+
+            // The film grading, at the values that mean "leave the picture alone". None of these is
+            // its own zero: grain falls back to the thinnest texture rather than to none, bloom and
+            // the vignette tint to white and black rather than to nothing, and split toning is
+            // neutral at GREY at both ends — a black shadow colour is the strongest shift there is,
+            // not the absence of one, which is the trap in defaulting a colour to default(Color).
+            filmGrainType = 0;                      // Thin1
+            filmGrainResponse = 0.8f;               // URP's own default: grain backs off in highlights
+            bloomTint = Color.white;
+            vignetteColour = Color.black;
+            vignetteRounded = false;
+            splitToningShadows = Color.grey;
+            splitToningHighlights = Color.grey;
+            splitToningBalance = 0f;
+            filmLift = 0f;
             lensDistortionScale = 1f;
             paniniCropToFit = 1f;
             captureTonemapping = (int)UnityEngine.Rendering.Universal.TonemappingMode.ACES;
@@ -73,6 +97,13 @@ public partial class BasisHandHeldCameraUI
             focusPeakingColour = 0;
             focusPeakingGreyPicture = false;
 
+            // Same shape again: off, but already holding an opacity that reads, so the file a
+            // camera loads on the day the grid arrives is not one that switches it on at the
+            // faintest setting there is.
+            viewfinderGrid = false;
+            viewfinderGridPattern = (int)BasisCameraGridPattern.Thirds;
+            viewfinderGridOpacity = BasisHandHeldCamera.DefaultGridOpacity;
+
             // Same again for the meter: off, but already set up to behave the moment it is on.
             autoBrightness = false;
             autoBrightnessTarget = BasisHandHeldCamera.DefaultBrightnessTarget;
@@ -87,6 +118,7 @@ public partial class BasisHandHeldCameraUI
             motionBlurQuality = 1;   // Medium
             motionBlurMode = 0;      // Camera only — no motion vector pass
 
+            overrideVolumetricFog = false;
             VolumetricFogVolumedensity = 0.01f;
             VolumetricFogenableAPVContribution = true;
             VolumetricFogenableMainLightContribution = true;
@@ -128,6 +160,23 @@ public partial class BasisHandHeldCameraUI
         /// both the file around it and the mode it names.</para>
         /// </summary>
         public string userMode;
+
+        /// <summary>
+        /// The physical camera, as <see cref="BasisCameraBodyKind"/>. Saved separately from
+        /// <see cref="cameraMode"/> because it outlives it: touch one slider on a disposable and
+        /// the mode is Custom, and you are still holding a disposable.
+        /// </summary>
+        public int cameraBody;
+
+        /// <summary>
+        /// Frames left on the load, or <see cref="BasisHandHeldCamera.FullRoll"/> for a fresh one.
+        /// Saved because a disposable that refilled itself every session would never run out at
+        /// all, which is most of what makes it a disposable.
+        /// </summary>
+        public int exposuresRemaining;
+
+        /// <summary>Whether the flash is armed. Ignored on a body with nothing on the front.</summary>
+        public bool flashEnabled;
 
         public int resolutionIndex = 1;
         public int formatIndex = 0;
@@ -177,6 +226,15 @@ public partial class BasisHandHeldCameraUI
         public bool focusPeakingGreyPicture;
 
         /// <summary>
+        /// The viewfinder alignment grid, saved for the reason focus peaking is: a view preference
+        /// that no capture path can reach, but one with nowhere else to be remembered.
+        /// </summary>
+        public bool viewfinderGrid;
+        /// <summary>Which grid, as <see cref="BasisCameraGridPattern"/>; 0 is the rule of thirds.</summary>
+        public int viewfinderGridPattern;
+        public float viewfinderGridOpacity;
+
+        /// <summary>
         /// Auto brightness. The stops the meter is currently adding are deliberately not saved:
         /// they describe the room the camera was last in, and a file that restored them would open
         /// every session mis-exposed until the loop had walked it back.
@@ -188,6 +246,8 @@ public partial class BasisHandHeldCameraUI
         public int autoBrightnessMetering;
         public float autoBrightnessRange;
 
+        /// <summary>Uses this camera's volumetric-fog profile instead of the world's fog.</summary>
+        public bool overrideVolumetricFog;
         public float VolumetricFogVolumedensity;
         public bool VolumetricFogenableAPVContribution;
         public bool VolumetricFogenableMainLightContribution;
@@ -200,6 +260,39 @@ public partial class BasisHandHeldCameraUI
         public float whiteBalanceTint;
         public float lensDistortion;
         public float paniniDistance;
+
+        /// <summary>
+        /// Which grain texture is used, as <c>FilmGrainLookup</c>. Size rather than strength — the
+        /// difference between the grain of a fast negative and digital noise is how big it is.
+        /// </summary>
+        public int filmGrainType;
+
+        /// <summary>How far the grain backs off in the highlights. 0 lays it evenly; 1 confines it to the shadows.</summary>
+        public float filmGrainResponse;
+
+        /// <summary>
+        /// The colour of the glow around a highlight. Orange on film, where it is halation rather
+        /// than bloom; white on anything with a sensor.
+        /// </summary>
+        public Color bloomTint;
+
+        /// <summary>What the corners darken toward, and whether they do it in a circle or with the frame.</summary>
+        public Color vignetteColour;
+        public bool vignetteRounded;
+
+        /// <summary>
+        /// The two ends of the colour split, and where the split falls. Neutral is grey at both
+        /// ends; this is the control that makes a stock rather than a filter.
+        /// </summary>
+        public Color splitToningShadows;
+        public Color splitToningHighlights;
+        public float splitToningBalance;
+
+        /// <summary>
+        /// The black point, raised. Stored as the flat offset rather than as the whole lift trackball
+        /// — the colour half is held at neutral so this cannot fight the split toning above it.
+        /// </summary>
+        public float filmLift;
 
         /// <summary>
         /// Shape, as opposed to strength. Each belongs to an effect whose own slider is the on/off,
@@ -248,6 +341,15 @@ public partial class BasisHandHeldCameraUI
         /// with nowhere to be saved, so it reset to Puck every session.
         /// </summary>
         public int detachedMarker;
+
+        /// <summary>
+        /// Whether a playspace anchor rides your body rather than your playspace origin. Off is the
+        /// zero fill and is the steadier of the two, so an older file loads as the playspace anchor
+        /// it was written as. Which anchor is selected is deliberately not saved, for the same
+        /// reason a fitted follow was not: a camera that restored bolted to a vehicle from the last
+        /// world has nothing to be bolted to in this one.
+        /// </summary>
+        public bool anchorFollowsBody;
 
         // Capture-mode toggles.
         public bool capture360;

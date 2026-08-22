@@ -5,11 +5,6 @@ using Unity.Collections;
 using UnityEngine;
 namespace Basis.Scripts.Drivers
 {
-    /// <summary>
-    /// Builds a <see cref="BasisEerieMovement"/> for an avatar. This is the seam that keeps the solver
-    /// itself framework-free: everything that reads persisted settings, the avatar's transform mapping or
-    /// the height driver lives here, on the framework side, rather than inside the job.
-    /// </summary>
     public static class BasisEerieMovementSetup
     {
         public static void SetDefaultValues(ref BasisEerieMovement job)
@@ -28,10 +23,13 @@ namespace Basis.Scripts.Drivers
             job.enabledLeftShoulder = job.enabledRightShoulder = false;
             job.offsetRotationHead = job.offsetRotationLeftFoot = job.offsetRotationRightFoot = Quaternion.identity;
             job.offsetRotationLeftHand = job.offsetRotationRightHand = Quaternion.identity;
+            job.tposeLeftLowerArmTwistBind = job.tposeLeftLowerArmChildBind = Quaternion.identity;
+            job.tposeRightLowerArmTwistBind = job.tposeRightLowerArmChildBind = Quaternion.identity;
+            job.tposeLeftUpperArmTwistBind = job.tposeLeftUpperArmChildBind = Quaternion.identity;
+            job.tposeRightUpperArmTwistBind = job.tposeRightUpperArmChildBind = Quaternion.identity;
 
             job.playerUp = Vector3.up;
 
-            // Avatar-measured; the rig driver overwrites both once the T-pose spine is known.
             job.minHeadSpineHeight = 0f;
             job.minFactor = 0.95f;
             job.maxFactor = 1.05f;
@@ -43,13 +41,10 @@ namespace Basis.Scripts.Drivers
             job.targetRotationHips = Quaternion.identity;
             job.offsetRotationHips = Quaternion.identity;
 
-            // Integrated driven TR defaults
-
             job.leftDrivenTargetRot = job.rightDrivenTargetRot = Quaternion.identity;
             job.leftToeEnabled = false;
             job.rightToeEnabled = false;
 
-            // Chest/hand capsule defaults — read from persisted settings
             job.chestRadius = Basis.BasisUI.BasisSettingsDefaults.FBIKChestRadius.RawValue;
             job.collisionSkin = Basis.BasisUI.BasisSettingsDefaults.FBIKCollisionSkin.RawValue;
             job.collisionsEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKCollisionsEnabled.RawValue;
@@ -59,7 +54,6 @@ namespace Basis.Scripts.Drivers
             job.elbowDragEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKElbowDrag.RawValue;
             job.elbowDragHz = Basis.BasisUI.BasisSettingsDefaults.FBIKElbowDragHz.RawValue;
             job.collideTrackedElbow = Basis.BasisUI.BasisSettingsDefaults.FBIKCollideTrackedElbow.RawValue;
-            job.useNeuralPole = false;
 
             job.shoulderSolveEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKShoulderSolveEnabled.RawValue;
             job.shoulderShrugEnabled = Basis.BasisUI.BasisSettingsDefaults.FBIKShoulderShrug.RawValue;
@@ -104,13 +98,12 @@ namespace Basis.Scripts.Drivers
             job.spineGazeFollow = Basis.BasisUI.BasisSettingsDefaults.FBIKSpineGazeFollow.RawValue;
             job.neckGazeFollow = Basis.BasisUI.BasisSettingsDefaults.FBIKNeckGazeFollow.RawValue;
             job.neckExtensionDamp = Basis.BasisUI.BasisSettingsDefaults.FBIKNeckExtensionDamp.RawValue;
+            job.neckFlexionDamp = Basis.BasisUI.BasisSettingsDefaults.FBIKNeckFlexionDamp.RawValue;
             job.moveBodyBackWhenCrouching = Basis.BasisUI.BasisSettingsDefaults.FBIKMoveBodyBackWhenCrouching.RawValue;
             job.crouchDepth = 0f;
-            job.standingHeadHeight = 0f; // 0 = sit-back inert until the rig driver packs the real height
+            job.standingHeadHeight = 0f;
             job.trunkCounterbalance = Basis.BasisUI.BasisSettingsDefaults.FBIKTrunkCounterbalance.RawValue;
-            job.swingSmoothRateDeg = Basis.BasisUI.BasisSettingsDefaults.FBIKElbowSwingEnabled.RawValue
-                ? Basis.BasisUI.BasisSettingsDefaults.FBIKSwingSmoothRate.RawValue
-                : 0f;
+            job.swingSmoothRateDeg = Basis.BasisUI.BasisSettingsDefaults.FBIKElbowSwingEnabled.RawValue ? Basis.BasisUI.BasisSettingsDefaults.FBIKSwingSmoothRate.RawValue : 0f;
             job.chestArmSwingFactor = Basis.BasisUI.BasisSettingsDefaults.FBIKChestArmSwingFactor.RawValue;
             job.chestArmSwingMaxDeg = Basis.BasisUI.BasisSettingsDefaults.FBIKChestArmSwingMaxDeg.RawValue;
             job.lowerArmTwistFraction = Basis.BasisUI.BasisSettingsDefaults.FBIKLowerArmTwistFraction.RawValue;
@@ -141,14 +134,12 @@ namespace Basis.Scripts.Drivers
             job.lordosisExtremeChestDownMax = Basis.BasisUI.BasisSettingsDefaults.FBIKLordosisExtremeChestDownMax.RawValue;
             job.lordosisExtremeHipsDownLookUp = Basis.BasisUI.BasisSettingsDefaults.FBIKLordosisExtremeHipsDownLookUp.RawValue;
             job.lordosisExtremeChestDownLookUp = Basis.BasisUI.BasisSettingsDefaults.FBIKLordosisExtremeChestDownLookUp.RawValue;
-            // 1.0 (was 0.8), retuned against the mocap corpus: full relax is strictly better measured —
-            // closer to the human spine AND a quieter standing noise floor. See FBIKSpineCCDRelax.
+
             job.spineCCDRelax = Basis.BasisUI.BasisSettingsDefaults.FBIKSpineCCDRelax.RawValue;
             job.neckMaxConeDeg = Basis.BasisUI.BasisSettingsDefaults.FBIKNeckMaxConeDeg.RawValue;
             job.spineTwistKeep = Basis.BasisUI.BasisSettingsDefaults.FBIKSpineTwistKeep.RawValue;
             job.spineNeckTwistKeep = Basis.BasisUI.BasisSettingsDefaults.FBIKSpineNeckTwistKeep.RawValue;
 
-            // Slots: identity rotations, zero positions, weights disabled.
             job.slotPositions.Length = BasisEerieMovement.Count;
             job.slotRotations.Length = BasisEerieMovement.Count;
             job.slotOffsets.Length = BasisEerieMovement.Count;
@@ -161,110 +152,74 @@ namespace Basis.Scripts.Drivers
                 job.slotWeights[i] = false;
             }
         }
+        private static Quaternion BindLocal(Transform parent, Transform bone)
+        {
+            if (parent == null || bone == null)
+            {
+                return Quaternion.identity;
+            }
+
+            return Quaternion.Inverse(parent.rotation) * bone.rotation;
+        }
         public static void Create(ref BasisEerieMovement job, BasisPoseSkeleton skeleton, BasisTransformMapping Mapping)
         {
-            job.handleHips = BindHandle(skeleton, Mapping.Hips);
-            job.handleChest = BindHandle(skeleton, Mapping.chest);
-            job.handleNeck = BindHandle(skeleton, Mapping.neck);
-            job.handleHead = BindHandle(skeleton, Mapping.head);
-            job.handleLeftUpperLeg = BindHandle(skeleton, Mapping.LeftUpperLeg);
-            job.handleLeftLowerLeg = BindHandle(skeleton, Mapping.LeftLowerLeg);
-            job.handleLeftFoot = BindHandle(skeleton, Mapping.leftFoot);
-            job.handleRightUpperLeg = BindHandle(skeleton, Mapping.RightUpperLeg);
-            job.handleRightLowerLeg = BindHandle(skeleton, Mapping.RightLowerLeg);
-            job.handleRightFoot = BindHandle(skeleton, Mapping.rightFoot);
-            job.handleLeftToe = BindHandle(skeleton, Mapping.leftToe);
-            job.handleRightToe = BindHandle(skeleton, Mapping.rightToe);
-            job.handleLeftUpperArm = BindHandle(skeleton, Mapping.leftUpperArm);
-            job.handleLeftLowerArm = BindHandle(skeleton, Mapping.leftLowerArm);
-            job.handleLeftHand = BindHandle(skeleton, Mapping.leftHand);
-            job.handleRightUpperArm = BindHandle(skeleton, Mapping.RightUpperArm);
-            job.handleRightLowerArm = BindHandle(skeleton, Mapping.RightLowerArm);
-            job.handleRightHand = BindHandle(skeleton, Mapping.rightHand);
-            job.handleLeftUpperArmTwist = BindHandle(skeleton, Mapping.leftUpperArmTwist);
-            job.handleLeftLowerArmTwist = BindHandle(skeleton, Mapping.leftLowerArmTwist);
-            job.handleRightUpperArmTwist = BindHandle(skeleton, Mapping.RightUpperArmTwist);
-            job.handleRightLowerArmTwist = BindHandle(skeleton, Mapping.RightLowerArmTwist);
-            job.handleSpine = BindHandle(skeleton, Mapping.spine);
-            job.handleUpperChest = BindHandle(skeleton, Mapping.Upperchest);
-            job.handleLeftShoulder = BindHandle(skeleton, Mapping.leftShoulder);
-            job.handleRightShoulder = BindHandle(skeleton, Mapping.RightShoulder);
+            job.handleHips = skeleton.Bind(Mapping.Hips);
+            job.handleChest = skeleton.Bind(Mapping.chest);
+            job.handleNeck = skeleton.Bind(Mapping.neck);
+            job.handleHead = skeleton.Bind(Mapping.head);
+            job.handleLeftUpperLeg = skeleton.Bind(Mapping.LeftUpperLeg);
+            job.handleLeftLowerLeg = skeleton.Bind(Mapping.LeftLowerLeg);
+            job.handleLeftFoot = skeleton.Bind(Mapping.leftFoot);
+            job.handleRightUpperLeg = skeleton.Bind(Mapping.RightUpperLeg);
+            job.handleRightLowerLeg = skeleton.Bind(Mapping.RightLowerLeg);
+            job.handleRightFoot = skeleton.Bind(Mapping.rightFoot);
+            job.handleLeftToe = skeleton.Bind(Mapping.leftToe);
+            job.handleRightToe = skeleton.Bind(Mapping.rightToe);
+            job.handleLeftUpperArm = skeleton.Bind(Mapping.leftUpperArm);
+            job.handleLeftLowerArm = skeleton.Bind(Mapping.leftLowerArm);
+            job.handleLeftHand = skeleton.Bind(Mapping.leftHand);
+            job.handleRightUpperArm = skeleton.Bind(Mapping.RightUpperArm);
+            job.handleRightLowerArm = skeleton.Bind(Mapping.RightLowerArm);
+            job.handleRightHand = skeleton.Bind(Mapping.rightHand);
+            job.handleLeftUpperArmTwist = skeleton.Bind(Mapping.leftUpperArmTwist);
+            job.handleLeftLowerArmTwist = skeleton.Bind(Mapping.leftLowerArmTwist);
+            job.handleRightUpperArmTwist = skeleton.Bind(Mapping.RightUpperArmTwist);
+            job.handleRightLowerArmTwist = skeleton.Bind(Mapping.RightLowerArmTwist);
+            job.handleSpine = skeleton.Bind(Mapping.spine);
+            job.handleUpperChest = skeleton.Bind(Mapping.Upperchest);
+            job.handleLeftShoulder = skeleton.Bind(Mapping.leftShoulder);
+            job.handleRightShoulder = skeleton.Bind(Mapping.RightShoulder);
 
-            // Baked T-pose data for shoulder solve
             job.tposeLeftShoulderRot = Mapping.leftShoulder != null ? Mapping.leftShoulder.rotation : Quaternion.identity;
             job.tposeRightShoulderRot = Mapping.RightShoulder != null ? Mapping.RightShoulder.rotation : Quaternion.identity;
-            job.tposeChestRot = Mapping.Upperchest != null ? Mapping.Upperchest.rotation
-                : Mapping.chest != null ? Mapping.chest.rotation : Quaternion.identity;
-            job.tposeLeftShoulderLocalDir = (Mapping.leftShoulder != null && Mapping.leftUpperArm != null)
-                ? (Mapping.leftUpperArm.position - Mapping.leftShoulder.position).normalized : Vector3.left;
-            job.tposeRightShoulderLocalDir = (Mapping.RightShoulder != null && Mapping.RightUpperArm != null)
-                ? (Mapping.RightUpperArm.position - Mapping.RightShoulder.position).normalized : Vector3.right;
-            // 0.6 m is an adult arm; on a small avatar it is the same shoulder-inert / shrug-latched failure
-            // a stale bake produces, so the fallback tracks avatar size too.
-            float fallbackArmLength = 0.6f * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
-            job.tposeShoulderToHandLeft = (Mapping.leftShoulder != null && Mapping.leftHand != null)
-                ? Vector3.Distance(Mapping.leftShoulder.position, Mapping.leftHand.position) : fallbackArmLength;
-            job.tposeShoulderToHandRight = (Mapping.RightShoulder != null && Mapping.rightHand != null)
-                ? Vector3.Distance(Mapping.RightShoulder.position, Mapping.rightHand.position) : fallbackArmLength;
-            job.tposeClavicleLenLeft = (Mapping.leftShoulder != null && Mapping.leftUpperArm != null)
-                ? Vector3.Distance(Mapping.leftShoulder.position, Mapping.leftUpperArm.position) : 0f;
-            job.tposeClavicleLenRight = (Mapping.RightShoulder != null && Mapping.RightUpperArm != null)
-                ? Vector3.Distance(Mapping.RightShoulder.position, Mapping.RightUpperArm.position) : 0f;
-            job.tposeShoulderToElbowLeft = (Mapping.leftShoulder != null && Mapping.leftLowerArm != null)
-                ? Vector3.Distance(Mapping.leftShoulder.position, Mapping.leftLowerArm.position) : 0f;
-            job.tposeShoulderToElbowRight = (Mapping.RightShoulder != null && Mapping.RightLowerArm != null)
-                ? Vector3.Distance(Mapping.RightShoulder.position, Mapping.RightLowerArm.position) : 0f;
+            job.tposeChestRot = Mapping.Upperchest != null ? Mapping.Upperchest.rotation : Mapping.chest != null ? Mapping.chest.rotation : Quaternion.identity;
+            job.tposeLeftShoulderLocalDir = (Mapping.leftShoulder != null && Mapping.leftUpperArm != null) ? (Mapping.leftUpperArm.position - Mapping.leftShoulder.position).normalized : Vector3.left;
+            job.tposeRightShoulderLocalDir = (Mapping.RightShoulder != null && Mapping.RightUpperArm != null) ? (Mapping.RightUpperArm.position - Mapping.RightShoulder.position).normalized : Vector3.right;
 
-            // Pair each slot with its bone handle, in HumanBodyBones order.
-            job.slotHandles.Length = BasisEerieMovement.Count;
-            job.slotHandles[0] = job.handleHips;
-            job.slotHandles[1] = job.handleLeftUpperLeg;
-            job.slotHandles[2] = job.handleRightUpperLeg;
-            job.slotHandles[3] = job.handleLeftLowerLeg;
-            job.slotHandles[4] = job.handleRightLowerLeg;
-            job.slotHandles[5] = job.handleLeftFoot;
-            job.slotHandles[6] = job.handleRightFoot;
-            job.slotHandles[7] = job.handleSpine;
-            job.slotHandles[8] = job.handleChest;
-            job.slotHandles[9] = job.handleNeck;
-            job.slotHandles[10] = job.handleHead;
-            job.slotHandles[11] = job.handleLeftShoulder;
-            job.slotHandles[12] = job.handleRightShoulder;
-            job.slotHandles[13] = job.handleLeftUpperArm;
-            job.slotHandles[14] = job.handleRightUpperArm;
-            job.slotHandles[15] = job.handleLeftLowerArm;
-            job.slotHandles[16] = job.handleRightLowerArm;
-            job.slotHandles[17] = job.handleLeftHand;
-            job.slotHandles[18] = job.handleRightHand;
-            job.slotHandles[19] = job.handleLeftToe;
-            job.slotHandles[20] = job.handleRightToe;
-            job.slotHandles[BasisEerieMovement.UpperChestSlot] = job.handleUpperChest;
+            float fallbackArmLength = 0.6f * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
+            job.tposeShoulderToHandLeft = (Mapping.leftShoulder != null && Mapping.leftHand != null) ? Vector3.Distance(Mapping.leftShoulder.position, Mapping.leftHand.position) : fallbackArmLength;
+            job.tposeShoulderToHandRight = (Mapping.RightShoulder != null && Mapping.rightHand != null) ? Vector3.Distance(Mapping.RightShoulder.position, Mapping.rightHand.position) : fallbackArmLength;
+            job.tposeClavicleLenLeft = (Mapping.leftShoulder != null && Mapping.leftUpperArm != null) ? Vector3.Distance(Mapping.leftShoulder.position, Mapping.leftUpperArm.position) : 0f;
+            job.tposeClavicleLenRight = (Mapping.RightShoulder != null && Mapping.RightUpperArm != null) ? Vector3.Distance(Mapping.RightShoulder.position, Mapping.RightUpperArm.position) : 0f;
+            job.tposeShoulderToElbowLeft = (Mapping.leftShoulder != null && Mapping.leftLowerArm != null) ? Vector3.Distance(Mapping.leftShoulder.position, Mapping.leftLowerArm.position) : 0f;
+            job.tposeShoulderToElbowRight = (Mapping.RightShoulder != null && Mapping.RightLowerArm != null) ? Vector3.Distance(Mapping.RightShoulder.position, Mapping.RightLowerArm.position) : 0f;
+
+            job.tposeLeftLowerArmTwistBind = BindLocal(Mapping.leftLowerArm, Mapping.leftLowerArmTwist);
+            job.tposeLeftLowerArmChildBind = BindLocal(Mapping.leftLowerArm, Mapping.leftHand);
+            job.tposeRightLowerArmTwistBind = BindLocal(Mapping.RightLowerArm, Mapping.RightLowerArmTwist);
+            job.tposeRightLowerArmChildBind = BindLocal(Mapping.RightLowerArm, Mapping.rightHand);
+            job.tposeLeftUpperArmTwistBind = BindLocal(Mapping.leftUpperArm, Mapping.leftUpperArmTwist);
+            job.tposeLeftUpperArmChildBind = BindLocal(Mapping.leftUpperArm, Mapping.leftLowerArm);
+            job.tposeRightUpperArmTwistBind = BindLocal(Mapping.RightUpperArm, Mapping.RightUpperArmTwist);
+            job.tposeRightUpperArmChildBind = BindLocal(Mapping.RightUpperArm, Mapping.RightLowerArm);
 
             GenerateHeadToSpine(ref job, skeleton, Mapping);
             job.spineMaxIterations = 20;
             job.spineTolerance = 0.001f;
-            job.chestSpringState = new NativeArray<Vector3>(2, Allocator.Persistent);
-            job.chestSpringInit = new NativeArray<int>(1, Allocator.Persistent);
-
-            job.swingLastDir = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingLastAxis = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingLastTarget = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingContinuityInit = new NativeArray<int>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingCollided = new NativeArray<int>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingSmoothState = new NativeArray<int>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingHintBend = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingHintAxis = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingHintDrag = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingHintBodyRot = new NativeArray<Quaternion>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingHintInit = new NativeArray<int>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingHintReach = new NativeArray<float>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingGuardSide = new NativeArray<int>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingPoleAnchor = new NativeArray<Vector3>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingPoleAnchorRot = new NativeArray<Quaternion>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.swingPoleAnchorInit = new NativeArray<int>(BasisEerieMovement.k_SwingCount, Allocator.Persistent);
-            job.legSwivelRaw = new NativeArray<Vector3>(2, Allocator.Persistent);
-            job.legSwivelSmooth = new NativeArray<Vector3>(2, Allocator.Persistent);
-            job.legSwivelInit = new NativeArray<int>(2, Allocator.Persistent);
+            job.chestSpring = new NativeArray<BasisChestSpringState>(1, Allocator.Persistent);
+            job.swingContinuity = new NativeArray<BasisSwingContinuityState>(BasisEerieMovement.swingCount, Allocator.Persistent);
+            job.armState = new NativeArray<BasisArmSlotState>(BasisEerieMovement.swingCount, Allocator.Persistent);
+            job.legState = new NativeArray<BasisLegSlotState>(2, Allocator.Persistent);
             job.legDiagnostics = new NativeArray<BasisLegDiagnostics>(2, Allocator.Persistent);
             job.virtualSpineState = new NativeArray<BasisAnimationRelativeVirtualSpineState>(1, Allocator.Persistent);
         }
@@ -272,17 +227,16 @@ namespace Basis.Scripts.Drivers
         {
             int n = chain.Length;
             job.chainSpineRestFrames = new NativeArray<BasisSpineRestFrame>(n, Allocator.Persistent);
-            job.chainSpineRoms = new NativeArray<BasisSpineRom>(n, Allocator.Persistent);
             if (Mapping.leftUpperArm == null || Mapping.RightUpperArm == null)
             {
-                return;   // every frame stays Valid=false, so the guard is a no-op. Decline, never guess.
+                return;
             }
             Vector3 hipsRight = Mapping.RightUpperArm.position - Mapping.leftUpperArm.position;
 
-            for (int i = 1; i <= n - 2; i++)   // skip the head (0) and the hips (n-1)
+            for (int i = 1; i <= n - 2; i++)
             {
                 Transform bone = chain[i];
-                Transform child = chain[i - 1];    // the chain runs tip -> root, so the CHILD is i-1
+                Transform child = chain[i - 1];
                 Transform parent = chain[i + 1];
                 if (bone == null || child == null || parent == null)
                 {
@@ -311,17 +265,14 @@ namespace Basis.Scripts.Drivers
                     continue;
                 }
 
-                job.chainSpineRestFrames[i] = BasisSpineAnatomy.BuildRestFrame(
-                    bone.position, child.position, bone.rotation, parent.rotation, hipsRight);
-                job.chainSpineRoms[i] = BasisSpineAnatomy.Rom(segment);
+                BasisSpineRestFrame frame = BasisSpineAnatomy.BuildRestFrame( bone.position, child.position, bone.rotation, parent.rotation, hipsRight);
+                frame.Segment = segment;
+                job.chainSpineRestFrames[i] = frame;
             }
         }
         public static void GenerateHeadToSpine(ref BasisEerieMovement job, BasisPoseSkeleton skeleton, BasisTransformMapping Mapping)
         {
-            // Neck / upperChest / chest are optional humanoid bones. The chain carries only the bones the
-            // avatar has -- an unbound handle anywhere in it would switch the whole spine solve (and the
-            // head pin welded to the HMD) off for that avatar. Head, spine and hips are required: without
-            // them there is no chain (the solver treats fewer than 3 links as unsolvable).
+
             Transform[] candidates = { Mapping.head, Mapping.neck, Mapping.Upperchest, Mapping.chest, Mapping.spine, Mapping.Hips };
             bool solvable = Mapping.head != null && Mapping.spine != null && Mapping.Hips != null;
             int presentCount = 0;
@@ -358,14 +309,7 @@ namespace Basis.Scripts.Drivers
             {
                 job.chainHeadToSpine[i] = skeleton.Bind(HeadToSpine[i]);
             }
-            if (Mapping.Hips != null && Mapping.head != null)
-            {
-                job.tposeLengthHeadToHips = (Mapping.head.position - Mapping.Hips.position);
-            }
-            else
-            {
-                job.tposeLengthHeadToHips = Vector3.zero;
-            }
+            Vector3 headToHips = Mapping.Hips != null && Mapping.head != null ? Mapping.head.position - Mapping.Hips.position : Vector3.zero;
             if (Mapping.head != null && Mapping.neck != null)
             {
                 job.tposeHeadToNeckLocal = Quaternion.Inverse(Mapping.head.rotation) * (Mapping.neck.position - Mapping.head.position);
@@ -381,12 +325,10 @@ namespace Basis.Scripts.Drivers
             }
             else
             {
-                job.tposeLengthNeckToHips = job.tposeLengthHeadToHips;
+                job.tposeLengthNeckToHips = headToHips;
             }
 
-            // Record the size these were measured at, so a later rescale can carry them along.
             job.tposeBakeScale = BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
         }
-        internal static BasisBoneHandle BindHandle(BasisPoseSkeleton skeleton, Transform t) => (t != null) ? skeleton.Bind(t) : default;
     }
 }

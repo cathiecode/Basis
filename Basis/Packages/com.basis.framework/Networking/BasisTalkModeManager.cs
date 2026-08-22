@@ -5,18 +5,11 @@ using Basis.Scripts.Networking.NetworkedAvatar;
 using BasisPermissions;
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using UnityEngine;
 
 namespace Basis.Scripts.Networking
 {
-    public enum BasisTalkMode : byte
-    {
-        Normal = 0,
-        Private = 1,
-        Direct = 2,
-        ThisPerson = 3,
-        Shout = 4,
-    }
 
     public static class BasisTalkModeManager
     {
@@ -45,6 +38,8 @@ namespace Basis.Scripts.Networking
             BasisNetworkManagement.OnlocalPermissionsChanged += HandlePermissionsChanged;
             BasisSettingsDefaults.ShoutShowOnMenuBar.OnChanged -= HandleShoutMenuBarPrefChanged;
             BasisSettingsDefaults.ShoutShowOnMenuBar.OnChanged += HandleShoutMenuBarPrefChanged;
+            BasisSettingsDefaults.TalkToNoOne.OnChanged -= HandleTalkToNoOnePrefChanged;
+            BasisSettingsDefaults.TalkToNoOne.OnChanged += HandleTalkToNoOnePrefChanged;
 #if !BASIS_DISABLE_MICROPHONE
             BasisLocalMicrophoneDriver.OnPausedAction -= HandleLocalMuteChanged;
             BasisLocalMicrophoneDriver.OnPausedAction += HandleLocalMuteChanged;
@@ -62,6 +57,40 @@ namespace Basis.Scripts.Networking
             return LocalCanShout() && BasisSettingsDefaults.ShoutShowOnMenuBar.RawValue;
         }
 
+        public static bool TalkToNoOneAvailable()
+        {
+            return BasisSettingsDefaults.TalkToNoOne.RawValue;
+        }
+
+        private static int localOnlyHolds;
+
+        /// <summary>
+        /// Scoped "nothing leaves this client" hold for local features that must not be heard by
+        /// anyone, such as the microphone test recorder. Deliberately independent of CurrentMode and
+        /// of the TalkToNoOne setting, so it neither changes nor persists the user's own choice, and
+        /// releasing it restores whatever mode is active rather than a value captured earlier.
+        /// </summary>
+        public static void AddLocalOnlyHold()
+        {
+            if (Interlocked.Increment(ref localOnlyHolds) == 1) OnLocalTalkModeChanged?.Invoke();
+        }
+
+        public static void ReleaseLocalOnlyHold()
+        {
+            int remaining = Interlocked.Decrement(ref localOnlyHolds);
+            if (remaining < 0)
+            {
+                Interlocked.Exchange(ref localOnlyHolds, 0);
+                return;
+            }
+
+            if (remaining == 0) OnLocalTalkModeChanged?.Invoke();
+        }
+
+        public static bool LocalOnlyHeld => Volatile.Read(ref localOnlyHolds) > 0;
+
+        public static bool TransmitBlockedLocally => CurrentMode == BasisTalkMode.NoOne || LocalOnlyHeld;
+
         private static readonly BasisTalkMode[] CycleOrder =
         {
             BasisTalkMode.Normal,
@@ -69,17 +98,19 @@ namespace Basis.Scripts.Networking
             BasisTalkMode.ThisPerson,
             BasisTalkMode.Direct,
             BasisTalkMode.Shout,
+            BasisTalkMode.NoOne,
         };
 
         /// <summary>
         /// True only when there is a reason to expose the mic-mode button: we're already
-        /// in a non-normal mode, shout is enabled on the menu bar, have a private set, a
-        /// marked person, or at least one P2P-connected peer.
+        /// in a non-normal mode, shout is enabled on the menu bar, talk-to-no-one is opted
+        /// into, have a private set, a marked person, or at least one P2P-connected peer.
         /// </summary>
         public static bool ShouldShowModeButton()
         {
             if (CurrentMode != BasisTalkMode.Normal) return true;
             if (ShoutAvailableOnMenuBar()) return true;
+            if (TalkToNoOneAvailable()) return true;
             if (privateMembers.Count > 0) return true;
             if (hasThisPersonTarget) return true;
             return BasisP2PManager.GetConnectedSessionCount() > 0;
@@ -94,6 +125,7 @@ namespace Basis.Scripts.Networking
                 case BasisTalkMode.ThisPerson: return hasThisPersonTarget;
                 case BasisTalkMode.Direct: return BasisP2PManager.GetConnectedSessionCount() > 0;
                 case BasisTalkMode.Shout: return ShoutAvailableOnMenuBar();
+                case BasisTalkMode.NoOne: return TalkToNoOneAvailable();
                 default: return false;
             }
         }
@@ -330,6 +362,16 @@ namespace Basis.Scripts.Networking
 
         private static void HandleShoutMenuBarPrefChanged(bool _)
         {
+            OnLocalTalkModeChanged?.Invoke();
+        }
+
+        private static void HandleTalkToNoOnePrefChanged(bool enabled)
+        {
+            if (!enabled && CurrentMode == BasisTalkMode.NoOne)
+            {
+                SetMode(BasisTalkMode.Normal);
+                return;
+            }
             OnLocalTalkModeChanged?.Invoke();
         }
     }

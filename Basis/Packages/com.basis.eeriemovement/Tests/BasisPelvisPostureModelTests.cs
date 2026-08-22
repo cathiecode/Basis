@@ -4,42 +4,22 @@ using Basis.IK.Mocap;
 using NUnit.Framework;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
     using BasisMotionClip = Basis.IK.Mocap.BasisMotionClip;
-
-    /// <summary>
-    /// The pelvis posture model, against the humans it claims to imitate -- and against the law it replaces.
-    ///
-    /// The safety properties come first, because this model moves EVERY local player's pelvis on EVERY frame.
-    /// A wrong elbow is ugly; a wrong pelvis is the whole avatar. So the things that must never happen are
-    /// pinned as identities before anything about accuracy is discussed.
-    /// </summary>
     public sealed class BasisPelvisPostureModelTests
     {
         // ==========================================================================================
         // SAFETY. These are the ones that would ruin someone's session, so they are checked hardest.
         // ==========================================================================================
-
-        /// <summary>
-        /// ⭐ THE ONE THAT MATTERS MOST. A user who is STANDING STILL has a pelvis that has not moved.
-        /// Exactly zero -- not "small", not "within tolerance". The model is factored as k * drop precisely
-        /// so this is an algebraic identity and not something a 3rd-order polynomial has to be trusted with.
-        /// </summary>
         [Test]
         public void StandingStill_MovesThePelvisExactlyZero()
         {
             for (float lean = 0f; lean <= 0.8f; lean += 0.05f)
             {
-                Assert.AreEqual(0f, BasisPelvisPostureModel.PelvisDrop(0f, lean),
-                    "a head at standing height must not move the pelvis by ANY amount, at any lean");
+                Assert.AreEqual(0f, BasisPelvisPostureModel.PelvisDrop(0f, lean),"a head at standing height must not move the pelvis by ANY amount, at any lean");
             }
         }
-
-        /// <summary>The pelvis never RISES because the head fell, and never falls FURTHER than the head did.
-        /// Either would be a spine doing something no spine does, and both are reachable by a polynomial that
-        /// is allowed to run free -- raw k spans -3.09..+1.23 across the domain. The clamp is load-bearing.</summary>
         [Test]
         public void ThePelvis_NeverRises_AndNeverOutrunsTheHead()
         {
@@ -56,9 +36,6 @@ namespace Basis.Tests.IK
                 }
             }
         }
-
-        /// <summary>A NaN head position must move the pelvis by nothing. A NaN transform in Unity PERSISTS --
-        /// the avatar does not recover when good data returns -- so this is not a tidiness check.</summary>
         [Test]
         public void ANaNInput_MovesThePelvisNotAtAll()
         {
@@ -67,29 +44,15 @@ namespace Basis.Tests.IK
             Assert.AreEqual(0f, BasisPelvisPostureModel.PelvisDrop(float.NaN, float.NaN));
             Assert.AreEqual(0f, BasisPelvisPostureModel.PelvisDrop(-1f, 0.2f), "a head ABOVE standing is not this model's business");
         }
-
-        /// <summary>Extrapolation is refused, not attempted: a 3rd-order polynomial outside its fit box is a
-        /// random number generator. Anything past the domain saturates at the domain edge.</summary>
         [Test]
         public void OutsideTheFitDomain_TheModelSaturatesInsteadOfExtrapolating()
         {
-            Assert.AreEqual(BasisPelvisPostureModel.Coupling(BasisPelvisPostureModel.MaxDrop, 0.3f),
-                            BasisPelvisPostureModel.Coupling(5f, 0.3f), 1e-6f,
-                            "an absurd head drop must clamp to the domain edge");
-            Assert.AreEqual(BasisPelvisPostureModel.Coupling(0.3f, BasisPelvisPostureModel.MaxLean),
-                            BasisPelvisPostureModel.Coupling(0.3f, 5f), 1e-6f,
-                            "an absurd lean must clamp to the domain edge");
+            Assert.AreEqual(BasisPelvisPostureModel.Coupling(BasisPelvisPostureModel.MaxDrop, 0.3f), BasisPelvisPostureModel.Coupling(5f, 0.3f), 1e-6f,"an absurd head drop must clamp to the domain edge");
+            Assert.AreEqual(BasisPelvisPostureModel.Coupling(0.3f, BasisPelvisPostureModel.MaxLean), BasisPelvisPostureModel.Coupling(0.3f, 5f), 1e-6f,"an absurd lean must clamp to the domain edge");
         }
-
         // ==========================================================================================
         // BEHAVIOUR. Does it actually tell the two postures apart?
         // ==========================================================================================
-
-        /// <summary>
-        /// THE WHOLE POINT, in one assertion. Same head drop, different lean -- and the pelvis must do two
-        /// completely different things. A squat drops it; a waist-bend does not. The old law could not
-        /// express this at all, because it never saw the lean.
-        /// </summary>
         [Test]
         public void TheSameHeadDrop_MovesThePelvisDifferently_DependingOnTheLean()
         {
@@ -98,33 +61,20 @@ namespace Basis.Tests.IK
             float squat = BasisPelvisPostureModel.Coupling(drop, 0.05f);   // straight down: a squat
             float bend = BasisPelvisPostureModel.Coupling(drop, 0.50f);    // way out front: a waist-bend
 
-            Assert.Greater(squat, 0.75f,
-                $"dropping straight down is a SQUAT -- the pelvis must ride the head down (got k={squat:F2}, " +
-                "real humans measure 0.78-0.99)");
-            Assert.Less(bend, 0.25f,
-                $"dropping while leaning far forward is a WAIST-BEND -- the pelvis must stay high (got k={bend:F2}, " +
-                "real humans measure 0.02-0.14)");
-            Assert.Greater(squat - bend, 0.5f,
-                "if the model cannot separate these two by a wide margin it has learned nothing, and the " +
-                "single constant it replaces would do just as well");
+            Assert.Greater(squat, 0.75f, $"dropping straight down is a SQUAT -- the pelvis must ride the head down (got k={squat:F2}, " +"real humans measure 0.78-0.99)");
+            Assert.Less(bend, 0.25f, $"dropping while leaning far forward is a WAIST-BEND -- the pelvis must stay high (got k={bend:F2}, " +"real humans measure 0.02-0.14)");
+            Assert.Greater(squat - bend, 0.5f, "if the model cannot separate these two by a wide margin it has learned nothing, and the " +"single constant it replaces would do just as well");
         }
-
         // ==========================================================================================
         // ACCURACY. Against real humans, out of sample, versus the law that ships today.
         // ==========================================================================================
-
-        /// <summary>
-        /// ⭐ THE A/B. The model and the shipped saturation law, run over every posture clip, scored against
-        /// the pelvis a real human actually had. This is the number that justifies the change.
-        /// </summary>
         [Test]
         public void ThePostureModel_BeatsTheShippedSaturationLaw_OnRealHumans()
         {
             List<BasisMotionClip> clips = BasisPostureCorpusTests.LoadPostureCorpus();
 
             // The shipped law, verbatim (BasisVirtualSpineCore + BasisSettingsDefaults).
-            const float k_MaxDropM = 0.30f, k_Strength = 0.85f;
-
+            const float maxDropM = 0.30f, strength = 0.85f;
             double modelErr = 0, rigErr = 0;
             int n = 0;
             float modelWorst = 0f, rigWorst = 0f;
@@ -150,11 +100,8 @@ namespace Basis.Tests.IK
 
                     // The rig, exactly as the driver calls it. Its input is the RIGID pelvis drop, which is
                     // the head/neck drop -- so it is handed the same head drop, in metres.
-                    float dropM = s.HeadDrop * standHeadY;
-                    float soft = k_MaxDropM * (1f - Mathf.Exp(-dropM / k_MaxDropM));
-                    float rig = Mathf.Lerp(dropM, soft, k_Strength);
-
-                    float truth = s.HipsDrop * standHeadY;
+                    float dropM = s.HeadDrop * standHeadY, soft = maxDropM * (1f - Mathf.Exp(-dropM / maxDropM));
+                    float rig = Mathf.Lerp(dropM, soft, strength), truth = s.HipsDrop * standHeadY;
                     float em = Mathf.Abs(model - truth), er = Mathf.Abs(rig - truth);
                     cm += em; cr += er; cn++;
                     modelWorst = Mathf.Max(modelWorst, em);
@@ -168,8 +115,7 @@ namespace Basis.Tests.IK
             }
 
             Assert.Greater(n, 1000, "not enough frames to conclude anything");
-            float rigMean = (float)(rigErr / n) * 100f;
-            float modelMean = (float)(modelErr / n) * 100f;
+            float rigMean = (float)(rigErr / n) * 100f, modelMean = (float)(modelErr / n) * 100f;
 
             report.AppendLine(new string('-', 52));
             report.AppendLine($"MEAN pelvis-height error:  rig {rigMean:F1} cm   MODEL {modelMean:F1} cm");
@@ -179,12 +125,8 @@ namespace Basis.Tests.IK
             report.AppendLine("find by ROTATING, because the head is welded to the HMD and cannot be negotiated with.");
             Debug.Log(report.ToString());
 
-            Assert.Less(modelMean, rigMean,
-                $"the posture model ({modelMean:F1} cm) must beat the shipped saturation law ({rigMean:F1} cm) " +
-                "on real humans, or there is no case for shipping it");
-            Assert.Less(modelMean, 0.75f * rigMean,
-                "and it must beat it by a margin that survives the corpus's own fidelity limits -- a few " +
-                "percent would not be worth the risk of touching every player's pelvis");
+            Assert.Less(modelMean, rigMean, $"the posture model ({modelMean:F1} cm) must beat the shipped saturation law ({rigMean:F1} cm) " +"on real humans, or there is no case for shipping it");
+            Assert.Less(modelMean, 0.75f * rigMean, "and it must beat it by a margin that survives the corpus's own fidelity limits -- a few " +"percent would not be worth the risk of touching every player's pelvis");
         }
     }
 }

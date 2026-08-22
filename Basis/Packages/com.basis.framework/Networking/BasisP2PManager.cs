@@ -397,6 +397,7 @@ namespace Basis.Scripts.Networking
         public static void BroadcastVoiceViaP2P(NetDataWriter clientFormatWriter)
         {
             if (clientFormatWriter == null || clientFormatWriter.Length == 0) return;
+            if (BasisTalkModeManager.TransmitBlockedLocally) return;
             if (!HasAnyConnectedSession()) return;
             if (!BasisNetworkConnection.TryGetLocalPlayerID(out ushort localId)) return;
 
@@ -873,8 +874,8 @@ namespace Basis.Scripts.Networking
 
             if (channel == BasisNetworkCommons.DeltaAvatarChannel)
             {
-                HandleP2PDeltaFrame(reader, expectedOtherId);
-                reader.Recycle();
+                bool leftoverIsExpected = HandleP2PDeltaFrame(reader, expectedOtherId);
+                reader.Recycle(leftoverIsExpected);
                 return;
             }
 
@@ -916,9 +917,9 @@ namespace Basis.Scripts.Networking
         /// fresh uplink keyframe) or a peer's avatar delta in the standard delta layout, which the
         /// normal delta decoder handles after the embedded-id spoof check.
         /// </summary>
-        private static void HandleP2PDeltaFrame(NetPacketReader reader, ushort expectedOtherId)
+        private static bool HandleP2PDeltaFrame(NetPacketReader reader, ushort expectedOtherId)
         {
-            if (reader.AvailableBytes < 1) return;
+            if (reader.AvailableBytes < 1) return true;
             int origPos = reader.Position;
             byte header = reader.GetByte();
 
@@ -928,20 +929,20 @@ namespace Basis.Scripts.Networking
                 {
                     Basis.Scripts.Networking.NetworkedAvatar.BasisNetworkAvatarCompressor.ForceUplinkKeyframe();
                 }
-                return;
+                return true;
             }
 
             bool largeId = BasisNetworkCommons.DeltaHeaderLargeId(header);
-            if (reader.AvailableBytes < (largeId ? 2 : 1)) return;
+            if (reader.AvailableBytes < (largeId ? 2 : 1)) return true;
             ushort embeddedId = largeId ? reader.GetUShort() : reader.GetByte();
             if (embeddedId != expectedOtherId)
             {
                 BasisDebug.LogWarning($"[P2P] Delta frame id {embeddedId} doesn't match session {expectedOtherId} — dropping spoofed packet.");
-                return;
+                return true;
             }
             reader.SetPosition(origPos);
             BasisNetworkProfiler.AddToCounter(BasisNetworkProfilerCounter.InboundAvatarP2P, reader.AvailableBytes);
-            BasisNetworkHandleAvatarDelta.Handle(reader);
+            return BasisNetworkHandleAvatarDelta.Handle(reader);
         }
 
         private static void HandleDirectP2PPacket(byte channel, NetPacketReader reader, ushort senderPlayerId, DeliveryMethod deliveryMethod)

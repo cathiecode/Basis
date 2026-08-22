@@ -1,59 +1,24 @@
 using Unity.Mathematics;
-
 namespace Basis.Scripts.Drivers
 {
-    public enum BasisLocoState : byte
-    {
-        Walking = 0,
-        Crouching = 1,
-        Jump = 2,
-        Falling = 3,
-        Landing = 4,
-        Prone = 5,
-    }
-
-    public enum BasisLocoCondition : byte
-    {
-        IsJumpingTrue = 0,
-        CrouchedTrue = 1,
-        CrouchedFalse = 2,
-        IsFallingTrue = 3,
-        IsFallingFalse = 4,
-        LandingTrigger = 5,
-        ProneTrue = 6,
-        ProneFalse = 7,
-    }
-
     public struct BasisLocoParams
     {
-        public float VelocityX;
-        public float VelocityZ;
-        public float CurrentSpeed;
-        public bool CrouchedState;
-        public bool ProneState;
-        public bool IsFalling;
-        public bool IsJumping;
-        public bool LandingTrigger;
+        public float VelocityX, VelocityZ, CurrentSpeed;
+        public bool CrouchedState, ProneState, IsFalling, IsJumping, LandingTrigger;
     }
-
     public struct BasisLocoContribution
     {
         public int Clip;
-        public float Weight;
-        public float Time;
+        public float Weight, Time;
     }
-
     public struct BasisLocoSimState
     {
         public BasisLocoState Current;
         public float CurrentNorm;
         public bool InTransition;
         public BasisLocoState To;
-        public float ToNorm;
-        public float TransitionProgress01;
-        public float TransitionInvDuration;
+        public float ToNorm, TransitionProgress01, TransitionInvDuration;
     }
-
     public struct BasisLocoTransition
     {
         public BasisLocoCondition Condition;
@@ -62,20 +27,10 @@ namespace Basis.Scripts.Drivers
         public bool HasExitTime;
         public float ExitTime;
     }
-
-    /// <summary>
-    /// Faithful data model + stepper for BasisLocomotion.controller (com.basis.sdk). The tables mirror
-    /// the asset exactly — state set, transition order, blend-tree child positions/time scales, exit
-    /// times — and BasisLocomotionGraphParityTests re-derives them from the asset in the editor, so a
-    /// controller edit fails the test instead of silently diverging from this stepper.
-    /// Scope is deliberately the stock controller only: avatars that ship their own controller keep the
-    /// engine Animator path (see BasisLocomotionPoseSystem).
-    /// </summary>
     public static class BasisLocomotionGraph
     {
         public const int ClipCount = 38;
         public const int MaxContributions = 28;
-
         public const int WalkingChildCount = 17;
         public const int CrouchingChildCount = 9;
         public const int ProneChildCount = 9;
@@ -85,7 +40,6 @@ namespace Basis.Scripts.Drivers
         public const int JumpClip = 35;
         public const int FallingClip = 36;
         public const int LandingClip = 37;
-
         public static readonly string[] ClipNames =
         {
             "Walking",
@@ -127,7 +81,6 @@ namespace Basis.Scripts.Drivers
             "HumanoidFall",
             "JumpLand",
         };
-
         public static readonly float2[] WalkingChildPositions =
         {
             new float2(0f, 1.2f),
@@ -148,12 +101,10 @@ namespace Basis.Scripts.Drivers
             new float2(-3.6f, 0f),
             new float2(-2.55f, 2.55f),
         };
-
         public static readonly float[] WalkingChildTimeScales =
         {
             1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1.5f, 1f, 1.5f, 1.5f, 1.5f, 1.5f, 1.5f, 1.5f, 1.5f,
         };
-
         public static readonly float2[] CrouchingChildPositions =
         {
             new float2(0f, 1.2f),
@@ -166,12 +117,10 @@ namespace Basis.Scripts.Drivers
             new float2(-1.35f, 1.35f),
             new float2(0f, 0f),
         };
-
         public static readonly float[] CrouchingChildTimeScales =
         {
             1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f,
         };
-
         public static readonly float2[] ProneChildPositions =
         {
             new float2(0f, 0.4f),
@@ -184,16 +133,13 @@ namespace Basis.Scripts.Drivers
             new float2(-0.42f, 0.42f),
             new float2(0f, 0f),
         };
-
         public static readonly float[] ProneChildTimeScales =
         {
             1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f,
         };
-
-        // Per state, in the exact order the controller asset lists them — first satisfied wins.
         public static readonly BasisLocoTransition[][] Transitions =
         {
-            // Walking
+
             new[]
             {
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsJumpingTrue, To = BasisLocoState.Jump, DurationSeconds = 0.25f },
@@ -202,47 +148,44 @@ namespace Basis.Scripts.Drivers
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsFallingTrue, To = BasisLocoState.Falling, DurationSeconds = 0.25f },
                 new BasisLocoTransition { Condition = BasisLocoCondition.LandingTrigger, To = BasisLocoState.Landing, DurationSeconds = 0.25f, HasExitTime = true, ExitTime = 0.79395604f },
             },
-            // Crouching
+
             new[]
             {
                 new BasisLocoTransition { Condition = BasisLocoCondition.ProneTrue, To = BasisLocoState.Prone, DurationSeconds = 0.25f },
                 new BasisLocoTransition { Condition = BasisLocoCondition.CrouchedFalse, To = BasisLocoState.Walking, DurationSeconds = 0.25f },
             },
-            // Jump
+
             new[]
             {
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsFallingTrue, To = BasisLocoState.Falling, DurationSeconds = 0.25f },
             },
-            // Falling
+
             new[]
             {
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsFallingFalse, To = BasisLocoState.Walking, DurationSeconds = 0.25f, HasExitTime = true, ExitTime = 0.75f },
                 new BasisLocoTransition { Condition = BasisLocoCondition.LandingTrigger, To = BasisLocoState.Landing, DurationSeconds = 0.25f },
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsJumpingTrue, To = BasisLocoState.Jump, DurationSeconds = 0.25f },
             },
-            // Landing
+
             new[]
             {
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsFallingTrue, To = BasisLocoState.Falling, DurationSeconds = 0.25f },
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsJumpingTrue, To = BasisLocoState.Jump, DurationSeconds = 0.25f },
                 new BasisLocoTransition { Condition = BasisLocoCondition.IsFallingFalse, To = BasisLocoState.Walking, DurationSeconds = 0.25f },
             },
-            // Prone
+
             new[]
             {
                 new BasisLocoTransition { Condition = BasisLocoCondition.ProneFalse, To = BasisLocoState.Crouching, DurationSeconds = 0.25f },
             },
         };
-
         static readonly float[] sWalkingWeights = new float[WalkingChildCount];
         static readonly float[] sCrouchingWeights = new float[CrouchingChildCount];
         static readonly float[] sProneWeights = new float[ProneChildCount];
-
         public static BasisLocoSimState DefaultSimState => new BasisLocoSimState
         {
             Current = BasisLocoState.Walking,
         };
-
         static bool EvaluateCondition(BasisLocoCondition condition, in BasisLocoParams p)
         {
             switch (condition)
@@ -258,11 +201,6 @@ namespace Basis.Scripts.Drivers
                 default: return false;
             }
         }
-
-        /// <summary>
-        /// Gradient-band interpolation in cartesian space — the algorithm behind Unity's
-        /// 2D Freeform Cartesian blend type. weights must have one slot per position.
-        /// </summary>
         public static void FreeformCartesianWeights(float2 point, float2[] positions, float[] weights)
         {
             int count = positions.Length;
@@ -314,7 +252,6 @@ namespace Basis.Scripts.Drivers
                 weights[i] *= inv;
             }
         }
-
         static float TreeNormDelta(in BasisLocoParams p, float dt, float[] clipLengths, float2[] positions, float[] timeScales, float[] weights, int clipStart)
         {
             FreeformCartesianWeights(new float2(p.VelocityX, p.VelocityZ), positions, weights);
@@ -326,32 +263,24 @@ namespace Basis.Scripts.Drivers
             }
             return duration > 1e-4f ? dt * p.CurrentSpeed / duration : 0f;
         }
-
         static float StateNormDelta(BasisLocoState state, in BasisLocoParams p, float dt, float[] clipLengths, out float[] treeWeights)
         {
             switch (state)
             {
-                case BasisLocoState.Walking:
-                    treeWeights = sWalkingWeights;
+                case BasisLocoState.Walking: treeWeights = sWalkingWeights;
                     return TreeNormDelta(in p, dt, clipLengths, WalkingChildPositions, WalkingChildTimeScales, sWalkingWeights, WalkingClipStart);
-                case BasisLocoState.Crouching:
-                    treeWeights = sCrouchingWeights;
+                case BasisLocoState.Crouching: treeWeights = sCrouchingWeights;
                     return TreeNormDelta(in p, dt, clipLengths, CrouchingChildPositions, CrouchingChildTimeScales, sCrouchingWeights, CrouchingClipStart);
-                case BasisLocoState.Prone:
-                    treeWeights = sProneWeights;
+                case BasisLocoState.Prone: treeWeights = sProneWeights;
                     return TreeNormDelta(in p, dt, clipLengths, ProneChildPositions, ProneChildTimeScales, sProneWeights, ProneClipStart);
-                case BasisLocoState.Jump:
-                    treeWeights = null;
+                case BasisLocoState.Jump: treeWeights = null;
                     return clipLengths[JumpClip] > 1e-4f ? dt / clipLengths[JumpClip] : 0f;
-                case BasisLocoState.Falling:
-                    treeWeights = null;
+                case BasisLocoState.Falling: treeWeights = null;
                     return clipLengths[FallingClip] > 1e-4f ? dt / clipLengths[FallingClip] : 0f;
-                default:
-                    treeWeights = null;
+                default: treeWeights = null;
                     return clipLengths[LandingClip] > 1e-4f ? dt / clipLengths[LandingClip] : 0f;
             }
         }
-
         static int EmitTree(float norm, float stateWeight, float[] treeWeights, int clipStart, int childCount, float[] clipLengths, BasisLocoContribution[] contributions, int count)
         {
             float phase = norm - math.floor(norm);
@@ -367,17 +296,13 @@ namespace Basis.Scripts.Drivers
             }
             return count;
         }
-
         static int EmitState(BasisLocoState state, float norm, float stateWeight, float[] treeWeights, float[] clipLengths, bool[] clipLooping, BasisLocoContribution[] contributions, int count)
         {
             switch (state)
             {
-                case BasisLocoState.Walking:
-                    return EmitTree(norm, stateWeight, treeWeights, WalkingClipStart, WalkingChildCount, clipLengths, contributions, count);
-                case BasisLocoState.Crouching:
-                    return EmitTree(norm, stateWeight, treeWeights, CrouchingClipStart, CrouchingChildCount, clipLengths, contributions, count);
-                case BasisLocoState.Prone:
-                    return EmitTree(norm, stateWeight, treeWeights, ProneClipStart, ProneChildCount, clipLengths, contributions, count);
+                case BasisLocoState.Walking: return EmitTree(norm, stateWeight, treeWeights, WalkingClipStart, WalkingChildCount, clipLengths, contributions, count);
+                case BasisLocoState.Crouching: return EmitTree(norm, stateWeight, treeWeights, CrouchingClipStart, CrouchingChildCount, clipLengths, contributions, count);
+                case BasisLocoState.Prone: return EmitTree(norm, stateWeight, treeWeights, ProneClipStart, ProneChildCount, clipLengths, contributions, count);
                 default:
                 {
                     int clip = state == BasisLocoState.Jump ? JumpClip : state == BasisLocoState.Falling ? FallingClip : LandingClip;
@@ -387,12 +312,6 @@ namespace Basis.Scripts.Drivers
                 }
             }
         }
-
-        /// <summary>
-        /// Advances the state machine by dt and emits the weighted clip samples that reproduce what the
-        /// Animator would have blended this frame. Consumes p.LandingTrigger when a transition fires on it.
-        /// Returns the contribution count.
-        /// </summary>
         public static int Step(ref BasisLocoSimState s, ref BasisLocoParams p, float dt, float[] clipLengths, bool[] clipLooping, BasisLocoContribution[] contributions)
         {
             float previousNorm = s.CurrentNorm;
@@ -422,7 +341,7 @@ namespace Basis.Scripts.Drivers
                     ref readonly BasisLocoTransition t = ref candidates[i];
                     if (t.HasExitTime)
                     {
-                        // Looping states re-arm the exit each cycle: fires on crossing k + ExitTime.
+
                         bool crossed = math.floor(s.CurrentNorm - t.ExitTime) > math.floor(previousNorm - t.ExitTime);
                         if (!crossed)
                         {

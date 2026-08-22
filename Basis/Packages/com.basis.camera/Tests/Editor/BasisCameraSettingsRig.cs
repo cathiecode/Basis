@@ -41,6 +41,8 @@ namespace Basis.Tests.Camera
         public readonly LensDistortion LensDistortion;
         public readonly MotionBlur MotionBlur;
         public readonly PaniniProjection PaniniProjection;
+        public readonly SplitToning SplitToning;
+        public readonly LiftGammaGain LiftGammaGain;
 
         public readonly Slider FovSlider;
         public readonly Slider ExposureSlider;
@@ -74,6 +76,8 @@ namespace Basis.Tests.Camera
             LensDistortion = NewOverride<LensDistortion>();
             MotionBlur = NewOverride<MotionBlur>();
             PaniniProjection = NewOverride<PaniniProjection>();
+            SplitToning = NewOverride<SplitToning>();
+            LiftGammaGain = NewOverride<LiftGammaGain>();
 
             BasisHandHeldCameraMetaData metaData = Camera.MetaData;
             metaData.depthOfField = DepthOfField;
@@ -86,6 +90,8 @@ namespace Basis.Tests.Camera
             metaData.lensDistortion = LensDistortion;
             metaData.motionBlur = MotionBlur;
             metaData.paniniProjection = PaniniProjection;
+            metaData.splitToning = SplitToning;
+            metaData.liftGammaGain = LiftGammaGain;
 
             // Mirrors CachePostProcessingReferences: colour grading is always live, the added
             // effects start switched off so an unconfigured one never alters the shot.
@@ -158,11 +164,15 @@ namespace Basis.Tests.Camera
                 focusPeakingSensitivity = 0.72f,
                 focusPeakingColour = 2,
                 focusPeakingGreyPicture = true,
+                viewfinderGrid = true,
+                viewfinderGridPattern = (int)BasisCameraGridPattern.GoldenRatio,
+                viewfinderGridOpacity = 0.85f,
                 autoBrightness = true,
                 autoBrightnessTarget = 0.62f,
                 autoBrightnessSpeed = 3.4f,
                 autoBrightnessMetering = (int)BasisCameraMeteringMode.Spot,
                 autoBrightnessRange = 4.5f,
+                overrideVolumetricFog = true,
                 VolumetricFogVolumedensity = 0.42f,
                 VolumetricFogenableAPVContribution = false,
                 VolumetricFogenableMainLightContribution = false,
@@ -185,6 +195,7 @@ namespace Basis.Tests.Camera
                 autoFocusFollowSubject = true,
                 modifiers = DistinctiveModifiers(),
                 detachedMarker = (int)BasisCameraDetachedMarker.Gizmo,
+                anchorFollowsBody = true,
                 capture360 = true,
                 useAutoLeveling = true,
                 useVRHandheldSmoothing = true,

@@ -1,6 +1,5 @@
 using System;
 using Unity.Mathematics;
-using Unity.Profiling;
 using UnityEngine;
 
 namespace Basis.Scripts.Rendering
@@ -14,23 +13,6 @@ namespace Basis.Scripts.Rendering
         public float4 Plane4;
         public float4 Plane5;
         public float3 Position;
-    }
-
-    [Flags]
-    public enum BasisVisibilityFlags : uint
-    {
-        None = 0u,
-        Active = 1u << 0,
-        Dynamic = 1u << 1,
-        AlwaysVisible = 1u << 2,
-        CullEligible = 1u << 3,
-
-        /// <summary>
-        /// Bounds are authored once and never move, so the entry needs no root transform. Without
-        /// this a root-less entry is forced <see cref="AlwaysVisible"/>, because nothing would ever
-        /// refresh its centre and it would be culled against a stale position.
-        /// </summary>
-        Static = 1u << 4,
     }
 
     public static class BasisVisibilityMath
@@ -49,11 +31,4 @@ namespace Basis.Scripts.Rendering
         }
     }
 
-    internal static class BasisVisibilityMarkers
-    {
-        public static readonly ProfilerMarker CollectCameras = new ProfilerMarker("BasisVisibility.CollectCameras");
-        public static readonly ProfilerMarker Dispatch = new ProfilerMarker("BasisVisibility.Dispatch");
-        public static readonly ProfilerMarker Join = new ProfilerMarker("BasisVisibility.Join");
-        public static readonly ProfilerMarker Apply = new ProfilerMarker("BasisVisibility.Apply");
-    }
 }

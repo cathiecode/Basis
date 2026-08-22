@@ -5,77 +5,19 @@ using Basis.IK.Mocap;
 using NUnit.Framework;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
     using BasisMotionClip = Basis.IK.Mocap.BasisMotionClip;
-
-    /// <summary>
-    /// WHAT A REAL HUMAN'S PELVIS DOES WHEN THEY BEND OVER -- measured, so the spine can stop being argued about.
-    ///
-    /// ================================================================================================
-    /// THE TWO COMPLAINTS, FROM IN-HEADSET TESTING:
-    ///   (A) "looking down forces chest to ROTATE, not POSITION -- we need a more stable looking down"
-    ///   (B) "gamer neck: when bending over the body does not pull itself DOWN enough, so the neck looks
-    ///        like a tortoise"
-    ///
-    /// Both are the same defect wearing two hats: THE TORSO ROTATES WHERE IT SHOULD TRANSLATE. And it has
-    /// to, because in this rig the chest bone's position is not an IK target at all -- it is pure FK, hanging
-    /// off the hips. The entire translate budget in the spine subsystem is a 1.5 cm hips / 2.5 cm chest nudge
-    /// inside BasisCervicalSolveCore, and it only unlocks past 50 degrees of gaze. Everything else the torso
-    /// can do about a head that has moved is turn.
-    ///
-    /// THE HEAD IS A HARD CONSTRAINT -- it is welded to the HMD. So every centimetre the body declines to
-    /// travel is a centimetre the NECK has to find. That is the tortoise, and it is arithmetic, not taste.
-    /// ================================================================================================
-    ///
-    /// This file does not assert taste. It reads the CMU bend-over clips -- 26_09 (bend over / pick up),
-    /// 143_11 (bend + pick up a box), 69_70 (squat / pick up), 143_18 (sit down / get up) -- and measures the
-    /// couplings the solver is supposed to reproduce:
-    ///
-    ///   VERTICAL     how far does the pelvis drop per metre the head drops?
-    ///   HORIZONTAL   as the head travels FORWARD of the feet, which way does the pelvis go?
-    ///
-    /// The second one matters most, because the shipped answer is a CONSTANT, it is applied with NO regard to
-    /// what the body is doing, and I want to know its sign from a human rather than from an argument:
-    ///
-    ///     BasisVirtualSpineCore.ComputeRealisticHipsXZBurst
-    ///         hipsXZ = lerp(feetMidXZ, headXZ, FootPendulumLeanFrac = 0.20)   // feet tracked
-    ///         hipsXZ = lerp(headBaselineXZ, headXZ, CounterbalanceFollowFrac = 0.25)
-    ///
-    /// Both lerp the pelvis TOWARD the head, and I fully expected the corpus to call that a sign error -- a
-    /// bending human's pelvis slides BACK over the heels, which is what "counterbalance" means.
-    ///
-    /// ⭐ THE CORPUS REFUSED TO SAY THAT, AND WHAT IT SAID INSTEAD IS MORE USEFUL.
-    ///
-    /// The vertical coupling a real human uses is NOT A CONSTANT. It is 0.23 for a waist-bend over a box
-    /// (143_11: the pelvis stays high and the spine folds) and 0.88 for a squat (69_70: the pelvis rides the
-    /// head almost 1:1). Same head drop, completely different pelvis. The rig ships ONE saturating law for
-    /// both, so it cannot help being wrong twice -- and it is: on the squat it holds the pelvis 32.8 cm ABOVE
-    /// where a real one goes, and on the waist-bend it slightly over-drops.
-    ///
-    /// The horizontal slopes tell the same story from the other side (-0.25, -0.51, -0.72, then +0.99 on the
-    /// sit), which is why the sibling test does NOT assert a sign on them: pooling a squat and a waist-bend
-    /// into one slope produces a number with no referent. The thing that separates the two motions is HOW FAR
-    /// FORWARD THE HEAD HAS TRAVELLED -- and that is exactly the input the rig's vertical law never looks at.
-    ///
-    /// So the finding is not "flip a sign". It is: THE PELVIS NEEDS AN INPUT IT IS NOT BEING GIVEN, and until
-    /// it has one, no single value of these constants can be right. The 32.8 cm is the size of the prize.
-    ///
-    /// REPORT-ONLY on the measurement, ASSERTING on the properties. Read the log; the numbers are the spec.
-    /// </summary>
     public sealed class BasisSpineBendOverGroundTruthTests
     {
         static string CorpusDir => Path.GetFullPath("Packages/com.basis.framework/Tests/MocapCorpus~");
-
         // The clips in the corpus where a human actually folds up.
-        static readonly string[] k_BendOverClips = { "26_09", "143_11", "69_70", "143_18" };
-
+        static readonly string[] bendOverClips = { "26_09", "143_11", "69_70", "143_18" };
         static List<BasisMotionClip> LoadBendOverClips()
         {
             if (!Directory.Exists(CorpusDir)) Assert.Ignore($"no mocap corpus at {CorpusDir}");
             var clips = new List<BasisMotionClip>();
-            foreach (string name in k_BendOverClips)
+            foreach (string name in bendOverClips)
             {
                 string path = Path.Combine(CorpusDir, name + ".bvh");
                 if (File.Exists(path) && BasisBvhLoader.TryLoad(path, out BasisMotionClip c, out _)) clips.Add(c);
@@ -83,10 +25,6 @@ namespace Basis.Tests.IK
             if (clips.Count == 0) Assert.Ignore("none of the bend-over clips are present in the corpus");
             return clips;
         }
-
-        /// <summary>The pelvis's own horizontal facing, from the hip line. Taken from the PELVIS and not the
-        /// chest on purpose: the chest is the thing under test, and a frame built from it would move with the
-        /// very rotation we are trying to measure.</summary>
         static Vector3 PelvisForward(BasisMotionClip c, int f)
         {
             Vector3 right = c.Get(f, BasisMocapJoint.RightUpperLeg).Position - c.Get(f, BasisMocapJoint.LeftUpperLeg).Position;
@@ -94,18 +32,11 @@ namespace Basis.Tests.IK
             if (right.sqrMagnitude < 1e-8f) return Vector3.forward;
             return Vector3.Cross(right.normalized, Vector3.up);   // Unity: Cross(right, up) == forward
         }
-
         static Vector3 SupportCentre(BasisMotionClip c, int f)
         {
-            Vector3 l = c.Get(f, BasisMocapJoint.LeftFoot).Position;
-            Vector3 r = c.Get(f, BasisMocapJoint.RightFoot).Position;
+            Vector3 l = c.Get(f, BasisMocapJoint.LeftFoot).Position, r = c.Get(f, BasisMocapJoint.RightFoot).Position;
             return new Vector3(0.5f * (l.x + r.x), 0f, 0.5f * (l.z + r.z));
         }
-
-        /// <summary>
-        /// THE MEASUREMENT. Prints the two couplings, per clip and pooled, and asserts only the things that
-        /// are unambiguous from the data.
-        /// </summary>
         [Test]
         public void ARealHumansPelvis_DropsWithTheHead_ByAnAmountThatDependsOnTheMotion()
         {
@@ -126,8 +57,7 @@ namespace Basis.Tests.IK
             report.AppendLine("             the rig ships +0.20 / +0.25 (pelvis lerps TOWARD the head).");
             report.AppendLine("             A NEGATIVE number here means a real pelvis goes the OTHER WAY.");
             report.AppendLine();
-            report.AppendLine($"{"clip",-9} {"maxHeadDrop",12} {"maxHipsDrop",12} {"dHips/dHead",12} | " +
-                              $"{"maxHeadFwd",11} {"hipsFwd@max",12} {"dHips/dHead",12}");
+            report.AppendLine($"{"clip",-9} {"maxHeadDrop",12} {"maxHipsDrop",12} {"dHips/dHead",12} | " + $"{"maxHeadFwd",11} {"hipsFwd@max",12} {"dHips/dHead",12}");
             report.AppendLine(new string('-', 92));
 
             // Pooled least-squares slopes through the origin: slope = sum(x*y) / sum(x*x).
@@ -155,12 +85,8 @@ namespace Basis.Tests.IK
                 {
                     Vector3 head = c.Get(f, BasisMocapJoint.Head).Position;
                     Vector3 hips = c.Get(f, BasisMocapJoint.Hips).Position;
-
-                    float headDrop = baseHeadY - head.y;
-                    float hipsDrop = baseHipsY - hips.y;
-
-                    Vector3 fwd = PelvisForward(c, f);
-                    Vector3 support = SupportCentre(c, f);
+                    float headDrop = baseHeadY - head.y, hipsDrop = baseHipsY - hips.y;
+                    Vector3 fwd = PelvisForward(c, f), support = SupportCentre(c, f);
                     float headFwd = Vector3.Dot(new Vector3(head.x - support.x, 0f, head.z - support.z), fwd);
                     float hipsFwd = Vector3.Dot(new Vector3(hips.x - support.x, 0f, hips.z - support.z), fwd);
 
@@ -183,8 +109,7 @@ namespace Basis.Tests.IK
                 vNum += cvNum; vDen += cvDen; hNum += chNum; hDen += chDen;
                 if (!float.IsNaN(vSlope) && vSlope < worstClipVertSlope) worstClipVertSlope = vSlope;
 
-                report.AppendLine($"{c.Name,-9} {maxHeadDrop,12:F3} {maxHipsDrop,12:F3} {vSlope,12:F3} | " +
-                                  $"{maxHeadFwd,11:F3} {hipsFwdAtMax,12:F3} {hSlope,12:F3}");
+                report.AppendLine($"{c.Name,-9} {maxHeadDrop,12:F3} {maxHipsDrop,12:F3} {vSlope,12:F3} | " + $"{maxHeadFwd,11:F3} {hipsFwdAtMax,12:F3} {hSlope,12:F3}");
             }
 
             float pooledVert = vDen > 1e-9 ? (float)(vNum / vDen) : float.NaN;
@@ -198,8 +123,7 @@ namespace Basis.Tests.IK
             report.AppendLine($"  vertical   : lerp(drop, 0.30*(1-exp(-drop/0.30)), 0.85) -- see the table below");
             for (float d = 0.1f; d <= 0.71f; d += 0.2f)
             {
-                float soft = 0.30f * (1f - Mathf.Exp(-d / 0.30f));
-                float got = Mathf.Lerp(d, soft, 0.85f);
+                float soft = 0.30f * (1f - Mathf.Exp(-d / 0.30f)), got = Mathf.Lerp(d, soft, 0.85f);
                 report.AppendLine($"               head drops {d:F2} m -> pelvis drops {got:F3} m  ({got / d * 100f:F0}% of rigid)");
             }
             report.AppendLine($"  horizontal : +0.20 (feet tracked) / +0.25 -- pelvis lerped TOWARD the head");
@@ -212,9 +136,7 @@ namespace Basis.Tests.IK
             // ------------------------------------------------------------------------------------------
             Assert.IsFalse(float.IsNaN(pooledVert), "no bent frames were found -- the measurement did not run");
 
-            Assert.Greater(pooledVert, 0.30f,
-                $"a real pelvis DROPS when the head drops (measured {pooledVert:F3} m per m). If this is near zero " +
-                "the corpus is not doing what the clip names say and the rest of this file is meaningless.");
+            Assert.Greater(pooledVert, 0.30f, $"a real pelvis DROPS when the head drops (measured {pooledVert:F3} m per m). If this is near zero " +"the corpus is not doing what the clip names say and the rest of this file is meaningless.");
 
             // ==========================================================================================
             // ⚠ THE HORIZONTAL SIGN IS *NOT* ASSERTED, AND THE REASON IS WORTH MORE THAN THE ASSERTION.
@@ -243,22 +165,14 @@ namespace Basis.Tests.IK
             // ==========================================================================================
             Assert.IsFalse(float.IsNaN(pooledHoriz), "the horizontal measurement did not run");
         }
-
-        /// <summary>
-        /// THE TORTOISE, QUANTIFIED. The rig's own vertical law, fed the head drops a real human actually
-        /// produces, versus the pelvis drop that human actually produced. The difference is the gap the neck
-        /// is left holding.
-        ///
-        /// This is the number to beat. It is not a style opinion -- it is centimetres of neck.
-        /// </summary>
         [Test]
         public void TheRigsCompressionLaw_LeavesTheNeckHoldingAGap_OnRealBendOvers()
         {
             List<BasisMotionClip> clips = LoadBendOverClips();
 
             // The shipped law: BasisVirtualSpineCore.ComputeHipsPosition, with the shipped defaults.
-            const float k_MaxDrop = 0.30f;        // VSpineHipsMaxDropMeters
-            const float k_Strength = 0.85f;       // VSpineHipsCompressionStrength
+            const float maxDrop = 0.30f;        // VSpineHipsMaxDropMeters
+            const float strength = 0.85f;       // VSpineHipsCompressionStrength
 
             float worstGap = 0f;
             string worstWhere = "";
@@ -287,8 +201,8 @@ namespace Basis.Tests.IK
 
                     // The rig's pelvis is driven from the NECK, rigidly, then compressed. The rigid drop the
                     // law is handed is the head/neck drop; this is that law, verbatim.
-                    float soft = k_MaxDrop * (1f - Mathf.Exp(-headDrop / k_MaxDrop));
-                    float rigHips = Mathf.Lerp(headDrop, soft, k_Strength);
+                    float soft = maxDrop * (1f - Mathf.Exp(-headDrop / maxDrop));
+                    float rigHips = Mathf.Lerp(headDrop, soft, strength);
 
                     float gap = humanHips - rigHips;   // positive => the human's pelvis is LOWER than the rig's
                     if (gap > clipWorst) { clipWorst = gap; atHead = headDrop; atHuman = humanHips; atRig = rigHips; }
@@ -329,13 +243,9 @@ namespace Basis.Tests.IK
             report.AppendLine($"WORST GAP (posture model): {worstModelGap * 100f:F1} cm -- on the same frames.");
             Debug.Log(report.ToString());
 
-            Assert.Greater(worstGap, 0.05f,
-                "the shipped saturation law held the pelvis measurably above a real human's on a deep bend. " +
-                "If this no longer holds, the legacy law has been changed and the premise of the fix has moved.");
+            Assert.Greater(worstGap, 0.05f, "the shipped saturation law held the pelvis measurably above a real human's on a deep bend. " +"If this no longer holds, the legacy law has been changed and the premise of the fix has moved.");
 
-            Assert.Less(worstModelGap, worstGap,
-                $"BasisPelvisPostureModel must close the gap the saturation law opened -- legacy {worstGap * 100f:F1} cm, " +
-                $"model {worstModelGap * 100f:F1} cm. This is the tortoise, and this assertion is what stops it coming back.");
+            Assert.Less(worstModelGap, worstGap, $"BasisPelvisPostureModel must close the gap the saturation law opened -- legacy {worstGap * 100f:F1} cm, " + $"model {worstModelGap * 100f:F1} cm. This is the tortoise, and this assertion is what stops it coming back.");
         }
     }
 }

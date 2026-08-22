@@ -3,40 +3,17 @@ using System.Text;
 using Basis.IK.Mocap;
 using NUnit.Framework;
 using UnityEngine;
-
 namespace Basis.Tests.IK
 {
-    /// <summary>
-    /// "Fast rotation around the hips must not make the feet step on each other."
-    ///
-    /// Drives the REAL BasisFootSimulateJob through a battery of in-place spins (both a PHYSICAL spin -- the
-    /// playspace fixed while the body yaws, the hard case -- and a character-controller/stick turn) at chibi,
-    /// adult and giant scale, and asserts the feet never overlap and never scissor badly. This is pure
-    /// synthetic (no BVH), so it runs headless in the batch suite -- unlike BasisFootIKSweep, which is editor
-    /// only and merely TOLERATED fast-rotation crossover. See project_basis_foot_mocap_comparison_harness.
-    ///
-    /// Also guards two bug CLASSES this system has shipped before: scale-dependence (a metre constant that a
-    /// chibi feels differently) and framerate-dependence (a self-referential smoothing that converges by frame
-    /// count, not time). The gait law is dimensionless, so both must be invariant.
-    /// </summary>
     public sealed class BasisFootRotationTests
     {
         static readonly float[] Scales = { 0.6f, 1.0f, 1.8f };
         // Includes EXTREME rates (600-1200 deg/s = a fast physical whip / snap turn) -- the anti-overlap
         // backstop must hold there, which the tracking+widening alone did not.
         static readonly float[] Rates = { 60f, 120f, 240f, 360f, 600f, 900f, 1200f };
-
         const float MaxCollidePct = 3f;    // feet overlap (gap < foot length) on at most this % of ticks
         const float MaxCrossMaxCm = 3f;    // a foot may cross to the wrong side of the other by at most this (scaled below)
-
-        static string Row(float scale, float rate, bool stick, in BasisFootRotationResult r) =>
-            $"  {(stick ? "stick" : "phys"),-6} {scale,4:F1}x {rate,4:F0}deg/s | " +
-            $"crossMax {r.CrossMaxCm,6:F1}cm  crossed {r.CrossedPct,5:F1}%  minGap {r.MinGapCm,5:F1}cm  " +
-            $"collide {r.CollidePct,5:F1}%  bothStep {r.BothSteppingTicks}";
-
-        /// <summary>
-        /// The headline: across every scale/rate/mode, the feet must not overlap and must keep single support.
-        /// </summary>
+        static string Row(float scale, float rate, bool stick, in BasisFootRotationResult r) => $"  {(stick ? "stick" : "phys"),-6} {scale,4:F1}x {rate,4:F0}deg/s | " + $"crossMax {r.CrossMaxCm,6:F1}cm  crossed {r.CrossedPct,5:F1}%  minGap {r.MinGapCm,5:F1}cm  " + $"collide {r.CollidePct,5:F1}%  bothStep {r.BothSteppingTicks}";
         [Test]
         public void Feet_DoNotStepOnEachOther_DuringFastRotation()
         {
@@ -74,13 +51,6 @@ namespace Basis.Tests.IK
             Debug.Log(report.ToString());
             if (failures.Count > 0) Assert.Fail("Fast-rotation crossover:\n  " + string.Join("\n  ", failures) + "\n\n" + report);
         }
-
-        /// <summary>
-        /// A planted foot must HOLD its rotation in the world as the body turns -- it must NOT pivot with the
-        /// turn (the old "preserveTip" behaviour, and the thing that reads as unconvincing). This drives the
-        /// real job's foot ROTATION (currentRot -- which the driver now consumes) through a moderate turn, where
-        /// planted phases are long enough to measure the hold cleanly. yaw-follow 0 = holds, 1 = spins with body.
-        /// </summary>
         [Test]
         public void PlantedFoot_HoldsItsRotation_WhileTheBodyTurns()
         {
@@ -93,17 +63,11 @@ namespace Basis.Tests.IK
                     BasisFootRotationResult r = BasisMocapFootQuality.RunSpin(p, 90f, stick);
                     Debug.Log($"[planted-hold {scale:F1}x {(stick ? "stick" : "phys")}] yaw-follow {r.PlantedYawFollowFrac:F2}");
                     if (r.PlantedYawFollowFrac > 0.5f)
-                        failures.Add($"{(stick ? "stick" : "phys")} {scale:F1}x: planted foot follows the body {r.PlantedYawFollowFrac:F2} " +
-                                     "(it pivots with the turn instead of holding in the world)");
+                        failures.Add($"{(stick ? "stick" : "phys")} {scale:F1}x: planted foot follows the body {r.PlantedYawFollowFrac:F2} " +"(it pivots with the turn instead of holding in the world)");
                 }
             }
             if (failures.Count > 0) Assert.Fail(string.Join("\n", failures));
         }
-
-        /// <summary>
-        /// The whole scale law is that a chibi and a giant behave IDENTICALLY once you divide out size. Run the
-        /// same spin at 0.6x and 1.8x; the crossover %-metrics (already dimensionless) must match closely.
-        /// </summary>
         [Test]
         public void Rotation_IsScaleInvariant()
         {
@@ -129,12 +93,6 @@ namespace Basis.Tests.IK
             }
             if (failures.Count > 0) Assert.Fail(string.Join("\n", failures));
         }
-
-        /// <summary>
-        /// The stepper had framerate-dependent bugs before (a self-referential swing slerp that converged by
-        /// frame count). Run the same spin at 30 / 72 / 144 fps; collision must stay ~0 and the crossover must
-        /// not swing wildly with the framerate.
-        /// </summary>
         [Test]
         public void Rotation_IsFramerateIndependent()
         {
@@ -150,8 +108,7 @@ namespace Basis.Tests.IK
                     foreach (var (label, r) in new[] { ("30fps", r30), ("72fps", r72), ("144fps", r144) })
                         if (r.CollidePct > MaxCollidePct)
                             failures.Add($"{(stick ? "stick" : "phys")} {rate:F0}deg/s @ {label}: feet overlap {r.CollidePct:F1}%");
-                    float spread = Mathf.Max(r30.CrossMaxCm, r72.CrossMaxCm, r144.CrossMaxCm) -
-                                   Mathf.Min(r30.CrossMaxCm, r72.CrossMaxCm, r144.CrossMaxCm);
+                    float spread = Mathf.Max(r30.CrossMaxCm, r72.CrossMaxCm, r144.CrossMaxCm) - Mathf.Min(r30.CrossMaxCm, r72.CrossMaxCm, r144.CrossMaxCm);
                     if (spread > 6f)
                         failures.Add($"{(stick ? "stick" : "phys")} {rate:F0}deg/s: crossMax spans {spread:F1}cm across 30/72/144fps -- framerate-dependent");
                 }

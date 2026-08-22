@@ -1,82 +1,31 @@
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
-
 [BurstCompile]
 public struct BasisFootSimulateJob : IJob
 {
-    const float k_DoubleSupportSlow = 2.00f;
-    const float k_DoubleSupportFast = 0.05f;
-    const float k_WalkTopSpeedFrac = 0.45f;
-
-    const float k_DoubleSupportStanding = 1.0f;
-    const float k_WalkOnsetFrac = 0.10f;
-
-    // Standing reaction scale on (stepTriggerDist + idleBoost). stepTriggerDist (0.18*leg) is a WALK
-    // stride constant; at 0.55 with the boost added unscaled the body drifted ~0.19*leg (16.5 cm adult)
-    // before a standing step was even requested -- the documented "slow to react" residue. 0.38 with the
-    // boost folded under the scale lands the standing reaction at ~0.10*leg (8.9 cm), balance-of-support
-    // scale rather than stride scale. Walk band (walkOnset >= 1) is bit-identical: scale lerps to 1 and
-    // the boost is only nonzero when stationary.
-    const float k_StandingTriggerFrac = 0.38f;
-
-    // A foot far out of place may go SOONER: drift at 2x threshold halves the remaining double-support
-    // dwell. Advances the existing trigger, never creates one (the invariance-safe shape); inert in the
-    // walk band where the dwell is already ~0.05*stepDur.
-    const float k_DriftDwellWaiver = 0.5f;
-
-    const float k_DriftUrgencyRefMul = 1.0f;
-
-    const float k_AccelUrgencyRef = 3.0f;
-    const float k_AccelTriggerFrac = 0.60f;
-
-    const float k_ExtUrgencyBand = 0.10f;
-
-    const float k_YawReversalGain = 4.0f;
-
-    const float k_MedialSwingFrac = 0.20f;
-
-    const float k_ReachAheadFrac = 0.25f;
-
-    const float k_StanceNarrowAtSpeed = 0.35f;
-
-    const float k_HipSwayFraction = 0.03f;
-
-    const float k_ToeOffDeg = 22f;
-    const float k_HeelStrikeDeg = 16f;
-
-    const float k_PreSwingFrac = 0.20f;
-
-    const float k_FootFlatFrac = 0.30f;
-
-    const float k_PelvisAxialDeg = 4.5f;
-    const float k_PelvisListDeg = 5f;
-
-    const float k_LoadingDipFraction = 0.012f;
-    const float k_LoadingResponseFrac = 0.35f;
-
-    const float k_YawTrackGain = 5.0f;
-    const float k_RotWidenFrac = 0.6f;
-
-    const float k_MinFootSepFrac = 0.85f;
-
-    public const float YawUrgencyRefMul = 5.0f;
-
-    public const float TurnStepArcFloor = 0.65f;
-
+    const float doubleSupportSlow = 2.00f, doubleSupportFast = 0.05f, walkTopSpeedFrac = 0.45f;
+    const float doubleSupportStanding = 1.0f, walkOnsetFrac = 0.10f, standingTriggerFrac = 0.38f;
+    const float driftDwellWaiver = 0.5f, driftUrgencyRefMul = 1.0f, accelUrgencyRef = 3.0f, accelTriggerFrac = 0.60f;
+    const float extUrgencyBand = 0.10f, yawReversalGain = 4.0f, medialSwingFrac = 0.20f, reachAheadFrac = 0.25f;
+    const float stanceNarrowAtSpeed = 0.35f, hipSwayFraction = 0.03f, toeOffDeg = 22f, heelStrikeDeg = 16f;
+    const float preSwingFrac = 0.20f, footFlatFrac = 0.30f, pelvisAxialDeg = 4.5f, pelvisListDeg = 5f;
+    const float loadingDipFraction = 0.012f, loadingResponseFrac = 0.35f, yawTrackGain = 5.0f, rotWidenFrac = 0.6f;
+    const float minFootSepFrac = 0.85f;
+    public const float YawUrgencyRefMul = 5.0f, TurnStepArcFloor = 0.65f;
     public BasisFootSimParams p;
     public NativeArray<BasisFootNativeState> feet;
     public NativeArray<BasisFootSimState> simState;
     public NativeArray<BasisFootSimInput> input;
     public NativeArray<BasisFootSimOutput> output;
-
-    public void Execute()
+    public unsafe void Execute()
     {
-        var inp = input[0];
-        var sim = simState[0];
-        var left = feet[0];
-        var right = feet[1];
+        ref BasisFootSimInput inp = ref UnsafeUtility.ArrayElementAsRef<BasisFootSimInput>(input.GetUnsafePtr(), 0);
+        ref BasisFootSimState sim = ref UnsafeUtility.ArrayElementAsRef<BasisFootSimState>(simState.GetUnsafePtr(), 0);
+        ref BasisFootNativeState left = ref UnsafeUtility.ArrayElementAsRef<BasisFootNativeState>(feet.GetUnsafePtr(), 0);
+        ref BasisFootNativeState right = ref UnsafeUtility.ArrayElementAsRef<BasisFootNativeState>(feet.GetUnsafePtr(), 1);
         float dt = inp.dt;
 
         if (dt <= 0f) return;
@@ -84,8 +33,7 @@ public struct BasisFootSimulateJob : IJob
         float3 up = inp.playerUp;
         if (math.lengthsq(up) < 0.001f) up = new float3(0, 1, 0);
 
-        float3 velSample = inp.hipsPos;
-        float3 rawVel = (velSample - sim.prevHeadPos) / dt;
+        float3 velSample = inp.hipsPos, rawVel = (velSample - sim.prevHeadPos) / dt;
         rawVel -= up * math.dot(rawVel, up);
         sim.prevHeadPos = velSample;
 
@@ -95,19 +43,14 @@ public struct BasisFootSimulateJob : IJob
         sim.smoothedVelocity = math.lerp(sim.smoothedVelocity, rawVel, vAlpha);
 
         float speed = math.length(sim.smoothedVelocity);
-
         float accelMag = math.length(sim.smoothedVelocity - prevSmoothedVel) / dt;
         sim.smoothedAccelMag = math.lerp(sim.smoothedAccelMag, accelMag, 1f - math.exp(-p.velocitySmoothAccel * dt));
-        float accelUrgency = math.saturate(sim.smoothedAccelMag / k_AccelUrgencyRef);
-
+        float accelUrgency = math.saturate(sim.smoothedAccelMag / accelUrgencyRef);
         float3 rawFwd = ComputeBodyForward(inp, sim, p, up);
-
         float bodyYawRate = math.lengthsq(sim.prevBodyFwd) > 0.001f ? SignedAngle(sim.prevBodyFwd, rawFwd, up) / dt : 0f;
         sim.prevBodyFwd = rawFwd;
 
-        float yawFilterRate = bodyYawRate * sim.smoothedYawRateDeg < 0f
-            ? p.bodyFwdRateMoving * k_YawReversalGain
-            : p.bodyFwdRateMoving;
+        float yawFilterRate = bodyYawRate * sim.smoothedYawRateDeg < 0f ? p.bodyFwdRateMoving * yawReversalGain : p.bodyFwdRateMoving;
         sim.smoothedYawRateDeg = math.lerp(sim.smoothedYawRateDeg, bodyYawRate, 1f - math.exp(-yawFilterRate * dt));
 
         float3 rootFwd = inp.avatarForward - up * math.dot(inp.avatarForward, up);
@@ -124,34 +67,24 @@ public struct BasisFootSimulateJob : IJob
         }
 
         bool turning = math.abs(sim.smoothedYawRateDeg) > 20f;
-
         float fwdRate = (speed > 0.034f * p.fastSpeedRef || turning) ? p.bodyFwdRateMoving : p.bodyFwdRateStationary;
 
         if (turning)
-            fwdRate = math.max(fwdRate, k_YawTrackGain * math.abs(math.radians(sim.smoothedYawRateDeg)));
+            fwdRate = math.max(fwdRate, yawTrackGain * math.abs(math.radians(sim.smoothedYawRateDeg)));
         float fwdAlpha = 1f - math.exp(-fwdRate * dt);
-
         float3 blendedFwd = Slerp3(sim.smoothedBodyFwd, rawFwd, fwdAlpha);
         sim.smoothedBodyFwd = math.lengthsq(blendedFwd) < 0.001f ? rawFwd : math.normalize(blendedFwd);
 
         float3 rightCross = math.cross(up, sim.smoothedBodyFwd);
         sim.smoothedBodyRight = math.lengthsq(rightCross) < 0.001f ? inp.avatarRight : math.normalize(rightCross);
 
-        float3 bodyFwd = sim.smoothedBodyFwd;
-        float3 bodyRight = sim.smoothedBodyRight;
-
-        float3 rawRightCross = math.cross(up, rawFwd);
+        float3 bodyFwd = sim.smoothedBodyFwd, bodyRight = sim.smoothedBodyRight, rawRightCross = math.cross(up, rawFwd);
         float3 rawRight = math.lengthsq(rawRightCross) < 0.001f ? bodyRight : math.normalize(rawRightCross);
-
         float hipsUpComponent = math.dot(inp.hipsPos, up);
         float3 hipsFlat = inp.hipsPos - up * hipsUpComponent;
         float3 velDir = sim.smoothedVelocity - up * math.dot(sim.smoothedVelocity, up);
-
-        float standHipsAboveGround = p.hipToFoot + p.ankleHeight;
-        float avgLegReach = (p.leftLegLen + p.rightLegLen) * 0.5f;
-        bool groundInReach = inp.groundHit &&
-            (hipsUpComponent - math.dot(inp.groundPoint, up)) <= standHipsAboveGround + avgLegReach * 0.15f;
-
+        float standHipsAboveGround = p.hipToFoot + p.ankleHeight, avgLegReach = (p.leftLegLen + p.rightLegLen) * 0.5f;
+        bool groundInReach = inp.groundHit && (hipsUpComponent - math.dot(inp.groundPoint, up)) <= standHipsAboveGround + avgLegReach * 0.15f;
         float groundUpComponent;
         bool airborne;
         if (groundInReach)
@@ -168,27 +101,18 @@ public struct BasisFootSimulateJob : IJob
         float reachLimit = standHipsAboveGround + avgLegReach * 0.15f;
         float leftGroundUp = FootGroundUp(inp.leftGroundValid, inp.leftGroundUp, left.filteredNormal, up, hipsUpComponent, reachLimit, groundUpComponent);
         float rightGroundUp = FootGroundUp(inp.rightGroundValid, inp.rightGroundUp, right.filteredNormal, up, hipsUpComponent, reachLimit, groundUpComponent);
-
         float moveDirGate = 0.034f * p.fastSpeedRef;
         float3 moveDir = math.lengthsq(velDir) > moveDirGate * moveDirGate ? math.normalize(velDir) : bodyFwd;
-        float avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
-        float maxOffset = avgLeg * p.maxVelocityOffsetFraction;
+        float avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f, maxOffset = avgLeg * p.maxVelocityOffsetFraction;
         float baseBias = math.min(speed * p.velocityBiasFactor, maxOffset);
         float3 center = hipsFlat + up * groundUpComponent + moveDir * baseBias;
-
-        float speedFrac = math.saturate(speed / p.fastSpeedRef);
-        float fwdFrac = math.abs(math.dot(moveDir, bodyFwd));
-
+        float speedFrac = math.saturate(speed / p.fastSpeedRef), fwdFrac = math.abs(math.dot(moveDir, bodyFwd));
         float fastYawRef = math.max(1f, 0.5f * p.maxPlantedYawDegrees / math.max(0.01f, p.stepDurFast));
         float yawFrac = math.saturate(math.abs(sim.smoothedYawRateDeg) / fastYawRef);
-
         float yawUrgency = math.saturate(math.abs(sim.smoothedYawRateDeg) / (fastYawRef * YawUrgencyRefMul));
-        float halfStance = p.stanceWidth * 0.5f * math.lerp(1f, k_StanceNarrowAtSpeed, speedFrac * fwdFrac)
-                           * (1f + k_RotWidenFrac * yawFrac);
-
+        float halfStance = p.stanceWidth * 0.5f * math.lerp(1f, stanceNarrowAtSpeed, speedFrac * fwdFrac) * (1f + rotWidenFrac * yawFrac);
         float leadAmount = math.min(speed * p.velocityBiasFactor * p.leadOffsetFactor, maxOffset * 0.5f);
         float3 leadOffset = moveDir * leadAmount;
-
         float leftDist = HDist(left.plantedPos, center - bodyRight * halfStance, up);
         float rightDist = HDist(right.plantedPos, center + bodyRight * halfStance, up);
 
@@ -211,24 +135,16 @@ public struct BasisFootSimulateJob : IJob
         SetUpComponent(ref right.idealPos, rightGroundUp, up);
 
         float urgencyT = math.max(math.max(math.saturate(speed / p.fastSpeedRef), yawUrgency), accelUrgency);
-
         bool stationary = speed < p.idleSpeedThreshold && math.abs(sim.smoothedYawRateDeg) < 20f;
         float idleBoost = stationary ? p.stepTriggerDist * p.idleBoostFraction : 0f;
-
-        float avgLegT = (p.leftLegLen + p.rightLegLen) * 0.5f;
-        float dsSpeedRef = math.sqrt(9.81f * avgLegT);
-        float walkOnset = math.saturate(speed / math.max(1e-3f, k_WalkOnsetFrac * dsSpeedRef));
-
-        float triggerScale = math.lerp(k_StandingTriggerFrac, 1f, walkOnset)
-                           * math.lerp(1f, k_AccelTriggerFrac, accelUrgency);
+        float avgLegT = (p.leftLegLen + p.rightLegLen) * 0.5f, dsSpeedRef = math.sqrt(9.81f * avgLegT);
+        float walkOnset = math.saturate(speed / math.max(1e-3f, walkOnsetFrac * dsSpeedRef));
+        float triggerScale = math.lerp(standingTriggerFrac, 1f, walkOnset) * math.lerp(1f, accelTriggerFrac, accelUrgency);
         float threshold = math.min((p.stepTriggerDist + idleBoost) * triggerScale + speed * p.strideScale, avgLegT * 0.55f);
         float stepDur = math.lerp(p.stepDurSlow, p.stepDurFast, urgencyT);
-
-        float dsWalkT = math.saturate(speed / math.max(1e-3f, k_WalkTopSpeedFrac * dsSpeedRef));
-        float dsFraction = math.lerp(k_DoubleSupportStanding,
-            math.lerp(k_DoubleSupportSlow, k_DoubleSupportFast, dsWalkT), walkOnset);
+        float dsWalkT = math.saturate(speed / math.max(1e-3f, walkTopSpeedFrac * dsSpeedRef));
+        float dsFraction = math.lerp(doubleSupportStanding, math.lerp(doubleSupportSlow, doubleSupportFast, dsWalkT), walkOnset);
         float doubleSupportSec = stepDur * dsFraction * (1f - yawUrgency);
-
         float absYawRate = math.abs(sim.smoothedYawRateDeg);
         if (absYawRate > 1f)
         {
@@ -276,21 +192,16 @@ public struct BasisFootSimulateJob : IJob
 
         if (left.phase == 0 && right.phase == 0 && left.wantsStep && right.wantsStep)
         {
-            float ld = HDist(left.plantedPos, left.idealPos, up);
-            float rd = HDist(right.plantedPos, right.idealPos, up);
+            float ld = HDist(left.plantedPos, left.idealPos, up), rd = HDist(right.plantedPos, right.idealPos, up);
             if (ld >= rd) right.wantsStep = false; else left.wantsStep = false;
         }
 
         float avgThigh = (p.leftThighLen + p.rightThighLen) * 0.5f;
         float3 hp = inp.hipsPos;
-
         float hipFootUpDist = math.abs(GetUpComponent(hp, up) - GetUpComponent((left.currentPos + right.currentPos) * 0.5f, up));
-        float avgLeg2 = (p.leftLegLen + p.rightLegLen) * 0.5f;
-        float bendRatio = 1f - math.saturate(hipFootUpDist / avgLeg2);
-
+        float avgLeg2 = (p.leftLegLen + p.rightLegLen) * 0.5f, bendRatio = 1f - math.saturate(hipFootUpDist / avgLeg2);
         float3 leftKneeTarget = (hp + left.currentPos) * 0.5f + bodyFwd * (avgThigh * p.kneeForwardPushFraction);
         float3 rightKneeTarget = (hp + right.currentPos) * 0.5f + bodyFwd * (avgThigh * p.kneeForwardPushFraction);
-
         float kneeSplay = halfStance * inp.splayWhenCrouched * bendRatio;
         leftKneeTarget -= rawRight * kneeSplay;
         rightKneeTarget += rawRight * kneeSplay;
@@ -321,8 +232,7 @@ public struct BasisFootSimulateJob : IJob
         if (right.phase == 1) EnforceSide(ref right.currentPos, hipsGround3, rawRight, +1, footMinSide);
 
         float3 sepV = ProjectOntoUpPlane(left.currentPos - right.currentPos, up);
-        float sepLen = math.length(sepV);
-        float minSep = p.stanceWidth * k_MinFootSepFrac;
+        float sepLen = math.length(sepV), minSep = p.stanceWidth * minFootSepFrac;
         if (sepLen < minSep)
         {
             float3 sepAxis = sepLen > 1e-4f ? sepV / sepLen : -rawRight;
@@ -337,15 +247,8 @@ public struct BasisFootSimulateJob : IJob
         outp.pelvisDelta = ComputePelvisDelta(ref left, ref right, speed, up, bodyFwd);
         outp.airborne = airborne;
         output[0] = outp;
-
-        feet[0] = left;
-        feet[1] = right;
-        simState[0] = sim;
     }
-
-    private void UpdateFoot(ref BasisFootNativeState f, ref BasisFootNativeState other,
-        float3 rawFwd, float3 smoothedVelocity, float speed, float threshold, float stepDur, float dt, float3 up,
-        float3 hipsGround, float3 hipsPos, float yawRateDeg, float doubleSupportSec, float urgencyT)
+    private void UpdateFoot(ref BasisFootNativeState f, ref BasisFootNativeState other, float3 rawFwd, float3 smoothedVelocity, float speed, float threshold, float stepDur, float dt, float3 up, float3 hipsGround, float3 hipsPos, float yawRateDeg, float doubleSupportSec, float urgencyT)
     {
         float3 bodyFlat = rawFwd - up * math.dot(rawFwd, up);
         bool bodyFlatValid = math.lengthsq(bodyFlat) > 1e-6f;
@@ -362,7 +265,7 @@ public struct BasisFootSimulateJob : IJob
                 f.plantedRot = FootRotation(f.plantedBodyFwd, f.filteredNormal, up, plantedAlign, 0f);
             }
 
-            float flatDur = math.max(1e-4f, f.stepDur * k_FootFlatFrac);
+            float flatDur = math.max(1e-4f, f.stepDur * footFlatFrac);
             if (f.plantedTime < flatDur)
             {
                 float fl = f.plantedTime / flatDur;
@@ -375,16 +278,12 @@ public struct BasisFootSimulateJob : IJob
             }
 
             float dist = HDist(f.plantedPos, f.idealPos, up);
-
             bool yawTrigger = false;
             if (bodyFlatValid)
             {
                 if (math.lengthsq(f.plantedBodyFwd) < 1e-6f) f.plantedBodyFwd = bodyFlat;
 
                 float yawDiff = math.abs(SignedAngle(math.normalize(f.plantedBodyFwd), bodyFlat, up));
-                // Fire EARLY by the yaw the body will add during the swing (mirroring what
-                // ComputeStepPrediction adds to the target) -- triggering only at the full limit meant
-                // every re-plant cost limit + yawRate*stepDur = 25-46 deg of body yaw instead of ~20.
                 float predSwingYaw = math.min(math.abs(yawRateDeg) * stepDur, p.maxPlantedYawDegrees);
                 yawTrigger = yawDiff + predSwingYaw > p.maxPlantedYawDegrees;
             }
@@ -393,7 +292,7 @@ public struct BasisFootSimulateJob : IJob
             if (dist > threshold && threshold > 1e-4f)
             {
                 float driftUrgency = math.saturate((dist - threshold) / threshold);
-                dwellRequired *= 1f - k_DriftDwellWaiver * driftUrgency;
+                dwellRequired *= 1f - driftDwellWaiver * driftUrgency;
             }
 
             float doubleSupportSoFar = math.min(f.plantedTime, other.plantedTime);
@@ -403,10 +302,9 @@ public struct BasisFootSimulateJob : IJob
             {
                 f.wantsStep = true;
 
-                float driftOver = math.saturate((dist - threshold) / math.max(1e-4f, threshold * k_DriftUrgencyRefMul));
-
+                float driftOver = math.saturate((dist - threshold) / math.max(1e-4f, threshold * driftUrgencyRefMul));
                 float extRatio = math.length(hipsPos - f.plantedPos) / math.max(1e-4f, p.hipToFoot);
-                float extOver = math.saturate((extRatio - 1f) / k_ExtUrgencyBand);
+                float extOver = math.saturate((extRatio - 1f) / extUrgencyBand);
                 f.stepUrgency = math.max(urgencyT, math.max(driftOver, extOver));
                 f.predictedTargetXZ = ComputeStepPrediction(ref f, rawFwd, smoothedVelocity, speed, stepDur, up, hipsGround, yawRateDeg);
             }
@@ -420,26 +318,17 @@ public struct BasisFootSimulateJob : IJob
             f.wantsStep = false;
             f.stepTimer += dt;
             float t = math.saturate(f.stepTimer / f.stepDur);
-
             float3 footFwd = math.lengthsq(f.plantedBodyFwd) > 1e-6f ? math.normalize(f.plantedBodyFwd) : bodyFlat;
-            float pivotArm = math.max(p.footLength, 1e-4f);
-            float toeOffRad = math.radians(k_ToeOffDeg);
-            float3 liftOffPos = f.stepStartPos
-                + footFwd * (pivotArm * (1f - math.cos(toeOffRad)))
-                + up * (pivotArm * math.sin(toeOffRad));
-
+            float pivotArm = math.max(p.footLength, 1e-4f), toeOffRad = math.radians(toeOffDeg);
+            float3 liftOffPos = f.stepStartPos + footFwd * (pivotArm * (1f - math.cos(toeOffRad))) + up * (pivotArm * math.sin(toeOffRad));
             float3 pos;
-            float pitchDeg;
-            float swingU;
-            if (t < k_PreSwingFrac)
+            float pitchDeg, swingU;
+            if (t < preSwingFrac)
             {
-                float pr = t / k_PreSwingFrac;
-                float roll = pr * pr * (3f - 2f * pr);
-                pitchDeg = k_ToeOffDeg * roll;
+                float pr = t / preSwingFrac, roll = pr * pr * (3f - 2f * pr);
+                pitchDeg = toeOffDeg * roll;
                 float th = math.radians(pitchDeg);
-                pos = f.stepStartPos
-                    + footFwd * (pivotArm * (1f - math.cos(th)))
-                    + up * (pivotArm * math.sin(th));
+                pos = f.stepStartPos + footFwd * (pivotArm * (1f - math.cos(th))) + up * (pivotArm * math.sin(th));
                 swingU = 0f;
 
                 float3 toeAxis = math.cross(up, footFwd);
@@ -451,25 +340,20 @@ public struct BasisFootSimulateJob : IJob
             }
             else
             {
-                swingU = (t - k_PreSwingFrac) / math.max(1e-4f, 1f - k_PreSwingFrac);
+                swingU = (t - preSwingFrac) / math.max(1e-4f, 1f - preSwingFrac);
                 pitchDeg = SwingAnklePitchDeg(swingU);
                 pos = math.lerp(liftOffPos, f.stepTargetPos, swingU * swingU * (3f - 2f * swingU));
             }
-            float ease = swingU * swingU * (3f - 2f * swingU);
-
-            float avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
+            float ease = swingU * swingU * (3f - 2f * swingU), avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
             float stepDist = HDist(f.stepStartPos, f.stepTargetPos, up);
             float strideFrac = math.saturate(stepDist / math.max(1e-3f, avgLeg * p.stepHeightStrideRefFraction));
-
             float travelFrac = strideFrac;
 
             strideFrac = math.max(strideFrac, f.stepArcScale);
             float dynamicHeight = p.stepHeightCalc * math.lerp(p.stepHeightMinFraction, 1.0f, strideFrac);
-
             float a = p.stepArcLiftExp, b = p.stepArcDropExp;
             float tPeak = a / math.max(1e-4f, a + b);
             float arcPeak = math.max(1e-4f, math.pow(tPeak, a) * math.pow(1f - tPeak, b));
-
             float lift = math.pow(swingU, a) * math.pow(1f - swingU, b) / arcPeak;
             pos += up * (math.saturate(lift) * dynamicHeight);
 
@@ -477,25 +361,22 @@ public struct BasisFootSimulateJob : IJob
             if (math.lengthsq(swingRightCross) > 1e-6f)
             {
                 float3 swingRight = math.normalize(swingRightCross);
-                float medial = math.sin(swingU * math.PI) * (p.stanceWidth * 0.5f) * k_MedialSwingFrac * travelFrac;
+                float medial = math.sin(swingU * math.PI) * (p.stanceWidth * 0.5f) * medialSwingFrac * travelFrac;
                 pos -= swingRight * (f.sideSign * medial);
             }
             f.currentPos = pos;
 
             quaternion footAlign = f.sideSign < 0 ? p.footAlignLeft : p.footAlignRight;
+            quaternion liveRot = t < preSwingFrac ? FootRotation(footFwd, f.filteredNormal, up, footAlign, pitchDeg) : FootRotation(rawFwd, f.filteredNormal, up, footAlign, pitchDeg);
 
-            quaternion liveRot = t < k_PreSwingFrac
-                ? FootRotation(footFwd, f.filteredNormal, up, footAlign, pitchDeg)
-                : FootRotation(rawFwd, f.filteredNormal, up, footAlign, pitchDeg);
-
-            if (t < k_PreSwingFrac)
+            if (t < preSwingFrac)
             {
-                float pr = t / k_PreSwingFrac;
+                float pr = t / preSwingFrac;
                 f.currentRot = math.slerp(f.stepStartRot, liveRot, pr * pr * (3f - 2f * pr));
             }
             else
             {
-                quaternion liftOffRot = FootRotation(footFwd, f.filteredNormal, up, footAlign, k_ToeOffDeg);
+                quaternion liftOffRot = FootRotation(footFwd, f.filteredNormal, up, footAlign, toeOffDeg);
                 f.currentRot = math.slerp(liftOffRot, liveRot, ease);
             }
 
@@ -512,7 +393,6 @@ public struct BasisFootSimulateJob : IJob
             }
         }
     }
-
     private float FootGroundUp(bool valid, float measuredUp, float3 normal, float3 up, float hipsUpComponent, float reachLimit, float shared)
     {
         if (!valid) return shared;
@@ -524,22 +404,15 @@ public struct BasisFootSimulateJob : IJob
 
         return measuredUp + lift;
     }
-
-    private float3 ComputeStepPrediction(ref BasisFootNativeState f, float3 bodyFwd, float3 smoothedVelocity, float speed, float stepDur, float3 up,
-        float3 hipsGround, float yawRateDeg)
+    private float3 ComputeStepPrediction(ref BasisFootNativeState f, float3 bodyFwd, float3 smoothedVelocity, float speed, float stepDur, float3 up, float3 hipsGround, float yawRateDeg)
     {
         float avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
         float3 svFlat = smoothedVelocity - up * math.dot(smoothedVelocity, up);
-
         float predMoveGate = 0.034f * p.fastSpeedRef;
-        float3 moveDir = math.lengthsq(svFlat) > predMoveGate * predMoveGate
-            ? math.normalize(svFlat)
-            : bodyFwd;
+        float3 moveDir = math.lengthsq(svFlat) > predMoveGate * predMoveGate ? math.normalize(svFlat) : bodyFwd;
         float predAmount = math.min(speed * stepDur * p.predictionFactor, avgLeg * p.maxPredictionFraction);
-
-        float dsRef = math.sqrt(9.81f * avgLeg);
-        float reachGate = math.saturate((speed - 0.03f * dsRef) / (0.08f * dsRef));
-        float reachFloor = k_ReachAheadFrac * avgLeg * reachGate;
+        float dsRef = math.sqrt(9.81f * avgLeg), reachGate = math.saturate((speed - 0.03f * dsRef) / (0.08f * dsRef));
+        float reachFloor = reachAheadFrac * avgLeg * reachGate;
         predAmount = math.min(math.max(predAmount, reachFloor), avgLeg * p.maxPredictionFraction);
 
         float predYawDeg = math.clamp(yawRateDeg * stepDur, -p.maxPlantedYawDegrees, p.maxPlantedYawDegrees);
@@ -550,15 +423,12 @@ public struct BasisFootSimulateJob : IJob
 
         return predictedIdeal + moveDir * predAmount;
     }
-
     private float ComputeHipBob(ref BasisFootNativeState left, ref BasisFootNativeState right, float speed)
     {
         if (speed < 0.02f * p.fastSpeedRef) return 0f;
 
-        float maxBob = p.hipToFoot * p.hipBobFraction;
-        float speedScale = math.saturate(speed / p.fastSpeedRef);
+        float maxBob = p.hipToFoot * p.hipBobFraction, speedScale = math.saturate(speed / p.fastSpeedRef);
         float amplitude = maxBob * speedScale;
-
         float leftRise = 0f, rightRise = 0f;
         if (left.phase == 1)
         {
@@ -571,33 +441,27 @@ public struct BasisFootSimulateJob : IJob
             rightRise = math.sin(t * math.PI);
         }
 
-        float rise = math.max(leftRise, rightRise) * amplitude;
-
-        float avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
-        float dipAmplitude = avgLeg * k_LoadingDipFraction * speedScale;
+        float rise = math.max(leftRise, rightRise) * amplitude, avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
+        float dipAmplitude = avgLeg * loadingDipFraction * speedScale;
         float dip = math.max(LoadingResponse(ref left), LoadingResponse(ref right)) * dipAmplitude;
 
         return rise - dip;
     }
-
     private static float LoadingResponse(ref BasisFootNativeState f)
     {
         if (f.phase != 0) return 0f;
-        float dur = f.stepDur * k_LoadingResponseFrac;
+        float dur = f.stepDur * loadingResponseFrac;
         if (dur <= 1e-4f) return 0f;
         float u = f.plantedTime / dur;
         if (u >= 1f) return 0f;
         return math.sin(u * math.PI);
     }
-
     private float ComputeHipSway(ref BasisFootNativeState left, ref BasisFootNativeState right, float speed)
     {
         if (speed < 0.02f * p.fastSpeedRef) return 0f;
 
         float avgLeg = (p.leftLegLen + p.rightLegLen) * 0.5f;
-        float amplitude = avgLeg * k_HipSwayFraction * math.saturate(speed / p.fastSpeedRef);
-
-        float sway = 0f;
+        float amplitude = avgLeg * hipSwayFraction * math.saturate(speed / p.fastSpeedRef), sway = 0f;
         if (left.phase == 1)
         {
             float t = math.saturate(left.stepTimer / left.stepDur);
@@ -611,14 +475,11 @@ public struct BasisFootSimulateJob : IJob
 
         return sway * amplitude;
     }
-
     private quaternion ComputePelvisDelta(ref BasisFootNativeState left, ref BasisFootNativeState right, float speed, float3 up, float3 bodyFwd)
     {
         if (speed < 0.02f * p.fastSpeedRef) return quaternion.identity;
 
-        float scale = math.saturate(speed / p.fastSpeedRef);
-
-        float swingSide = 0f;
+        float scale = math.saturate(speed / p.fastSpeedRef), swingSide = 0f;
         if (left.phase == 1)
         {
             float t = math.saturate(left.stepTimer / left.stepDur);
@@ -631,37 +492,30 @@ public struct BasisFootSimulateJob : IJob
         }
         if (math.abs(swingSide) < 1e-4f) return quaternion.identity;
 
-        float axialDeg = swingSide * k_PelvisAxialDeg * scale;
-        float listDeg = swingSide * k_PelvisListDeg * scale;
-
+        float axialDeg = swingSide * pelvisAxialDeg * scale, listDeg = swingSide * pelvisListDeg * scale;
         quaternion axial = quaternion.AxisAngle(up, math.radians(axialDeg));
         quaternion list = quaternion.AxisAngle(bodyFwd, math.radians(listDeg));
         return math.mul(axial, list);
     }
-
     private static float HDist(float3 a, float3 b, float3 up)
     {
         float3 diff = a - b;
         diff -= up * math.dot(diff, up);
         return math.length(diff);
     }
-
     private static float GetUpComponent(float3 pos, float3 up)
     {
         return math.dot(pos, up);
     }
-
     private static void SetUpComponent(ref float3 pos, float value, float3 up)
     {
         float current = math.dot(pos, up);
         pos += up * (value - current);
     }
-
     private static float3 ProjectOntoUpPlane(float3 pos, float3 up)
     {
         return pos - up * math.dot(pos, up);
     }
-
     private static void EnforceSide(ref float3 pos, float3 center, float3 bodyRight, int sideSign, float minDist)
     {
         float3 toPos = pos - center;
@@ -672,22 +526,14 @@ public struct BasisFootSimulateJob : IJob
         else if (sideSign < 0 && lateral > -minDist)
             pos -= bodyRight * (lateral + minDist);
     }
-
     public static bool BoneYaw(quaternion rot, float3 up, out float3 yawDir)
     {
-        float3 fwd = math.mul(rot, new float3(0, 0, 1));
-        float3 fwdFlat = fwd - up * math.dot(fwd, up);
+        float3 fwd = math.mul(rot, new float3(0, 0, 1)), fwdFlat = fwd - up * math.dot(fwd, up);
         float fwdLen = math.length(fwdFlat);
-
-        float3 boneUp = math.mul(rot, new float3(0, 1, 0));
-        float3 upFlat = boneUp - up * math.dot(boneUp, up);
-        float upLen = math.length(upFlat);
-
-        float upSign = -math.sign(math.dot(fwd, up));
-
+        float3 boneUp = math.mul(rot, new float3(0, 1, 0)), upFlat = boneUp - up * math.dot(boneUp, up);
+        float upLen = math.length(upFlat), upSign = -math.sign(math.dot(fwd, up));
         float3 fromFwd = fwdLen > 1e-5f ? fwdFlat / fwdLen : float3.zero;
         float3 fromUp = upLen > 1e-5f ? (upFlat / upLen) * upSign : float3.zero;
-
         float3 blended = fromFwd * fwdLen + fromUp * (1f - fwdLen);
         if (math.lengthsq(blended) < 1e-8f)
         {
@@ -698,8 +544,7 @@ public struct BasisFootSimulateJob : IJob
         yawDir = math.normalize(blended);
         return true;
     }
-
-    public static float3 ComputeBodyForward(BasisFootSimInput inp, BasisFootSimState sim, BasisFootSimParams p, float3 up)
+    public static float3 ComputeBodyForward(in BasisFootSimInput inp, in BasisFootSimState sim, in BasisFootSimParams p, float3 up)
     {
         float3 accumulated = float3.zero;
         float totalWeight = 0f;
@@ -731,7 +576,6 @@ public struct BasisFootSimulateJob : IJob
 
         return inp.avatarForward;
     }
-
     public quaternion FootRotation(float3 bodyFwd, float3 normal, float3 up, quaternion footAlign, float swingPitchDeg)
     {
         if (math.lengthsq(normal) < 0.001f) normal = up;
@@ -741,15 +585,10 @@ public struct BasisFootSimulateJob : IJob
             fwd = ProjectOnPlane(new float3(0, 0, 1), normal);
         fwd = math.normalize(fwd);
 
-        quaternion surfaceRot = quaternion.LookRotation(fwd, normal);
-        quaternion uprightRot = quaternion.LookRotation(fwd, up);
+        quaternion surfaceRot = quaternion.LookRotation(fwd, normal), uprightRot = quaternion.LookRotation(fwd, up);
         float tiltAngle = AngleBetween(uprightRot, surfaceRot);
-        quaternion result = tiltAngle > 0.01f
-            ? math.slerp(uprightRot, surfaceRot, math.saturate(p.maxFootTiltDegrees / tiltAngle))
-            : uprightRot;
-
-        float3 footFwd = math.mul(result, new float3(0, 0, 1));
-        float3 footFwdFlat = footFwd - up * math.dot(footFwd, up);
+        quaternion result = tiltAngle > 0.01f ? math.slerp(uprightRot, surfaceRot, math.saturate(p.maxFootTiltDegrees / tiltAngle)) : uprightRot;
+        float3 footFwd = math.mul(result, new float3(0, 0, 1)), footFwdFlat = footFwd - up * math.dot(footFwd, up);
         float3 bodyFwdFlat = bodyFwd - up * math.dot(bodyFwd, up);
 
         if (math.lengthsq(footFwdFlat) > 1e-6f && math.lengthsq(bodyFwdFlat) > 1e-6f)
@@ -772,41 +611,33 @@ public struct BasisFootSimulateJob : IJob
 
         return math.mul(result, footAlign);
     }
-
     public static float SwingAnklePitchDeg(float t)
     {
         float inv = 1f - t;
-        return k_ToeOffDeg * inv * inv - k_HeelStrikeDeg * t * t;
+        return toeOffDeg * inv * inv - heelStrikeDeg * t * t;
     }
-
     private static float3 ProjectOnPlane(float3 v, float3 normal)
     {
         return v - math.dot(v, normal) * normal;
     }
-
     private static float AngleBetween(quaternion a, quaternion b)
     {
         float dot = math.abs(math.dot(a.value, b.value));
         return math.degrees(2f * math.acos(math.min(dot, 1f)));
     }
-
     private static float SignedAngle(float3 from, float3 to, float3 axis)
     {
         float angle = math.degrees(math.acos(math.clamp(math.dot(from, to), -1f, 1f)));
         float sign = math.sign(math.dot(axis, math.cross(from, to)));
         return angle * sign;
     }
-
     private static float3 Slerp3(float3 a, float3 b, float t)
     {
-        float la = math.length(a);
-        float lb = math.length(b);
+        float la = math.length(a), lb = math.length(b);
         if (la < 0.001f || lb < 0.001f) return math.lerp(a, b, t);
 
-        float3 na = a / la;
-        float3 nb = b / lb;
-        float dot = math.clamp(math.dot(na, nb), -1f, 1f);
-        float theta = math.acos(dot);
+        float3 na = a / la, nb = b / lb;
+        float dot = math.clamp(math.dot(na, nb), -1f, 1f), theta = math.acos(dot);
 
         if (theta < 0.001f) return math.lerp(a, b, t);
 

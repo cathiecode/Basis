@@ -149,6 +149,13 @@ namespace Basis.Scripts.Device_Management
         [SerializeField] public AudioClip CameraCountdownTickSound;
 
         /// <summary>
+        /// Source material for the microphone HUD's voice-level ring style. Held here rather than
+        /// resolved with Shader.Find, which returns null the moment a build drops the shader for
+        /// having no asset reference. The icon driver instantiates from it; this stays untouched.
+        /// </summary>
+        [SerializeField] public Material MicrophoneLevelRingMaterial;
+
+        /// <summary>
         /// Live collection of all input devices currently managed by this system.
         /// </summary>
         [SerializeField] public BasisObservableList<BasisInput> AllInputDevices = new();
@@ -233,18 +240,27 @@ namespace Basis.Scripts.Device_Management
 
             StaticCurrentMode = BasisConstants.None;
             CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
-            BasisSettingsSystem.Initialize();
-            // Localization must initialize before BasisSettingsDefaults so that
-            // auto-detection can see an empty settings dict on first run — any
-            // earlier binding constructor would write "en" as a default and
-            // defeat the HasSaveData("language") check.
-            Basis.BasisUI.BasisLocalization.Initialize();
-            Basis.BasisUI.BasisTMPFontFallbacks.RefreshJapanesePriority();
-            BasisSettingsDefaults.LoadAll();
-            Basis.BasisUI.SettingsProvider.ApplyJiggleStartupSettings();
-            // Applied here and nowhere else: the GPU Resident Drawer rebuild this triggers is only
-            // cheap while the loading scene is the whole scene.
-            Basis.Scripts.Rendering.BasisGpuOcclusionCulling.ApplyStartupSetting();
+            try
+            {
+                BasisSettingsSystem.Initialize();
+                // Localization must initialize before BasisSettingsDefaults so that
+                // auto-detection can see an empty settings dict on first run — any
+                // earlier binding constructor would write "en" as a default and
+                // defeat the HasSaveData("language") check.
+                Basis.BasisUI.BasisLocalization.Initialize();
+                Basis.BasisUI.BasisTMPFontFallbacks.RefreshJapanesePriority();
+                BasisSettingsDefaults.LoadAll();
+                BasisPersistentDataMigrationPrompt.ShowIfPending();
+                Basis.BasisUI.SettingsProvider.ApplyJiggleStartupSettings();
+                // Applied here and nowhere else: the GPU Resident Drawer rebuild this triggers is only
+                // cheap while the loading scene is the whole scene.
+                Basis.Scripts.Rendering.BasisGpuOcclusionCulling.ApplyStartupSetting();
+            }
+            catch (Exception e)
+            {
+                BasisDebug.LogError($"Startup configuration threw, continuing to Initialize: {e}");
+            }
+
             try
             {
                 await Initialize();
@@ -274,8 +290,6 @@ namespace Basis.Scripts.Device_Management
             }
             BasisRemoteNamePlateDriver.Dispose();
         }
-        static readonly Unity.Profiling.ProfilerMarker sMarkerLoop = new Unity.Profiling.ProfilerMarker("BasisDriver.DeviceManagement.Loop");
-        static readonly Unity.Profiling.ProfilerMarker sMarkerBaseTypes = new Unity.Profiling.ProfilerMarker("BasisDriver.DeviceManagement.BaseTypes");
         /// <summary>
         /// Starts asynchronous per-frame device work (e.g. the SteamVR input update on a worker
         /// thread). Called by the driver earlier in LateUpdate than <see cref="Simulate"/>, which
@@ -291,11 +305,11 @@ namespace Basis.Scripts.Device_Management
         }
         public void Simulate()
         {
-            using (sMarkerLoop.Auto())
+            using (BasisDeviceMarkers.Loop.Auto())
             {
                 OnDeviceManagementLoop?.Invoke();
             }
-            using (sMarkerBaseTypes.Auto())
+            using (BasisDeviceMarkers.BaseTypes.Auto())
             {
                 int Count = BaseTypes.Length;
                 for (int Index = 0; Index < Count; Index++)
@@ -357,6 +371,7 @@ namespace Basis.Scripts.Device_Management
             OnInitializationCompleted?.Invoke();
             OnInitializationComplete = true;
             BasisSettingsSystem.NotifyFinishedChanges();
+            ReconcileAutoSwapWithPresence();
         }
 
         #endregion
@@ -404,8 +419,7 @@ namespace Basis.Scripts.Device_Management
             }
 
             // Check whether we should use a soft swap (keep the XR runtime alive)
-            string swapMode = BasisSettingsSystem.LoadString("swap_mode", BasisSettingsDefaults.SwapMode_Shutdown);
-            bool useSoftSwap = !string.Equals(swapMode, BasisSettingsDefaults.SwapMode_Shutdown, StringComparison.OrdinalIgnoreCase);
+            bool useSoftSwap = !string.Equals(BasisSettingsDefaults.SwapMode.RawValue, BasisSettingsDefaults.SwapMode_Shutdown, StringComparison.OrdinalIgnoreCase);
 
             if (useSoftSwap)
             {
@@ -1153,6 +1167,18 @@ namespace Basis.Scripts.Device_Management
         }
 
         /// <summary>
+        /// Settles the boot mode against the presence the hub already holds. Presence is polled from
+        /// the moment the VR SDK comes up, which is before <see cref="SetupAutoSwap"/> subscribes, so
+        /// a headset that is absent or unworn at startup commits its edge into the hub with no
+        /// listener attached and never raises another. Without this the session stays in VR with
+        /// nothing to swap it back.
+        /// </summary>
+        private void ReconcileAutoSwapWithPresence()
+        {
+            OnHMDPresenceChanged(BasisHMDPresence.IsPresent);
+        }
+
+        /// <summary>
         /// Unsubscribes from presence events during shutdown.
         /// </summary>
         private void CleanupAutoSwap()
@@ -1176,8 +1202,7 @@ namespace Basis.Scripts.Device_Management
                 return;
             }
 
-            string swapMode = BasisSettingsSystem.LoadString("swap_mode", BasisSettingsDefaults.SwapMode_Shutdown);
-            if (!string.Equals(swapMode, BasisSettingsDefaults.SwapMode_AutoSwap, StringComparison.OrdinalIgnoreCase)) return;
+            if (!string.Equals(BasisSettingsDefaults.SwapMode.RawValue, BasisSettingsDefaults.SwapMode_AutoSwap, StringComparison.OrdinalIgnoreCase)) return;
 
             // Gated here rather than at the hub so the sensor keeps being read and reported while
             // this is off — the presence state stays diagnosable, it just stops changing modes.

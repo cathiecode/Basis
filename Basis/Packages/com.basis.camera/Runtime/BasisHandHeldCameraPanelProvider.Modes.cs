@@ -160,6 +160,11 @@ namespace Basis.BasisUI.HandHeldCamera
             RebuildModeList();
             _modeDropdown.OnValueChanged = _ => OnModeSelected();
 
+            // Directly under the picker, and above the modes people save: the picker is what hands
+            // you a body, and what is left in that body is the first thing worth knowing about the
+            // choice — well before the colour a saved mode paints its sections.
+            BuildBodySection(parent);
+
             _modeEditorSection = PanelSectionToggle.CreateNewEntry(parent);
             _modeEditorGroup = PanelSectionToggleHelpers.CreateCollapsibleContentGroup(
                 _modeEditorSection, parent, BasisLocalization.Get("camera.userMode.title"), false);
@@ -587,11 +592,13 @@ namespace Basis.BasisUI.HandHeldCamera
             AddSectionTint(BasisCameraPanelSection.Colour, _colorSection, _colorGroup);
             AddSectionTint(BasisCameraPanelSection.Effects, _effectsSection, _effectsGroup);
             AddSectionTint(BasisCameraPanelSection.Output, _outputSection, _outputGroup);
+            AddSectionTint(BasisCameraPanelSection.Anchor, _anchorSection, _anchorGroup);
             AddSectionTint(BasisCameraPanelSection.Subject, _followSection, _followGroup);
             AddSectionTint(BasisCameraPanelSection.PositionModifier, _positionSection, _positionGroup);
             AddSectionTint(BasisCameraPanelSection.RotationModifier, _rotationSection, _rotationGroup);
             AddSectionTint(BasisCameraPanelSection.ModifierEffects, _modifierEffectsSection, _modifierEffectsGroup);
-            AddSectionTint(BasisCameraPanelSection.Dolly, _dollySection, _dollyGroup);
+            // No header of its own to tint — the track block is a plain card inside the position slot.
+            AddSectionTint(BasisCameraPanelSection.Dolly, null, _dollyGroup);
             AddSectionTint(BasisCameraPanelSection.Background, _backgroundSection, _backgroundGroup);
             AddSectionTint(BasisCameraPanelSection.Layers, _layersSection, _layersGroup);
             AddSectionTint(BasisCameraPanelSection.Performance, _performanceSection, _performanceGroup);
@@ -759,6 +766,10 @@ namespace Basis.BasisUI.HandHeldCamera
                 _modeCheckCountdown = ModeCheckInterval;
                 changed |= RefreshHarvestedState();
 
+                // On the same beat as the readout: a wind-on is over a second long and a flash
+                // recycle is six, so four looks a second is faster than either can be missed.
+                RefreshBodyControls();
+
                 // The field only reports a committed edit, so without this the Save button would
                 // stay greyed out under a name that has been typed but not yet tabbed away from.
                 RefreshModeButtons();
@@ -793,6 +804,8 @@ namespace Basis.BasisUI.HandHeldCamera
         private void ClearModeReferences()
         {
             BasisCameraUserModes.OnChanged -= OnUserModesChanged;
+
+            ClearBodyReferences();
 
             _modeDropdown = null;
             _lastShownKey = null;

@@ -105,6 +105,10 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     /// <summary>Static metadata/presets and PP component references.</summary>
     public BasisHandHeldCameraMetaData MetaData = new BasisHandHeldCameraMetaData();
 
+#if Basis_VOLUMETRIC_SUPPORTED
+    public VolumetricFogCameraSource VolumetricFogSource;
+#endif
+
     /// <summary>World-space debug representations of this camera, toggled from the settings panel.</summary>
     public BasisHandHeldCameraGizmos DebugGizmos { get; } = new BasisHandHeldCameraGizmos();
 
@@ -290,6 +294,7 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         BasisLocalPlayer.AfterSimulateOnRender.AddAction(SimulateLatePriority, SimulateLate);
 
         RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
+        RenderPipelineManager.endCameraRendering += OnEndCameraRendering;
         BasisDeviceManagement.OnBootModeChanged += OnBootModeChanged;
         BasisLocalCameraDriver.RenderSettingsApplied += SyncBackgroundFromMainCamera;
 
@@ -308,10 +313,56 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     public void InitializeVolumetrics()
     {
 #if Basis_VOLUMETRIC_SUPPORTED
-        if (MetaData.Profile.TryGet(out MetaData.VolumetricFogVolume))
+        if (MetaData.VolumetricFogVolume == null)
         {
-
+            MetaData.Profile.TryGet(out MetaData.VolumetricFogVolume);
         }
+
+        if (captureCamera != null && VolumetricFogSource != null)
+        {
+            VolumetricFogSource.Initialize(captureCamera);
+
+            int defaultLayer = LayerMask.NameToLayer("Default");
+            VolumetricFogSource.WorldVolumeLayerMask = defaultLayer >= 0 ? 1 << defaultLayer : 1;
+            UpdateVolumetricFogSource();
+        }
+#endif
+    }
+
+    /// <summary>True when this camera's own fog override replaces the world's volumetric fog.</summary>
+    public bool OverrideVolumetricFog
+    {
+        get
+        {
+#if Basis_VOLUMETRIC_SUPPORTED
+            return MetaData.VolumetricFogVolume != null && MetaData.VolumetricFogVolume.active;
+#else
+            return false;
+#endif
+        }
+    }
+
+    public void SetOverrideVolumetricFog(bool enabled)
+    {
+#if Basis_VOLUMETRIC_SUPPORTED
+        if (MetaData.VolumetricFogVolume != null)
+        {
+            MetaData.VolumetricFogVolume.active = enabled;
+        }
+        UpdateVolumetricFogSource();
+#endif
+    }
+
+    private void UpdateVolumetricFogSource()
+    {
+#if Basis_VOLUMETRIC_SUPPORTED
+        if (VolumetricFogSource == null) return;
+
+        bool useCameraOverride = OverrideVolumetricFog;
+        bool worldIsInShot = backgroundMode == BasisCameraBackgroundMode.World || backgroundKeepsWorld;
+
+        VolumetricFogSource.SuppressFog = !useCameraOverride && !worldIsInShot;
+        VolumetricFogSource.UseWorldFog = !useCameraOverride && worldIsInShot;
 #endif
     }
     /// <summary>
@@ -358,8 +409,10 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         BasisMirrorViewerRegistry.Unregister(captureCamera);
         ReleaseRenderTexture();
         ReleaseFocusPeaking();
+        ReleaseViewfinderGrid();
         ReleaseAutoBrightness();
         if (pooledScreenshot != null) { Destroy(pooledScreenshot); pooledScreenshot = null; }
+        ReleasePrintSheet();
         ReleaseSrgbResolveTarget();
         if (actualMaterial != null) { Destroy(actualMaterial); actualMaterial = null; }
 
@@ -373,6 +426,7 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         BasisLocalPlayer.AfterSimulateOnRender.RemoveAction(SimulateLatePriority, SimulateLate);
 
         RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
+        RenderPipelineManager.endCameraRendering -= OnEndCameraRendering;
         BasisDeviceManagement.OnBootModeChanged -= OnBootModeChanged;
         BasisLocalCameraDriver.RenderSettingsApplied -= SyncBackgroundFromMainCamera;
         OnPickupUse.RemoveListener( OnPickupUseCapture );
@@ -895,6 +949,18 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     /// </summary>
     public void ApplyFocusDistance(float metres)
     {
+        focusRacking = false;
+        SetFocusDistance(metres);
+    }
+
+    public void RefreshFocusDistance()
+    {
+        if (MetaData == null || MetaData.depthOfField == null) return;
+        SetFocusDistance(MetaData.depthOfField.focusDistance.value);
+    }
+
+    private void SetFocusDistance(float metres)
+    {
         if (MetaData == null || MetaData.depthOfField == null) return;
 
         float focus = Mathf.Max(MinimumFocusDistance, metres);
@@ -909,6 +975,66 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
             MetaData.depthOfField.gaussianEnd.overrideState = true;
             MetaData.depthOfField.gaussianEnd.value = focus * GaussianFalloffRatio;
         }
+    }
+
+    [SerializeField] public float focusRackSeconds = 0.5f;
+
+    private float focusRackFrom, focusRackTo, focusRackElapsed;
+    private bool focusRacking;
+
+    public bool IsRackingFocus => focusRacking;
+
+    public float FocusRackTarget => focusRacking
+        ? focusRackTo
+        : (MetaData != null && MetaData.depthOfField != null ? MetaData.depthOfField.focusDistance.value : 0f);
+
+    public void RackFocusTo(float metres)
+    {
+        if (MetaData == null || MetaData.depthOfField == null) return;
+
+        float target = Mathf.Max(MinimumFocusDistance, metres);
+        float current = Mathf.Max(MinimumFocusDistance, MetaData.depthOfField.focusDistance.value);
+
+        if (focusRackSeconds <= 0f || Mathf.Abs(target - current) <= FocusRackEpsilon)
+        {
+            focusRacking = false;
+            SetFocusDistance(target);
+            HandHeld?.SyncFocusReadout();
+            return;
+        }
+
+        focusRackFrom = current;
+        focusRackTo = target;
+        focusRackElapsed = 0f;
+        focusRacking = true;
+    }
+
+    private void TickFocusRack()
+    {
+        if (!focusRacking) return;
+        if (MetaData == null || MetaData.depthOfField == null)
+        {
+            focusRacking = false;
+            return;
+        }
+
+        focusRackElapsed += Time.deltaTime;
+        float t = focusRackSeconds > 0f ? Mathf.Clamp01(focusRackElapsed / focusRackSeconds) : 1f;
+
+        SetFocusDistance(SampleFocusRack(focusRackFrom, focusRackTo, t));
+        HandHeld?.SyncFocusReadout();
+
+        if (t >= 1f) focusRacking = false;
+    }
+
+    private const float FocusRackEpsilon = 0.001f;
+
+    public static float SampleFocusRack(float from, float to, float t)
+    {
+        float eased = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t));
+        float near = 1f / Mathf.Max(from, 1e-4f);
+        float far = 1f / Mathf.Max(to, 1e-4f);
+        return 1f / Mathf.Lerp(near, far, eased);
     }
 
     /// <summary>Clamps an arbitrary sample count to a value the GPU accepts (1/2/4/8).</summary>
@@ -975,6 +1101,10 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
             CameraData.antialiasingQuality = AQ;
 
         BindViewfinderFeed(textureChanged);
+        if (textureChanged && backgroundMode == BasisCameraBackgroundMode.Transparent && CanPreserveVideoOutputAlpha())
+        {
+            PrepareTransparentVideoOutputResources(renderTexture);
+        }
     }
 
     /// <summary>
@@ -1104,8 +1234,17 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
             pooledScreenshot.LoadRawTextureData(data);
             pooledScreenshot.Apply(false);
 
+            // After the readback and before the save, so what the body does to a picture — the
+            // fog on the ends of a roll, the date a databack burned in, the sheet a print is
+            // mounted on — is in the file rather than only on screen, and every path that writes
+            // the picture out carries it, including the print-to-world one.
+            //
+            // The result is saved rather than the buffer, because a print is a bigger sheet with
+            // the photograph placed on it and is not the texture that was handed in.
+            Texture2D finished = FinishPicture(pooledScreenshot);
+
             SetNormalAfterCapture();
-            SaveScreenshotAsync(pooledScreenshot, photoMetadata);
+            SaveScreenshotAsync(finished, photoMetadata);
         });
     }
 
@@ -1275,6 +1414,14 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
             yield break;
         }
 
+        // Re-checked here too, and for the same reason: five seconds is long enough for the last
+        // frame of a pack to have been spent by the shutter button while this was counting.
+        if (!TryTakeFrame())
+        {
+            countdownText.text = string.Empty;
+            yield break;
+        }
+
         // Choose formats based on captureFormat
         GetCaptureFormats(out TextureFormat format, out RenderTextureFormat renderFormat);
 
@@ -1316,6 +1463,11 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
             return;
         }
 
+        // The film, the wind-on and the flash, in one call — and before the shutter sound for the
+        // same reason the moderation check is: a camera with nothing left in it must not sound like
+        // it took a picture. A digital body always says yes.
+        if (!TryTakeFrame()) return;
+
         GetCaptureFormats(out TextureFormat format, out RenderTextureFormat renderFormat);
 
         // Play shutter sound locally at the camera position
@@ -1348,6 +1500,9 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     public bool IsDirectToScreen => IsOverridingDesktopView;
     private BasisRenderRateLimiter renderRateLimiter;
 
+    public const float MinHandHeldRenderHz = 1f;
+    public const float MaxHandHeldRenderHz = 120f;
+
     /// <summary>Render-phase priority: after the camera has been moved (202).</summary>
     private const int SimulateLatePriority = 204;
 
@@ -1366,12 +1521,19 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     {
         UpdateRenderGate();
 
+        // Wind-on, develop and the flash all count down here rather than in an Update, so the lamp
+        // is put out on a frame boundary instead of somewhere inside a capture.
+        TickBody();
+
         // Ahead of the render, so the exposure the meter settles on is the one this frame is shot at.
         TickAutoBrightness();
 
         // Before every surface that binds a feed, so they are pointed at the overlay for the frame
         // it was produced in rather than the frame after.
         TickFocusPeaking();
+
+        // After the peaks, so the grid lies over them: it is the thing being aligned against.
+        TickViewfinderGrid();
 
         if (IsOverridingDesktopView)
         {
@@ -1383,6 +1545,7 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         TickGifRecorder();
         TickVideoRecorder();
         UpdateOnPropUIVisibility();
+        TickFocusRack();
         UpdateAutoFocus();
         UpdateFollowPip();
         DebugGizmos.Tick(this);
@@ -1400,7 +1563,12 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     /// </summary>
     public void OverrideDesktopOutput()
     {
-        IsOverridingDesktopView = enableRecordingView && !BasisDeviceManagement.IsUserInDesktop();
+        // The body has the last word. There is no socket on the back of a disposable, so a film
+        // body cannot present its feed anywhere but its own viewfinder however the toggle is left —
+        // and the toggle is left alone rather than cleared, so the setting comes back with the body.
+        IsOverridingDesktopView = enableRecordingView
+            && !BasisDeviceManagement.IsUserInDesktop()
+            && BodyAllowsLiveFeed;
 
         // ONE render path. The camera always renders into its own RT, so post-processing, MSAA and
         // colour are identical whether or not Direct To Screen is on; the mode only changes where
@@ -1433,7 +1601,12 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
     {
         string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string extension = captureFormat == "EXR" ? "exr" : "png";
-        string filename = $"Screenshot_{timestamp}_{captureWidth}x{captureHeight}.{extension}";
+        // The texture's own size rather than the capture size: a body that mounts its picture in
+        // a border writes a bigger file than the frame it rendered, and a name that reported the
+        // frame would disagree with the image it is on.
+        int savedWidth = screenshot != null ? screenshot.width : captureWidth;
+        int savedHeight = screenshot != null ? screenshot.height : captureHeight;
+        string filename = $"Screenshot_{timestamp}_{savedWidth}x{savedHeight}.{extension}";
         string path = GetSavePath(filename);
 
         // async void: anything thrown out of here surfaces as an unhandled exception rather than
@@ -1670,6 +1843,21 @@ public partial class BasisHandHeldCamera : BasisHandHeldCameraInteractable
         if (ReferenceEquals(renderingCamera, captureCamera))
         {
             BasisLocalAvatarDriver.ScaleHeadToNormal();
+        }
+    }
+
+    /// <summary>
+    /// URP callback after each camera render: the render texture now holds a picture nothing has
+    /// published yet. Taken from the pipeline rather than inferred from the render gate, because
+    /// the gate only says whether the automatic render was allowed — the transparent output and
+    /// the photo path both drive <see cref="Camera.Render"/> themselves, and those frames are just
+    /// as fresh.
+    /// </summary>
+    private void OnEndCameraRendering(ScriptableRenderContext context, Camera renderingCamera)
+    {
+        if (ReferenceEquals(renderingCamera, captureCamera))
+        {
+            MarkStreamFrameFresh();
         }
     }
 

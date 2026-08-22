@@ -1,31 +1,8 @@
 using NUnit.Framework;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
-    /// <summary>
-    /// "Chest snaps out of the way when looking down" regression tests for the spine-bend
-    /// distribution -- <see cref="BasisSpineBendCore"/> (the port of DistributeSpineBend).
-    ///
-    /// The spine/upper-chest YAW follows the head's facing azimuth: twistY = atan2(headFwd.x, headFwd.z).
-    /// That azimuth is undefined when the gaze is vertical (head looking straight down/up): the head-
-    /// forward's horizontal projection collapses to zero and the angle flips ~180 deg across the pole.
-    /// With the production yaw weights that flip clamps to the ~25 deg lateral limit, so the chest/upper-
-    /// chest TWISTS SIDEWAYS the instant the gaze crosses vertical -- the "snap out of the way" a user
-    /// sees when they look down (most visible with a chest+hips tracker, where the chest is otherwise
-    /// pinned to the tracker so the spurious twist stands out).
-    ///
-    /// The fix fades the facing twist out as the gaze nears vertical (horizMag -> 0), so it can't snap.
-    /// These guard that: the applied yaw stays CONTINUOUS through vertical gaze (the headline), is still
-    /// PRESERVED through ordinary look-down (the fade must not kill normal twist), collapses toward ZERO
-    /// past vertical (no sideways flick at the floor), and stays FINITE across the whole sweep.
-    ///
-    /// The pure-pitch cases hold the head straight above the hips to isolate the twist exactly like the
-    /// offline BasisSpineBendSweep Pass B isolates it for yaw; the realistic case also slides the head
-    /// down+forward as the gaze drops, so the bend pitch engages too. Sign convention matches the cervical
-    /// suite and the live job: a positive pitch command (Quaternion.AngleAxis(pitch, right)) is look-DOWN.
-    /// </summary>
     public class BasisSpineLookDownSweepTests
     {
         // Production defaults, matching BasisFullBodyIK.SetDefaults().
@@ -35,9 +12,7 @@ namespace Basis.Tests.IK
         const float SquishBoost = 0.5f;
         const float BendTwistCoupling = 0.15f; // k_BendTwistCoupling
         const float RestLen = 1f;
-
         // ----------------------------------------------------------------- wiring sanity
-
         [Test]
         public void TwistFollowsHeadYaw_AtLevelGaze()
         {
@@ -46,14 +21,10 @@ namespace Basis.Tests.IK
             // continuity assertions below would be guarding a twist that was never applied.
             var r = Solve(pitch: 0f, yaw: 30f);
             Assert.That(r.WriteUpper && r.WriteSpine, Is.True, "spine/upper-chest bend was not written.");
-            Assert.That(r.UpperEuler.y, Is.GreaterThan(1f),
-                $"upper-chest did not twist toward a 30 deg head facing at level gaze (got {r.UpperEuler.y:0.00} deg).");
-            Assert.That(Mathf.Sign(r.SpineEuler.y), Is.EqualTo(Mathf.Sign(r.UpperEuler.y)),
-                "spine and upper-chest twisted opposite ways for the same head facing.");
+            Assert.That(r.UpperEuler.y, Is.GreaterThan(1f), $"upper-chest did not twist toward a 30 deg head facing at level gaze (got {r.UpperEuler.y:0.00} deg).");
+            Assert.That(Mathf.Sign(r.SpineEuler.y), Is.EqualTo(Mathf.Sign(r.UpperEuler.y)),"spine and upper-chest twisted opposite ways for the same head facing.");
         }
-
         // ----------------------------------------------------------------- the headline: no snap
-
         [Test]
         public void ChestTwist_DoesNotSnap_AsGazeCrossesVertical()
         {
@@ -63,7 +34,6 @@ namespace Basis.Tests.IK
             // flip clamped to the lateral limit); post-fade the worst step is a fraction of a degree.
             AssertNoYawSnap(yaw: 0f, maxStepDeg: 2f);
         }
-
         [Test]
         public void ChestTwist_DoesNotSnap_AcrossVertical_AtVariousHeadYaw()
         {
@@ -75,9 +45,7 @@ namespace Basis.Tests.IK
                 AssertNoYawSnap(yaw, maxStepDeg: 2f);
             }
         }
-
         // ----------------------------------------------------------------- the fade must not over-correct
-
         [Test]
         public void OrdinaryLookDown_KeepsChestTwist()
         {
@@ -90,13 +58,10 @@ namespace Basis.Tests.IK
             foreach (float pitch in new[] { 20f, 40f, 55f, 68f })
             {
                 float here = Solve(pitch, yaw: 25f).UpperEuler.y;
-                Assert.That(here, Is.EqualTo(level).Within(0.5f),
-                    $"look-down {pitch:0} deg changed the chest twist to {here:0.00} (was {level:0.00}); the fade engaged inside the normal range.");
+                Assert.That(here, Is.EqualTo(level).Within(0.5f), $"look-down {pitch:0} deg changed the chest twist to {here:0.00} (was {level:0.00}); the fade engaged inside the normal range.");
             }
         }
-
         // ----------------------------------------------------------------- corrected behaviour past vertical
-
         [Test]
         public void LookingPastVertical_DoesNotFlickTheChestSideways()
         {
@@ -110,16 +75,12 @@ namespace Basis.Tests.IK
                 {
                     float upper = Mathf.Abs(Solve(pitch, yaw).UpperEuler.y);
                     float spine = Mathf.Abs(Solve(pitch, yaw).SpineEuler.y);
-                    Assert.That(upper, Is.LessThan(3f),
-                        $"gaze {pitch:0} deg down (yaw {yaw:0}) flicked the upper-chest {upper:0.0} deg sideways.");
-                    Assert.That(spine, Is.LessThan(3f),
-                        $"gaze {pitch:0} deg down (yaw {yaw:0}) flicked the spine {spine:0.0} deg sideways.");
+                    Assert.That(upper, Is.LessThan(3f), $"gaze {pitch:0} deg down (yaw {yaw:0}) flicked the upper-chest {upper:0.0} deg sideways.");
+                    Assert.That(spine, Is.LessThan(3f), $"gaze {pitch:0} deg down (yaw {yaw:0}) flicked the spine {spine:0.0} deg sideways.");
                 }
             }
         }
-
         // ----------------------------------------------------------------- realistic look-down (rot + pos)
-
         [Test]
         public void RealisticLookDown_BendsSmoothly_NoChestSnap()
         {
@@ -138,18 +99,14 @@ namespace Basis.Tests.IK
                     var r = Solve(pitch, yaw, head);
                     if (have)
                     {
-                        Assert.That((r.SpineEuler - prevSpine).magnitude, Is.LessThan(4f),
-                            $"spine bend jumped {(r.SpineEuler - prevSpine).magnitude:0.0} deg at pitch {pitch:0} (yaw {yaw:0}).");
-                        Assert.That((r.UpperEuler - prevUpper).magnitude, Is.LessThan(4f),
-                            $"upper-chest bend jumped {(r.UpperEuler - prevUpper).magnitude:0.0} deg at pitch {pitch:0} (yaw {yaw:0}).");
+                        Assert.That((r.SpineEuler - prevSpine).magnitude, Is.LessThan(4f), $"spine bend jumped {(r.SpineEuler - prevSpine).magnitude:0.0} deg at pitch {pitch:0} (yaw {yaw:0}).");
+                        Assert.That((r.UpperEuler - prevUpper).magnitude, Is.LessThan(4f), $"upper-chest bend jumped {(r.UpperEuler - prevUpper).magnitude:0.0} deg at pitch {pitch:0} (yaw {yaw:0}).");
                     }
                     prevSpine = r.SpineEuler; prevUpper = r.UpperEuler; have = true;
                 }
             }
         }
-
         // ----------------------------------------------------------------- degenerate / safety
-
         [Test]
         public void AllOutputs_StayFinite_AcrossTheFullPitchSweep()
         {
@@ -160,16 +117,12 @@ namespace Basis.Tests.IK
                 for (float pitch = -120f; pitch <= 120f; pitch += 1f)
                 {
                     var r = Solve(pitch, yaw);
-                    Assert.That(IsFinite(r.SpineEuler) && IsFinite(r.UpperEuler) && IsFinite(r.TwistY),
-                        Is.True, $"pitch {pitch:0} (yaw {yaw:0}): a spine-bend output is non-finite.");
-                    Assert.That(r.UpperEuler.magnitude, Is.LessThan(80f),
-                        $"pitch {pitch:0} (yaw {yaw:0}): upper-chest bend {r.UpperEuler.magnitude:0.0} deg is an inhuman contortion.");
+                    Assert.That(IsFinite(r.SpineEuler) && IsFinite(r.UpperEuler) && IsFinite(r.TwistY), Is.True, $"pitch {pitch:0} (yaw {yaw:0}): a spine-bend output is non-finite.");
+                    Assert.That(r.UpperEuler.magnitude, Is.LessThan(80f), $"pitch {pitch:0} (yaw {yaw:0}): upper-chest bend {r.UpperEuler.magnitude:0.0} deg is an inhuman contortion.");
                 }
             }
         }
-
         // ----------------------------------------------------------------- surgical: fade is twist-only
-
         [Test]
         public void TwistFade_IsTwistOnly_LeavesTheForwardBendUntouched()
         {
@@ -186,18 +139,13 @@ namespace Basis.Tests.IK
             for (float rotPitch = 0f; rotPitch <= 95f; rotPitch += 5f)
             {
                 var r = Solve(rotPitch, yaw: 20f, head: forwardHead);
-                Assert.That(r.SpineEuler.x, Is.EqualTo(b.SpineEuler.x).Within(1e-3f),
-                    $"forward spine bend shifted ({b.SpineEuler.x:0.000}->{r.SpineEuler.x:0.000}) as the head pitched to {rotPitch:0}; the twist fade bled into the lean.");
-                Assert.That(r.UpperEuler.x, Is.EqualTo(b.UpperEuler.x).Within(1e-3f),
-                    $"forward upper-chest bend shifted as the head pitched to {rotPitch:0}; the twist fade bled into the lean.");
-                Assert.That(r.SpineEuler.z, Is.EqualTo(b.SpineEuler.z).Within(1e-3f),
-                    $"lateral spine bend shifted as the head pitched to {rotPitch:0}; the twist fade bled into the roll.");
+                Assert.That(r.SpineEuler.x, Is.EqualTo(b.SpineEuler.x).Within(1e-3f), $"forward spine bend shifted ({b.SpineEuler.x:0.000}->{r.SpineEuler.x:0.000}) as the head pitched to {rotPitch:0}; the twist fade bled into the lean.");
+                Assert.That(r.UpperEuler.x, Is.EqualTo(b.UpperEuler.x).Within(1e-3f), $"forward upper-chest bend shifted as the head pitched to {rotPitch:0}; the twist fade bled into the lean.");
+                Assert.That(r.SpineEuler.z, Is.EqualTo(b.SpineEuler.z).Within(1e-3f), $"lateral spine bend shifted as the head pitched to {rotPitch:0}; the twist fade bled into the roll.");
                 if (Mathf.Abs(r.TwistY) < 1f) twistActuallyFaded = true;
             }
-            Assert.That(twistActuallyFaded, Is.True,
-                "the twist never faded across the sweep -- the test isn't actually exercising the fade.");
+            Assert.That(twistActuallyFaded, Is.True,"the twist never faded across the sweep -- the test isn't actually exercising the fade.");
         }
-
         [Test]
         public void NormalGazeRange_LeavesTheTwistUntouched()
         {
@@ -210,12 +158,10 @@ namespace Basis.Tests.IK
                 {
                     var r = Solve(pitch, yaw);
                     float raw = RawTwistDeg(pitch, yaw);
-                    Assert.That(r.TwistY, Is.EqualTo(raw).Within(0.01f),
-                        $"pitch {pitch:0} (yaw {yaw:0}): applied twist {r.TwistY:0.00} != raw {raw:0.00}; the fade reaches into the normal gaze range.");
+                    Assert.That(r.TwistY, Is.EqualTo(raw).Within(0.01f), $"pitch {pitch:0} (yaw {yaw:0}): applied twist {r.TwistY:0.00} != raw {raw:0.00}; the fade reaches into the normal gaze range.");
                 }
             }
         }
-
         [Test]
         public void TwistFade_IsMonotonic_AsGazeApproachesVertical()
         {
@@ -227,15 +173,12 @@ namespace Basis.Tests.IK
                 for (float pitch = 0f; pitch <= 89f; pitch += 1f)
                 {
                     float twist = Mathf.Abs(Solve(pitch, yaw).UpperEuler.y);
-                    Assert.That(twist, Is.LessThanOrEqualTo(prev + 1e-3f),
-                        $"twist grew ({prev:0.000}->{twist:0.000}) as the gaze pitched to {pitch:0} (yaw {yaw:0}); the fade must be monotonic.");
+                    Assert.That(twist, Is.LessThanOrEqualTo(prev + 1e-3f), $"twist grew ({prev:0.000}->{twist:0.000}) as the gaze pitched to {pitch:0} (yaw {yaw:0}); the fade must be monotonic.");
                     prev = twist;
                 }
             }
         }
-
         // ----------------------------------------------------------------- helpers (test scaffolding)
-
         // Worst consecutive-step change in the applied spine AND upper-chest yaw over a fine pitch sweep
         // through both vertical poles; the head is held straight above the hips so only the facing twist
         // varies (bend pitch/roll stay zero), making any step purely the twist's (dis)continuity.
@@ -249,20 +192,16 @@ namespace Basis.Tests.IK
                 var r = Solve(pitch, yaw);
                 if (have)
                 {
-                    float du = Mathf.Abs(r.UpperEuler.y - prevUpper);
-                    float ds = Mathf.Abs(r.SpineEuler.y - prevSpine);
+                    float du = Mathf.Abs(r.UpperEuler.y - prevUpper), ds = Mathf.Abs(r.SpineEuler.y - prevSpine);
                     float step = Mathf.Max(du, ds);
                     if (step > worst) { worst = step; worstAt = pitch; }
                 }
                 prevUpper = r.UpperEuler.y; prevSpine = r.SpineEuler.y; have = true;
             }
-            Assert.That(worst, Is.LessThan(maxStepDeg),
-                $"chest twist snapped {worst:0.0} deg between consecutive 1 deg steps near pitch {worstAt:0} (yaw {yaw:0}); it should ease through vertical gaze.");
+            Assert.That(worst, Is.LessThan(maxStepDeg), $"chest twist snapped {worst:0.0} deg between consecutive 1 deg steps near pitch {worstAt:0} (yaw {yaw:0}); it should ease through vertical gaze.");
         }
-
         static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
         static bool IsFinite(Vector3 v) => IsFinite(v.x) && IsFinite(v.y) && IsFinite(v.z);
-
         // The raw head-facing azimuth the fade damps, with hips/bind identity (matching the Solve builder)
         // so it is exactly the value the core computes before the fade -- used to assert the fade is off.
         static float RawTwistDeg(float pitch, float yaw)
@@ -272,9 +211,7 @@ namespace Basis.Tests.IK
             float horizSq = f.x * f.x + f.z * f.z;
             return horizSq < 1e-8f ? 0f : Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;
         }
-
         static BasisSpineBendResult Solve(float pitch, float yaw) => Solve(pitch, yaw, new Vector3(0f, 1f, 0f));
-
         // Build the production-default spine-bend input at a given gaze. Hips at the origin (identity
         // rotation + bind, so the bend frame is world-aligned); chest half-way up; head where the caller
         // puts it. Head rotation = yaw about up, then pitch about right -- positive pitch is look-down.

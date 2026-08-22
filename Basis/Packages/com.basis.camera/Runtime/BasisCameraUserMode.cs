@@ -122,12 +122,14 @@ public class BasisCameraUserMode
     /// <summary>
     /// Compares two settings files field for field.
     ///
-    /// <para>Four fields are deliberately absent. <c>settingsVersion</c> is about the file format
+    /// <para>Five fields are deliberately absent. <c>settingsVersion</c> is about the file format
     /// rather than the camera; <c>cameraMode</c> and <c>userMode</c> are labels <em>derived</em>
     /// from everything else, so comparing them would make the answer depend on itself. The shot
     /// list is left out because a shot is content the rig plays, not a setting the camera holds —
     /// moving a waypoint is authoring, and it should no more leave the mode than taking a photo
-    /// does.</para>
+    /// does. <c>exposuresRemaining</c> is left out for the end of that same sentence: taking a
+    /// photograph is what spends a frame, and a saved disposable is still that disposable after
+    /// one.</para>
     ///
     /// <para>⚠️ Hand-written rather than reflective on purpose: this runs while the panel is open,
     /// and walking <see cref="CameraSettings"/> with <c>FieldInfo.GetValue</c> would box every
@@ -148,6 +150,12 @@ public class BasisCameraUserMode
         if (left.isoIndex != right.isoIndex) return false;
         if (left.exposureIndex != right.exposureIndex) return false;
         if (left.showExposureOnCamera != right.showExposureOnCamera) return false;
+
+        // The body, but deliberately not what is left on the load: a saved disposable is still that
+        // disposable after a frame has been taken off it, and comparing the counter would drop the
+        // mode's name on the first photo somebody took with it.
+        if (left.cameraBody != right.cameraBody) return false;
+        if (left.flashEnabled != right.flashEnabled) return false;
 
         if (!Near(left.fov, right.fov, FovTolerance)) return false;
         if (!Near(left.focusDistance, right.focusDistance, OffsetTolerance)) return false;
@@ -173,19 +181,36 @@ public class BasisCameraUserMode
         if (left.focusPeakingColour != right.focusPeakingColour) return false;
         if (left.focusPeakingGreyPicture != right.focusPeakingGreyPicture) return false;
 
+        if (left.viewfinderGrid != right.viewfinderGrid) return false;
+        if (left.viewfinderGridPattern != right.viewfinderGridPattern) return false;
+        if (!Near(left.viewfinderGridOpacity, right.viewfinderGridOpacity, Epsilon)) return false;
+
         if (left.autoBrightness != right.autoBrightness) return false;
         if (!Near(left.autoBrightnessTarget, right.autoBrightnessTarget, Epsilon)) return false;
         if (!Near(left.autoBrightnessSpeed, right.autoBrightnessSpeed, Epsilon)) return false;
         if (left.autoBrightnessMetering != right.autoBrightnessMetering) return false;
         if (!Near(left.autoBrightnessRange, right.autoBrightnessRange, Epsilon)) return false;
 
-        if (!Near(left.VolumetricFogVolumedensity, right.VolumetricFogVolumedensity, Epsilon)) return false;
-        if (left.VolumetricFogenableAPVContribution != right.VolumetricFogenableAPVContribution) return false;
-        if (left.VolumetricFogenableMainLightContribution != right.VolumetricFogenableMainLightContribution) return false;
+        if (left.overrideVolumetricFog != right.overrideVolumetricFog) return false;
+        if (left.overrideVolumetricFog)
+        {
+            if (!Near(left.VolumetricFogVolumedensity, right.VolumetricFogVolumedensity, Epsilon)) return false;
+            if (left.VolumetricFogenableAPVContribution != right.VolumetricFogenableAPVContribution) return false;
+            if (left.VolumetricFogenableMainLightContribution != right.VolumetricFogenableMainLightContribution) return false;
+        }
 
         if (!Near(left.vignette, right.vignette, Epsilon)) return false;
         if (!Near(left.chromaticAberration, right.chromaticAberration, Epsilon)) return false;
         if (!Near(left.filmGrain, right.filmGrain, Epsilon)) return false;
+        if (left.filmGrainType != right.filmGrainType) return false;
+        if (!Near(left.filmGrainResponse, right.filmGrainResponse, Epsilon)) return false;
+        if (!Near(left.bloomTint, right.bloomTint)) return false;
+        if (!Near(left.vignetteColour, right.vignetteColour)) return false;
+        if (left.vignetteRounded != right.vignetteRounded) return false;
+        if (!Near(left.splitToningShadows, right.splitToningShadows)) return false;
+        if (!Near(left.splitToningHighlights, right.splitToningHighlights)) return false;
+        if (!Near(left.splitToningBalance, right.splitToningBalance, Epsilon)) return false;
+        if (!Near(left.filmLift, right.filmLift, Epsilon)) return false;
         if (!Near(left.whiteBalanceTemperature, right.whiteBalanceTemperature, Epsilon)) return false;
         if (!Near(left.whiteBalanceTint, right.whiteBalanceTint, Epsilon)) return false;
         if (!Near(left.lensDistortion, right.lensDistortion, Epsilon)) return false;
@@ -207,6 +232,7 @@ public class BasisCameraUserMode
         if (!Near(left.modifiers.subject.aimHeightOffset, right.modifiers.subject.aimHeightOffset, OffsetTolerance)) return false;
         if (!Near(left.modifiers.subject.framingRadius, right.modifiers.subject.framingRadius, Epsilon)) return false;
         if (left.detachedMarker != right.detachedMarker) return false;
+        if (left.anchorFollowsBody != right.anchorFollowsBody) return false;
 
         if (left.capture360 != right.capture360) return false;
         if (left.useAutoLeveling != right.useAutoLeveling) return false;

@@ -7,36 +7,12 @@ using NUnit.Framework;
 using Unity.Collections;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
     using BasisMotionClip = Basis.IK.Mocap.BasisMotionClip;
-
-    /// <summary>
-    /// HOW CLOSE IS THE SPINE SOLVE TO A REAL HUMAN'S SPINE, GIVEN THAT HUMAN'S OWN HEAD AND HIPS?
-    ///
-    /// The solver is fed exactly what it gets live — a hips anchor and a head target — except both come
-    /// from a CMU mocap frame, so for every solve there is a measured ground truth for the joints in
-    /// between. The error is the straight distance from each solved spine joint (Spine, Chest,
-    /// UpperChest, Neck) to where the human's actually was, in centimetres at normalized adult stature.
-    ///
-    /// Per clip the rig is rebuilt from THAT subject's own segment vectors at their most upright frame,
-    /// so proportions and natural spinal curvature are the subject's, not an invented stack. Each frame:
-    /// the hips bone is planted on the mocap pelvis (position + yaw, the headset-only convention), the
-    /// gaze frame is built geometrically from the neck→head axis and pelvis facing (no dependence on the
-    /// BVH's bind conventions), and the solve runs the shipped pipeline: DistributeSpineBend, then
-    /// SolveSequentialSpineIK — plus a CCD-only and a no-solve RIGID row so the table shows what each
-    /// stage buys.
-    ///
-    /// THE TRIAL TABLE. The same corpus is then re-run under parameter variants (relax, twist keep, neck
-    /// cone, iterations, tolerance, bend-weight scale). REPORT-ONLY on the variants — the numbers are the
-    /// spec and the argument; asserts hold only the unambiguous properties: the shipped solve beats doing
-    /// nothing, and it lands within a sane absolute bound.
-    /// </summary>
     public sealed class BasisSpineCorpusAccuracyTests
     {
         static string CorpusDir => Path.GetFullPath("Packages/com.basis.framework/Tests/MocapCorpus~");
-
         // Bend/squat clips (the spine actually works) + a posture spread (ordinary standing/gesturing).
         static readonly (string dir, string name)[] k_Clips =
         {
@@ -44,32 +20,27 @@ namespace Basis.Tests.IK
             ("posture", "13_04"), ("posture", "14_20"), ("posture", "26_10"),
             ("posture", "56_07"), ("posture", "77_06"), ("posture", "82_05"),
         };
-
-        static readonly BasisMocapJoint[] k_Measured =
+        static readonly BasisMocapJoint[] measured =
         {
             BasisMocapJoint.Spine, BasisMocapJoint.Chest, BasisMocapJoint.UpperChest, BasisMocapJoint.Neck,
         };
-
-        static readonly BasisMocapJoint[] k_ChainJoints =
+        static readonly BasisMocapJoint[] chainJoints =
         {
             BasisMocapJoint.Hips, BasisMocapJoint.Spine, BasisMocapJoint.Chest,
             BasisMocapJoint.UpperChest, BasisMocapJoint.Neck, BasisMocapJoint.Head,
         };
-
         struct SpineConfig
         {
             public string Name;
             public bool PreBend;
             public float Relax, TwistKeep, NeckTwistKeep, ConeDeg, Tolerance, PitchScale;
             public int Iters;
-
             public static SpineConfig Shipped(string name) => new SpineConfig
             {
                 Name = name, PreBend = true, Relax = 1.0f, TwistKeep = 0.25f, NeckTwistKeep = 0.9f,
                 ConeDeg = 45f, Tolerance = 0.001f, PitchScale = 1f, Iters = 20,
             };
         }
-
         static List<BasisMotionClip> LoadClips()
         {
             if (!Directory.Exists(CorpusDir)) Assert.Ignore($"no mocap corpus at {CorpusDir}");
@@ -77,8 +48,7 @@ namespace Basis.Tests.IK
             foreach ((string dir, string name) in k_Clips)
             {
                 string path = Path.Combine(CorpusDir, dir, name + ".bvh");
-                if (File.Exists(path) && BasisBvhLoader.TryLoad(path, out BasisMotionClip c, out _)
-                    && k_ChainJoints.All(c.Has))
+                if (File.Exists(path) && BasisBvhLoader.TryLoad(path, out BasisMotionClip c, out _) && chainJoints.All(c.Has))
                 {
                     clips.Add(c);
                 }
@@ -86,7 +56,6 @@ namespace Basis.Tests.IK
             if (clips.Count == 0) Assert.Ignore("none of the accuracy clips are present in the corpus");
             return clips;
         }
-
         static int MostUprightFrame(BasisMotionClip c)
         {
             int best = 0;
@@ -98,7 +67,6 @@ namespace Basis.Tests.IK
             }
             return best;
         }
-
         static Vector3 PelvisForward(BasisMotionClip c, int f, Vector3 fallback)
         {
             Vector3 right = c.Get(f, BasisMocapJoint.RightUpperLeg).Position - c.Get(f, BasisMocapJoint.LeftUpperLeg).Position;
@@ -106,7 +74,6 @@ namespace Basis.Tests.IK
             if (right.sqrMagnitude < 1e-8f) return fallback;
             return Vector3.Cross(right.normalized, Vector3.up);
         }
-
         // Gaze frame from pure geometry — up along the live neck→head axis, forward from the pelvis
         // facing — so nothing depends on the BVH's joint bind conventions.
         static Quaternion GazeFrame(Vector3 neckPos, Vector3 headPos, Vector3 pelvisFwd)
@@ -119,7 +86,6 @@ namespace Basis.Tests.IK
             Vector3 fwd = Vector3.Cross(rightAxis.normalized, up);
             return Quaternion.LookRotation(fwd, up);
         }
-
         sealed class Rig : System.IDisposable
         {
             public GameObject Root;
@@ -127,9 +93,8 @@ namespace Basis.Tests.IK
             public BasisPoseSkeleton Skeleton;
             public NativeArray<BasisBoneHandle> Chain;
             public BasisEerieMovement Job;
-            public int[] MeasuredStreamIndex;   // parallel to k_Measured
+            public int[] MeasuredStreamIndex;   // parallel to measured
             public Quaternion RestGaze;
-
             public void Dispose()
             {
                 if (Chain.IsCreated) Chain.Dispose();
@@ -137,18 +102,17 @@ namespace Basis.Tests.IK
                 if (Root != null) Object.DestroyImmediate(Root);
             }
         }
-
         static Rig BuildRig(BasisMotionClip clip, int restFrame)
         {
             var rig = new Rig { Root = new GameObject($"CorpusRig_{clip.Name}") };
-            rig.Bones = new Transform[k_ChainJoints.Length];
+            rig.Bones = new Transform[chainJoints.Length];
             Transform parent = rig.Root.transform;
             Vector3 prev = clip.Get(restFrame, BasisMocapJoint.Hips).Position;
-            for (int i = 0; i < k_ChainJoints.Length; i++)
+            for (int i = 0; i < chainJoints.Length; i++)
             {
-                var go = new GameObject(k_ChainJoints[i].ToString());
+                var go = new GameObject(chainJoints[i].ToString());
                 go.transform.SetParent(parent, false);
-                Vector3 world = clip.Get(restFrame, k_ChainJoints[i]).Position;
+                Vector3 world = clip.Get(restFrame, chainJoints[i]).Position;
                 go.transform.localPosition = i == 0 ? world : world - prev;
                 prev = world;
                 rig.Bones[i] = go.transform;
@@ -162,10 +126,10 @@ namespace Basis.Tests.IK
             rig.Chain = new NativeArray<BasisBoneHandle>(6, Allocator.Persistent);
             for (int i = 0; i < 6; i++) rig.Chain[i] = rig.Skeleton.Bind(rig.Bones[5 - i]);
 
-            rig.MeasuredStreamIndex = new int[k_Measured.Length];
-            for (int i = 0; i < k_Measured.Length; i++)
+            rig.MeasuredStreamIndex = new int[measured.Length];
+            for (int i = 0; i < measured.Length; i++)
             {
-                int boneIdx = System.Array.IndexOf(k_ChainJoints, k_Measured[i]);
+                int boneIdx = System.Array.IndexOf(chainJoints, measured[i]);
                 rig.MeasuredStreamIndex[i] = rig.Skeleton.Bind(rig.Bones[boneIdx]).Index;
             }
 
@@ -183,17 +147,15 @@ namespace Basis.Tests.IK
                 handleUpperChest = rig.Skeleton.Bind(rig.Bones[3]),
                 handleNeck = rig.Skeleton.Bind(rig.Bones[4]),
                 handleHead = rig.Skeleton.Bind(rig.Bones[5]),
-                targetOffsetHead = Quaternion.identity,
+                offsetRotationHead = Quaternion.identity,
                 offsetRotationHips = Quaternion.identity,
                 playerUp = Vector3.up,
                 chestIkTarget = false,
                 spineAnatomicalRom = false,
                 hasChestTracker = false,
                 // Rest anatomy for the pre-bend's neck cue and rest length.
-                tposeHeadToNeckLocal = Quaternion.Inverse(rig.RestGaze)
-                    * (clip.Get(restFrame, BasisMocapJoint.Neck).Position - clip.Get(restFrame, BasisMocapJoint.Head).Position),
-                tposeLengthNeckToHips = clip.Get(restFrame, BasisMocapJoint.Neck).Position
-                    - clip.Get(restFrame, BasisMocapJoint.Hips).Position,
+                tposeHeadToNeckLocal = Quaternion.Inverse(rig.RestGaze) * (clip.Get(restFrame, BasisMocapJoint.Neck).Position - clip.Get(restFrame, BasisMocapJoint.Head).Position),
+                tposeLengthNeckToHips = clip.Get(restFrame, BasisMocapJoint.Neck).Position - clip.Get(restFrame, BasisMocapJoint.Hips).Position,
                 // Production bend weights / limits (BasisFullIKConstraintJob.SetDefaults).
                 spineBendPitch = 0.45f, spineBendYaw = 0.10f, spineBendRoll = 0.35f,
                 upperChestBendPitch = 0.25f, upperChestBendYaw = 0.30f, upperChestBendRoll = 0.20f,
@@ -206,7 +168,6 @@ namespace Basis.Tests.IK
             };
             return rig;
         }
-
         static void ApplyConfig(ref BasisEerieMovement job, in SpineConfig cfg)
         {
             job.spineCCDRelax = cfg.Relax;
@@ -218,7 +179,6 @@ namespace Basis.Tests.IK
             job.spineBendPitch = 0.45f * cfg.PitchScale;
             job.upperChestBendPitch = 0.25f * cfg.PitchScale;
         }
-
         // Runs one configuration over one clip; appends each measured joint's error (metres).
         static void RunClip(Rig rig, BasisMotionClip clip, in SpineConfig cfg, bool solve, List<float> errors)
         {
@@ -233,20 +193,17 @@ namespace Basis.Tests.IK
             {
                 Vector3 hipsPos = clip.Get(f, BasisMocapJoint.Hips).Position;
                 Vector3 neckPos = clip.Get(f, BasisMocapJoint.Neck).Position;
-                Vector3 headPos = clip.Get(f, BasisMocapJoint.Head).Position;
-                Vector3 fwd = PelvisForward(clip, f, fallbackFwd);
+                Vector3 headPos = clip.Get(f, BasisMocapJoint.Head).Position, fwd = PelvisForward(clip, f, fallbackFwd);
                 fallbackFwd = fwd;
 
                 Vector3 fwdFlat = new Vector3(fwd.x, 0f, fwd.z);
-                Quaternion liveYaw = fwdFlat.sqrMagnitude > 1e-8f
-                    ? Quaternion.LookRotation(fwdFlat.normalized, Vector3.up)
-                    : restYaw;
+                Quaternion liveYaw = fwdFlat.sqrMagnitude > 1e-8f ? Quaternion.LookRotation(fwdFlat.normalized, Vector3.up) : restYaw;
                 Quaternion deltaYaw = liveYaw * Quaternion.Inverse(restYaw);
 
                 rig.Skeleton.GatherNow();
                 var hips = rig.Skeleton.Bind(rig.Bones[0]);
-                hips.SetPosition(rig.Skeleton.Stream, hipsPos);
-                hips.SetRotation(rig.Skeleton.Stream, deltaYaw);
+                rig.Skeleton.Stream.SetPosition(hips, hipsPos);
+                rig.Skeleton.Stream.SetRotation(hips, deltaYaw);
 
                 if (solve)
                 {
@@ -255,19 +212,20 @@ namespace Basis.Tests.IK
                     rig.Job.targetPositionHead = headPos;
                     if (cfg.PreBend)
                     {
-                        rig.Job.DistributeSpineBend(rig.Skeleton.Stream, headPos);
+                        rig.Job.poseStream = rig.Skeleton.Stream;
+                        rig.Job.DistributeSpineBend(headPos);
                     }
-                    rig.Job.SolveSequentialSpineIK(rig.Skeleton.Stream, headPos, gaze);
+                    rig.Job.poseStream = rig.Skeleton.Stream;
+                    rig.Job.SolveSequentialSpineIK(headPos, gaze);
                 }
 
-                for (int j = 0; j < k_Measured.Length; j++)
+                for (int j = 0; j < measured.Length; j++)
                 {
                     Vector3 solved = rig.Skeleton.Stream.GetWorldPosition(rig.MeasuredStreamIndex[j]);
-                    errors.Add((solved - clip.Get(f, k_Measured[j]).Position).magnitude);
+                    errors.Add((solved - clip.Get(f, measured[j]).Position).magnitude);
                 }
             }
         }
-
         static (float mean, float p95) Stats(List<float> e)
         {
             if (e.Count == 0) return (0f, 0f);
@@ -275,7 +233,6 @@ namespace Basis.Tests.IK
             s.Sort();
             return (e.Average(), s[(int)(s.Count * 0.95f)]);
         }
-
         [Test]
         public void TheSolvedSpine_TracksARealHumans_AndTheTrialTableSaysWhatWouldHelp()
         {
@@ -288,8 +245,7 @@ namespace Basis.Tests.IK
             var pooledRigid = new List<float>();
             var pooledCcd = new List<float>();
             var pooledShipped = new List<float>();
-            SpineConfig shipped = SpineConfig.Shipped("shipped preBend+CCD");
-            SpineConfig ccdOnly = SpineConfig.Shipped("CCD only");
+            SpineConfig shipped = SpineConfig.Shipped("shipped preBend+CCD"), ccdOnly = SpineConfig.Shipped("CCD only");
             ccdOnly.PreBend = false;
 
             report.AppendLine($"{"clip",-10} | {"rigid",-13} | {"CCD only",-13} | shipped preBend+CCD");

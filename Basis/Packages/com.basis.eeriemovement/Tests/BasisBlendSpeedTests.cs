@@ -4,43 +4,8 @@ using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
-
 namespace Basis.Tests.IK
 {
-    /// <summary>
-    /// "Is it blending at the CORRECT SPEED" -- gates every temporal blend in the IK stack against the
-    /// one property that makes the question answerable: a blend's speed must not depend on the user's
-    /// framerate.
-    ///
-    /// Basis ships to 72 Hz (Quest, Steam Frame), 80, 90 (Index, Pico), 120 and 144 Hz headsets, and to
-    /// desktop at whatever the monitor does. A smoother written as
-    ///
-    ///     t = saturate(dt * speed);   x = lerp(x, target, t);          // WRONG
-    ///
-    /// has a time constant that is a function of the GPU. Written as `1 - exp(-rate*dt)` it does not.
-    /// The two look nearly identical at any ONE framerate -- which is exactly why the wrong form passes
-    /// review, and why this has to be a standing gate instead of something someone notices once.
-    ///
-    /// TWO REAL BUGS ARE PINNED HERE. Both were live in this repo, and both are fixed in the same commit
-    /// as this file:
-    ///
-    ///   1. BasisVirtualSpineCore.SmoothSlerpBurst  -- neck, chest, spine and hips all used
-    ///      saturate(dt*speed). Perverse fingerprint: because a smaller dt gives a smaller alpha gives a
-    ///      SLOWER filter, a 144 Hz headset got ~60% MORE neck lag than a 72 Hz one from the same
-    ///      setting. And `saturate` clamps at dt*speed >= 1, so with the default NeckRotationSpeed of 40
-    ///      the smoothing VANISHED below 40 fps: the neck snapped every frame, precisely when the
-    ///      framerate was bad enough to need smoothing most.
-    ///
-    ///   2. BasisFootSimulateJob's swing branch -- `slerp(currentRot, liveRot, ease)` fed its own output
-    ///      back in, so the foot's rotation converged by FRAME COUNT rather than elapsed time. Mid-swing
-    ///      through an identical 0.35 s step the foot was 74% rotated at 30 fps and 99.7% at 144 Hz --
-    ///      literally a different pose on a faster GPU. It hid because the ENDPOINT always converges
-    ///      (ease reaches 1), so the error only existed while the foot was moving.
-    ///
-    /// House rule followed here: every gate that asserts the fixed form is correct is PAIRED with one
-    /// that drives the OLD form and asserts it FAILS. Without the pair, a bug that made the invariance
-    /// metric always return zero would leave every test green and the gate silently dead.
-    /// </summary>
     public sealed class BasisBlendSpeedTests
     {
         // The shipping virtual-spine speeds (BasisSettingsDefaults.VSpine*RotationSpeed).
@@ -48,17 +13,14 @@ namespace Basis.Tests.IK
         {
             ("neck", 40f), ("chest", 25f), ("spine", 30f), ("hips", 20f), ("torsoYaw", 8f),
         };
-
         // ------------------------------------------------------------------ virtual spine
-
         [Test]
         public void VirtualSpine_EveryRotationBlend_RunsAtTheSameSpeedOnEveryHeadset()
         {
             foreach ((string name, float speed) in k_SpineBlends)
             {
                 float s = speed;
-                BasisInvarianceResult r = BasisMotionResponse.Invariance(
-                    (dt, frames) =>
+                BasisInvarianceResult r = BasisMotionResponse.Invariance((dt, frames) =>
                     {
                         var y = new float[frames];
                         float x = 0f;
@@ -73,13 +35,10 @@ namespace Basis.Tests.IK
                     }, 0.8f, name);
 
                 Assert.IsTrue(r.Ok, r.Error);
-                Assert.Less(r.WorstDeviation, BasisMotionResponse.MaxFramerateDeviation,
-                    $"the {name} blend behaves differently at different framerates -- {r}");
-                Assert.Less(r.T63SpreadMs, 4f,
-                    $"the {name} blend's time constant depends on the headset -- {r}");
+                Assert.Less(r.WorstDeviation, BasisMotionResponse.MaxFramerateDeviation, $"the {name} blend behaves differently at different framerates -- {r}");
+                Assert.Less(r.T63SpreadMs, 4f, $"the {name} blend's time constant depends on the headset -- {r}");
             }
         }
-
         [Test]
         public void VirtualSpine_LegacySaturateForm_Fails_SoTheGateCannotRotIntoATautology()
         {
@@ -101,19 +60,12 @@ namespace Basis.Tests.IK
             foreach ((string name, float speed) in k_SpineBlends)
             {
                 float s = speed;
+                BasisInvarianceResult legacy = BasisMotionResponse.Invariance((dt, frames) => Chase(dt, frames, BasisMotionResponse.LegacySaturateAlpha(s, dt)), 0.8f, name);
+                BasisInvarianceResult fixedForm = BasisMotionResponse.Invariance((dt, frames) => Chase(dt, frames, BasisSmoothingProfiles.FramerateIndependentAlpha(s, dt)), 0.8f, name);
 
-                BasisInvarianceResult legacy = BasisMotionResponse.Invariance(
-                    (dt, frames) => Chase(dt, frames, BasisMotionResponse.LegacySaturateAlpha(s, dt)), 0.8f, name);
-                BasisInvarianceResult fixedForm = BasisMotionResponse.Invariance(
-                    (dt, frames) => Chase(dt, frames, BasisSmoothingProfiles.FramerateIndependentAlpha(s, dt)),
-                    0.8f, name);
-
-                Assert.Greater(legacy.WorstDeviation, 10f * Mathf.Max(fixedForm.WorstDeviation, 1e-4f),
-                    $"the invariance metric can no longer tell saturate(dt*{s}) from the fix -- it has stopped " +
-                    $"measuring anything. legacy={legacy.WorstDeviation:F4} fixed={fixedForm.WorstDeviation:F4}");
+                Assert.Greater(legacy.WorstDeviation, 10f * Mathf.Max(fixedForm.WorstDeviation, 1e-4f), $"the invariance metric can no longer tell saturate(dt*{s}) from the fix -- it has stopped " + $"measuring anything. legacy={legacy.WorstDeviation:F4} fixed={fixedForm.WorstDeviation:F4}");
             }
         }
-
         [Test]
         public void VirtualSpine_TheFastBlends_ReallyDidBreakTheShippingGate()
         {
@@ -124,14 +76,11 @@ namespace Basis.Tests.IK
             {
                 if (speed < 20f) continue;
                 float s = speed;
-                BasisInvarianceResult r = BasisMotionResponse.Invariance(
-                    (dt, frames) => Chase(dt, frames, BasisMotionResponse.LegacySaturateAlpha(s, dt)), 0.8f, name);
+                BasisInvarianceResult r = BasisMotionResponse.Invariance((dt, frames) => Chase(dt, frames, BasisMotionResponse.LegacySaturateAlpha(s, dt)), 0.8f, name);
 
-                Assert.Greater(r.WorstDeviation, BasisMotionResponse.MaxFramerateDeviation,
-                    $"{name} (speed {s}) was supposed to be one of the blends that broke the gate as shipped. {r}");
+                Assert.Greater(r.WorstDeviation, BasisMotionResponse.MaxFramerateDeviation, $"{name} (speed {s}) was supposed to be one of the blends that broke the gate as shipped. {r}");
             }
         }
-
         static float[] Chase(float dt, int frames, float alpha)
         {
             var y = new float[frames];
@@ -139,7 +88,6 @@ namespace Basis.Tests.IK
             for (int i = 0; i < frames; i++) { x += alpha * (1f - x); y[i] = x; }
             return y;
         }
-
         [Test]
         public void VirtualSpine_Fix_IsABitForBitNoOp_AtTheReferenceFramerate()
         {
@@ -154,13 +102,9 @@ namespace Basis.Tests.IK
             {
                 float legacy = BasisMotionResponse.LegacySaturateAlpha(speed, refDt);
                 float fixedAlpha = BasisSmoothingProfiles.FramerateIndependentAlpha(speed, refDt);
-                Assert.AreEqual(legacy, fixedAlpha, 1e-4f,
-                    $"at the reference 90 Hz the fix must reproduce the old behaviour exactly, but speed={speed} " +
-                    $"gives {fixedAlpha:F5} where the old code gave {legacy:F5} -- every persisted user setting " +
-                    "would silently change meaning");
+                Assert.AreEqual(legacy, fixedAlpha, 1e-4f, $"at the reference 90 Hz the fix must reproduce the old behaviour exactly, but speed={speed} " + $"gives {fixedAlpha:F5} where the old code gave {legacy:F5} -- every persisted user setting " +"would silently change meaning");
             }
         }
-
         [Test]
         public void VirtualSpine_NeckStillBlends_AtLowFramerate_InsteadOfSnapping()
         {
@@ -172,39 +116,15 @@ namespace Basis.Tests.IK
             // The smoothing switched itself off exactly when it was most needed.
             foreach (int fps in new[] { 20, 30, 40, 60 })
             {
-                float dt = 1f / fps;
-
-                float legacy = BasisMotionResponse.LegacySaturateAlpha(40f, dt);
+                float dt = 1f / fps, legacy = BasisMotionResponse.LegacySaturateAlpha(40f, dt);
                 float now = BasisSmoothingProfiles.FramerateIndependentAlpha(40f, dt);
 
                 if (fps <= 40)
                     Assert.AreEqual(1f, legacy, 1e-6f, $"sanity: the old form should have been snapping at {fps} fps");
 
-                Assert.Less(now, 0.995f,
-                    $"at {fps} fps the neck alpha is {now:F4} -- a blend that is complete in one frame is not a blend");
+                Assert.Less(now, 0.995f, $"at {fps} fps the neck alpha is {now:F4} -- a blend that is complete in one frame is not a blend");
             }
         }
-
-        /// <summary>
-        /// The fingerprint that made the original bug so hard to believe: with saturate(dt*speed), the BETTER
-        /// your headset, the LAGGIER your neck.
-        ///
-        /// ⚠ YOU CANNOT ASSERT THAT LAG IS IDENTICAL ACROSS FRAMERATES. It is not, it cannot be, and demanding
-        /// it is how the first version of this test failed the CORRECT code.
-        ///
-        /// A discrete one-pole's phase lag is tau - dt/2. That half-frame is the SAMPLER, not the filter: the
-        /// filter reacts to the current sample immediately, so a coarser clock actually shows LESS phase lag in
-        /// milliseconds, converging up to tau as dt shrinks. No implementation removes it. Between 72 and 144 Hz
-        /// the irreducible floor is (1/72 - 1/144)/2 = 3.47 ms.
-        ///
-        /// So the honest claims are:
-        ///   * the FIX's lag difference is explained ENTIRELY by that sampling floor (measured 2.84 ms), and
-        ///   * the LEGACY form's is far bigger (measured 6.88 ms, 2.4x), because its underlying TIME CONSTANT
-        ///     genuinely changes with framerate -- 17.1 ms at 72 Hz, 21.3 ms at 144 Hz.
-        ///
-        /// The framerate-independent quantity is the TIME CONSTANT, not the phase lag. That is what
-        /// VirtualSpine_EveryRotationBlend_RunsAtTheSameSpeedOnEveryHeadset asserts, and it is the real gate.
-        /// </summary>
         [Test]
         public void VirtualSpine_LagDoesNotGrowWithFramerate_BeyondTheSamplingFloor()
         {
@@ -228,28 +148,16 @@ namespace Basis.Tests.IK
 
             float now72 = Lag(72, BasisSmoothingProfiles.FramerateIndependentAlpha);
             float now144 = Lag(144, BasisSmoothingProfiles.FramerateIndependentAlpha);
-            float nowDiff = Mathf.Abs(now144 - now72);
+            float nowDiff = Mathf.Abs(now144 - now72), old72 = Lag(72, BasisMotionResponse.LegacySaturateAlpha);
+            float old144 = Lag(144, BasisMotionResponse.LegacySaturateAlpha), oldDiff = Mathf.Abs(old144 - old72);
 
-            float old72 = Lag(72, BasisMotionResponse.LegacySaturateAlpha);
-            float old144 = Lag(144, BasisMotionResponse.LegacySaturateAlpha);
-            float oldDiff = Mathf.Abs(old144 - old72);
+            Assert.Less(nowDiff, samplingFloorMs + 1f, $"the fixed blend's lag varies by {nowDiff:F2} ms across framerates (72Hz:{now72:F1} " + $"144Hz:{now144:F1}), which is MORE than the {samplingFloorMs:F2} ms sampling floor -- so " +"something beyond discrete sampling is still framerate-dependent");
 
-            Assert.Less(nowDiff, samplingFloorMs + 1f,
-                $"the fixed blend's lag varies by {nowDiff:F2} ms across framerates (72Hz:{now72:F1} " +
-                $"144Hz:{now144:F1}), which is MORE than the {samplingFloorMs:F2} ms sampling floor -- so " +
-                "something beyond discrete sampling is still framerate-dependent");
+            Assert.Greater(oldDiff, 2f * nowDiff, $"the legacy form is supposed to lag far more unevenly than the fix (legacy {oldDiff:F2} ms vs " + $"fixed {nowDiff:F2} ms); if it no longer does, this gate is testing nothing");
 
-            Assert.Greater(oldDiff, 2f * nowDiff,
-                $"the legacy form is supposed to lag far more unevenly than the fix (legacy {oldDiff:F2} ms vs " +
-                $"fixed {nowDiff:F2} ms); if it no longer does, this gate is testing nothing");
-
-            Assert.Greater(old144, old72 * 1.3f,
-                $"and its lag is supposed to GROW with framerate (72Hz:{old72:F1} 144Hz:{old144:F1}) -- the " +
-                "perverse fingerprint of saturate(dt*speed)");
+            Assert.Greater(old144, old72 * 1.3f, $"and its lag is supposed to GROW with framerate (72Hz:{old72:F1} 144Hz:{old144:F1}) -- the " +"perverse fingerprint of saturate(dt*speed)");
         }
-
         // ------------------------------------------------------------------ foot swing rotation
-
         // WHERE TO PROBE THE SWING -- this choice is load-bearing, and getting it wrong hides the bug.
         //
         // The self-referential form's divergence is NOT uniform across the swing. `ease` runs 0 -> 1, and once
@@ -267,29 +175,16 @@ namespace Basis.Tests.IK
         //
         // 10 ticks at 72 Hz and 20 at 144 Hz put both sims at the same instant (144 = 2 x 72, so the clocks
         // coincide EXACTLY -- no interpolation, nothing to explain away) at t = 0.278, the worst case.
-        const int k_Probe72 = 10;
-        const int k_Probe144 = 20;
-
-        /// <summary>
-        /// The foot's rotation part-way through a swing must depend on how far through the STEP it is, not on
-        /// how many frames have elapsed getting there.
-        ///
-        /// Every smoother in the sim is seeded at its fixed point and the input is held constant, so the swing
-        /// blend is the only thing that can move between the two runs.
-        /// </summary>
+        const int probe72 = 10, probe144 = 20;
         [Test]
         public void FootSwing_RotationAtTheSameStepProgress_IsIdenticalAtAnyFramerate()
         {
-            quaternion at72 = RunSwingTo(72, k_Probe72);
-            quaternion at144 = RunSwingTo(144, k_Probe144);   // same elapsed time, same step progress
+            quaternion at72 = RunSwingTo(72, probe72);
+            quaternion at144 = RunSwingTo(144, probe144);   // same elapsed time, same step progress
 
             float err = math.degrees(2f * math.acos(math.clamp(math.abs(math.dot(at72.value, at144.value)), -1f, 1f)));
-            Assert.Less(err, 0.5f,
-                $"the foot is in a different pose mid-swing at 72 Hz vs 144 Hz (off by {err:F2} deg). " +
-                "The swing rotation is converging by frame count instead of by step progress -- i.e. it is " +
-                "chasing its own previous output instead of blending from stepStartRot.");
+            Assert.Less(err, 0.5f, $"the foot is in a different pose mid-swing at 72 Hz vs 144 Hz (off by {err:F2} deg). " + "The swing rotation is converging by frame count instead of by step progress -- i.e. it is " +"chasing its own previous output instead of blending from stepStartRot.");
         }
-
         [Test]
         public void FootSwing_SelfReferentialForm_Fails_SoTheGateCannotRotIntoATautology()
         {
@@ -297,16 +192,11 @@ namespace Basis.Tests.IK
             // feeds its own output back in -- so twice the frames means substantially more convergence. At the
             // probe point the two rates disagree by ~0.22 of the whole rotation. If this ever stops failing,
             // the test above is no longer proving anything.
-            float a = LegacySelfReferentialConvergence(72, k_Probe72);
-            float b = LegacySelfReferentialConvergence(144, k_Probe144);
+            float a = LegacySelfReferentialConvergence(72, probe72);
+            float b = LegacySelfReferentialConvergence(144, probe144);
 
-            Assert.Greater(Mathf.Abs(a - b), 0.10f,
-                $"the self-referential slerp is supposed to diverge across framerates (72Hz:{a:F3} 144Hz:{b:F3}); " +
-                "if it no longer does, this gate is testing nothing");
+            Assert.Greater(Mathf.Abs(a - b), 0.10f, $"the self-referential slerp is supposed to diverge across framerates (72Hz:{a:F3} 144Hz:{b:F3}); " +"if it no longer does, this gate is testing nothing");
         }
-
-        /// <summary>Ticks the REAL BasisFootSimulateJob through a swing and returns the foot's rotation
-        /// after `ticks` frames at `fps`.</summary>
         static quaternion RunSwingTo(int fps, int ticks)
         {
             var feet = new NativeArray<BasisFootNativeState>(2, Allocator.Temp);
@@ -315,8 +205,7 @@ namespace Basis.Tests.IK
             var output = new NativeArray<BasisFootSimOutput>(1, Allocator.Temp);
             try
             {
-                float3 up = new float3(0f, 1f, 0f);
-                float3 fwd = new float3(0f, 0f, 1f);
+                float3 up = new float3(0f, 1f, 0f), fwd = new float3(0f, 0f, 1f);
                 quaternion startRot = quaternion.LookRotation(fwd, up);
 
                 // A COMPLETE param set on purpose. Several of these are divisors inside the job
@@ -467,18 +356,13 @@ namespace Basis.Tests.IK
                 output.Dispose();
             }
         }
-
-        /// <summary>The OLD swing form, reproduced ONLY so the paired negative above can prove the gate
-        /// still bites. Never call this from shipping code -- it is the bug.</summary>
         static float LegacySelfReferentialConvergence(int fps, int ticks)
         {
             const float stepDur = 0.5f;
-            float dt = 1f / fps;
-            float x = 0f;
+            float dt = 1f / fps, x = 0f;
             for (int i = 0; i < ticks; i++)
             {
-                float t = Mathf.Clamp01((i + 1) * dt / stepDur);
-                float ease = t * t * (3f - 2f * t);
+                float t = Mathf.Clamp01((i + 1) * dt / stepDur), ease = t * t * (3f - 2f * t);
                 x += ease * (1f - x);        // slerp(currentRot, liveRot, ease), scalarised
             }
             return x;

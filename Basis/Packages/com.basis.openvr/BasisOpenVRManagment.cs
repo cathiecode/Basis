@@ -60,7 +60,9 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
             /// <summary>OpenVR user-interaction events on a headset that reports a proximity sensor.</summary>
             ProximitySensorEvents,
             /// <summary>No proximity-backed source exists on this headset.</summary>
-            NoProximitySignal
+            NoProximitySignal,
+            /// <summary>No HMD is connected to the runtime at all.</summary>
+            HeadsetDisconnected
         }
         private HMDPresenceSource PresenceSource = HMDPresenceSource.Unresolved;
         /// <summary>
@@ -709,8 +711,6 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
         private readonly System.Threading.ManualResetEventSlim inputDone = new System.Threading.ManualResetEventSlim(true);
         private volatile bool inputThreadRun;
         private bool inputKicked;
-        static readonly Unity.Profiling.ProfilerMarker sMarkerJoinInput = new Unity.Profiling.ProfilerMarker("BasisDriver.DeviceManagement.JoinInput");
-        static readonly Unity.Profiling.ProfilerMarker sMarkerHMDPresence = new Unity.Profiling.ProfilerMarker("BasisDriver.DeviceManagement.HMDPresence");
 
         public override void SimulateKick()
         {
@@ -808,7 +808,7 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
                     // The main-thread half is independent of action state, so it fills the
                     // remaining wait instead of running after the join.
                     SteamVR_Render.SimulatePosesAndEvents();
-                    using (sMarkerJoinInput.Auto())
+                    using (BasisOpenVRMarkers.JoinInput.Auto())
                     {
                         inputDone.Wait();
                     }
@@ -821,7 +821,7 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
                     SteamVR_Render.SimulatePosesAndEvents();
                 }
             }
-            using (sMarkerHMDPresence.Auto())
+            using (BasisOpenVRMarkers.HMDPresence.Auto())
             {
                 PollHMDPresence();
             }
@@ -871,6 +871,16 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
         private void PollHMDPresence()
         {
             if (Valve.VR.OpenVR.System == null) return;
+
+            if (!Valve.VR.OpenVR.System.IsTrackedDeviceConnected(Valve.VR.OpenVR.k_unTrackedDeviceIndex_Hmd))
+            {
+                ProximityWorn = false;
+                ProximitySensorResolved = false;
+                ProximitySensorPresent = false;
+                SetPresenceSource(HMDPresenceSource.HeadsetDisconnected);
+                BasisHMDPresence.ReportPresence(false);
+                return;
+            }
 
             if (HasProximitySensor())
             {
@@ -956,6 +966,9 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
                     break;
                 case HMDPresenceSource.NoProximitySignal:
                     BasisDebug.Log("OpenVR: headset reports no proximity sensor and userPresence is unavailable — presence pinned worn, auto swap will not trigger", BasisDebug.LogTag.Device);
+                    break;
+                case HMDPresenceSource.HeadsetDisconnected:
+                    BasisDebug.Log("OpenVR: no HMD is connected to the runtime — reporting the headset as not worn", BasisDebug.LogTag.Device);
                     break;
             }
         }

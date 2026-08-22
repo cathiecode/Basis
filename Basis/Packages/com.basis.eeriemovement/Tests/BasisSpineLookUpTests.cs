@@ -1,88 +1,39 @@
 using NUnit.Framework;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
-    /// <summary>
-    /// "Looking up is not natural -- the chest comes super forwards and is almost linear before it goes up
-    /// to the head", headset only, no hips tracker.
-    ///
-    /// THE MECHANISM. The whole torso is estimated from one line, in two places -- the FBIK neck cue
-    /// (ComputeNeckCue) and the virtual spine's Head->Neck rotational lock:
-    ///
-    ///     neck = headTargetPos + headWorldRot * tposeHeadToNeckLocal
-    ///
-    /// which swings the head->neck lever by the WHOLE gaze, i.e. assumes a nod pivots at the neck bone.
-    /// <see cref="BasisSpineGazeContaminationTests"/> pins that estimate at exactly zero contamination --
-    /// and it is exact, but only under its own premise: its GazeDown() builds the head as
-    /// `neck + q*(head-neck)`, an exact rigid orbit. A real look-UP is not that. Cervical extension is
-    /// short and a look-up is taken largely by the thoracic spine arching, so the skull barely slides back
-    /// over the shoulders -- which is precisely why <see cref="BasisHeadPitchSwingCore"/> scales the
-    /// geometric prediction of that travel down to 0.35 on this side of the sweep and nowhere else.
-    ///
-    /// So the un-orbit over-rotates, and the residual (1 - carry) * (R - I) * lever points FORWARD and UP.
-    /// Measured on a 10 cm lever at a 60 deg look-up: 5.6 cm of neck that walked out in front of the body
-    /// and 3.3 cm that floated above it, with the player standing still. Everything that asks "where is the
-    /// torso" then answers with a lean that never happened -- the pre-bend folds the chest, the trunk
-    /// counterbalance slides the pelvis back to answer the phantom fold, and the virtual spine strings the
-    /// chest and spine bones along the neck->hips chord so the chest target itself is dragged forward with
-    /// it (and, with FBIKChestIKTarget on, the real chest bone after it).
-    ///
-    /// These tests drive the stream-free cores directly, the same way the look-down suites do. They are
-    /// written against the ARTIFACT, not against the constant: every bound is on how much phantom motion
-    /// survives, so the physiology number can be retuned without rewriting them.
-    /// </summary>
     public class BasisSpineLookUpTests
     {
         // A 1.7 m humanoid, standing, sagittal. Straight so that every centimetre measured below is the
         // solver's own contribution rather than the avatar's authored curve.
-        static readonly Vector3 Hips = new Vector3(0f, 0.950f, 0f);
-        static readonly Vector3 Chest = new Vector3(0f, 1.170f, 0f);
-        static readonly Vector3 Neck = new Vector3(0f, 1.400f, 0f);
-        static readonly Vector3 Head = new Vector3(0f, 1.500f, 0f);
+        static readonly Vector3 Hips = new Vector3(0f, 0.950f, 0f), Chest = new Vector3(0f, 1.170f, 0f);
+        static readonly Vector3 Neck = new Vector3(0f, 1.400f, 0f), Head = new Vector3(0f, 1.500f, 0f);
         static readonly Vector3 HeadToNeckLocal = Neck - Head;      // head bind is identity on this rig
-
         const float Damp = BasisNeckCueCore.DefaultExtensionDamp;   // 0.65 shipped
-
-        /// <summary>
-        /// How much of a rigid neck orbit the head actually performs. 1 = the idealised orbit the existing
-        /// gaze-contamination suite assumes; 0.35 = what BasisHeadPitchSwingCore says a look-up really does.
-        /// </summary>
         const float RealLookUpCarry = 0.35f;
-
         // Unity convention, shared with BasisCervicalDirectionTests and BasisHeadSweep: POSITIVE pitch is
         // looking DOWN.
         static Quaternion Gaze(float pitchDeg) => Quaternion.AngleAxis(pitchDeg, Vector3.right);
-
-        /// <summary>The head target a gaze of `pitchDeg` produces, for a head that performs `carry` of a
-        /// rigid orbit about the neck bone.</summary>
         static Vector3 HeadTarget(float pitchDeg, float carry)
         {
             return Vector3.Lerp(Head, Neck + Gaze(pitchDeg) * (Head - Neck), carry);
         }
-
         static Vector3 Cue(float pitchDeg, float carry, float damp)
         {
             return BasisNeckCueCore.Solve(HeadTarget(pitchDeg, carry), Gaze(pitchDeg), HeadToNeckLocal, Vector3.up, damp);
         }
-
-        /// <summary>Horizontal distance from where the neck actually is. This IS the phantom lean.</summary>
         static float PhantomForwardCm(float pitchDeg, float carry, float damp)
         {
             Vector3 d = Cue(pitchDeg, carry, damp) - Neck;
             return new Vector3(d.x, 0f, d.z).magnitude * 100f;
         }
-
-        /// <summary>The same quantity SIGNED along the gaze azimuth: + is out in front of the body.</summary>
         static float PhantomSignedForwardCm(float pitchDeg, float carry, float damp)
         {
             Vector3 d = Cue(pitchDeg, carry, damp) - Neck;
             return d.z * 100f;   // the whole rig and sweep are sagittal, so +z is the gaze azimuth
         }
-
         // ------------------------------------------------------------------ the artifact, and its removal
-
         [Test]
         public void TheRigidReattachment_WalksTheNeckForward_OnARealLookUp()
         {
@@ -90,11 +41,8 @@ namespace Basis.Tests.IK
             // fix), a player who stands perfectly still and looks up is reported as having leaned. If this
             // ever measures ~0 the premise has changed and the rest of the file is measuring nothing.
             float phantom = PhantomForwardCm(-60f, RealLookUpCarry, 0f);
-            Assert.That(phantom, Is.GreaterThan(4f),
-                $"a 60 deg look-up produced only {phantom:0.00} cm of phantom neck travel undamped; " +
-                "the artifact these tests guard is gone or the rig changed.");
+            Assert.That(phantom, Is.GreaterThan(4f), $"a 60 deg look-up produced only {phantom:0.00} cm of phantom neck travel undamped; " +"the artifact these tests guard is gone or the rig changed.");
         }
-
         [Test]
         public void Damping_CutsThePhantomLean_ByMostOfIt()
         {
@@ -103,12 +51,9 @@ namespace Basis.Tests.IK
             {
                 float before = PhantomForwardCm(pitch, RealLookUpCarry, 0f);
                 float after = PhantomForwardCm(pitch, RealLookUpCarry, Damp);
-                Assert.That(after, Is.LessThan(before * 0.35f),
-                    $"look-up {-pitch:0}: phantom neck travel {before:0.00} -> {after:0.00} cm, " +
-                    "less than the two thirds of it the damping is supposed to remove.");
+                Assert.That(after, Is.LessThan(before * 0.35f), $"look-up {-pitch:0}: phantom neck travel {before:0.00} -> {after:0.00} cm, " +"less than the two thirds of it the damping is supposed to remove.");
             }
         }
-
         [Test]
         public void Damping_LeavesUnderTwoCentimetres_AtAnyLookUp_AndAlwaysBeats0ff()
         {
@@ -120,15 +65,11 @@ namespace Basis.Tests.IK
             {
                 float before = PhantomForwardCm(pitch, RealLookUpCarry, 0f);
                 float after = PhantomForwardCm(pitch, RealLookUpCarry, Damp);
-                Assert.That(after, Is.LessThan(2f),
-                    $"look-up {-pitch:0}: {after:0.00} cm of neck still walks out in front of the body.");
-                Assert.That(after, Is.LessThanOrEqualTo(before + 1e-4f),
-                    $"look-up {-pitch:0}: damping made it worse, {before:0.00} -> {after:0.00} cm.");
+                Assert.That(after, Is.LessThan(2f), $"look-up {-pitch:0}: {after:0.00} cm of neck still walks out in front of the body.");
+                Assert.That(after, Is.LessThanOrEqualTo(before + 1e-4f), $"look-up {-pitch:0}: damping made it worse, {before:0.00} -> {after:0.00} cm.");
             }
         }
-
         // ------------------------------------------------------------------ what must NOT change
-
         [Test]
         public void LookDown_IsBitIdentical_ToTheRigidReattachment()
         {
@@ -136,14 +77,12 @@ namespace Basis.Tests.IK
             // tuned against. The damping must not touch it -- not approximately, exactly.
             for (float pitch = 0f; pitch <= 90f; pitch += 5f)
             {
-                Vector3 rigid = HeadTarget(pitch, 1f) + Gaze(pitch) * HeadToNeckLocal;
-                Vector3 damped = Cue(pitch, 1f, Damp);
+                Vector3 rigid = HeadTarget(pitch, 1f) + Gaze(pitch) * HeadToNeckLocal, damped = Cue(pitch, 1f, Damp);
                 Assert.That(damped.x, Is.EqualTo(rigid.x), $"look-down {pitch:0}: x moved.");
                 Assert.That(damped.y, Is.EqualTo(rigid.y), $"look-down {pitch:0}: y moved.");
                 Assert.That(damped.z, Is.EqualTo(rigid.z), $"look-down {pitch:0}: z moved.");
             }
         }
-
         [Test]
         public void PureYaw_IsBitIdentical_ToTheRigidReattachment()
         {
@@ -157,7 +96,6 @@ namespace Basis.Tests.IK
                 Assert.That((damped - rigid).magnitude, Is.LessThan(1e-6f), $"yaw {yaw:0}: the cue moved.");
             }
         }
-
         [Test]
         public void ZeroDamping_IsATrueOffSwitch()
         {
@@ -170,7 +108,6 @@ namespace Basis.Tests.IK
                 Assert.That((off - rigid).magnitude, Is.EqualTo(0f), $"pitch {pitch:0}: damp 0 was not a no-op.");
             }
         }
-
         [Test]
         public void TheLever_KeepsItsLength()
         {
@@ -185,7 +122,6 @@ namespace Basis.Tests.IK
                 Assert.That(len, Is.EqualTo(rest).Within(1e-5f), $"pitch {pitch:0}: lever length {len:0.0000} != {rest:0.0000}.");
             }
         }
-
         [Test]
         public void TheCorrection_IsContinuous_ThroughLevelGaze()
         {
@@ -196,12 +132,10 @@ namespace Basis.Tests.IK
             for (float pitch = -4.9f; pitch <= 5f; pitch += 0.1f)
             {
                 Vector3 cur = Cue(pitch, RealLookUpCarry, Damp);
-                Assert.That((cur - prev).magnitude, Is.LessThan(0.0005f),
-                    $"pitch {pitch:0.0}: the cue stepped {(cur - prev).magnitude * 1000f:0.00} mm in a 0.1 deg gaze change.");
+                Assert.That((cur - prev).magnitude, Is.LessThan(0.0005f), $"pitch {pitch:0.0}: the cue stepped {(cur - prev).magnitude * 1000f:0.00} mm in a 0.1 deg gaze change.");
                 prev = cur;
             }
         }
-
         [Test]
         public void ThePhantom_MovesBackMonotonically_AsDampingRises()
         {
@@ -216,14 +150,12 @@ namespace Basis.Tests.IK
             for (float damp = 0f; damp <= 1.001f; damp += 0.05f)
             {
                 float signed = PhantomSignedForwardCm(-60f, RealLookUpCarry, damp);
-                Assert.That(signed, Is.LessThan(prev + 1e-4f),
-                    $"damp {damp:0.00}: signed phantom rose from {prev:0.00} to {signed:0.00} cm.");
+                Assert.That(signed, Is.LessThan(prev + 1e-4f), $"damp {damp:0.00}: signed phantom rose from {prev:0.00} to {signed:0.00} cm.");
                 if (prev > 0f && signed <= 0f) crossedZero = true;
                 prev = signed;
             }
             Assert.That(crossedZero, Is.True, "the damping range never reaches a cancelled cue at all.");
         }
-
         [Test]
         public void TheCue_IsEquivariantUnderYaw()
         {
@@ -233,17 +165,13 @@ namespace Basis.Tests.IK
             float reference = PhantomForwardCm(-60f, RealLookUpCarry, Damp);
             for (float yaw = 0f; yaw < 360f; yaw += 30f)
             {
-                Quaternion yawQ = Quaternion.AngleAxis(yaw, Vector3.up);
-                Quaternion rot = yawQ * Gaze(-60f);
+                Quaternion yawQ = Quaternion.AngleAxis(yaw, Vector3.up), rot = yawQ * Gaze(-60f);
                 Vector3 headPos = Head + yawQ * (HeadTarget(-60f, RealLookUpCarry) - Head);
-                Vector3 cue = BasisNeckCueCore.Solve(headPos, rot, HeadToNeckLocal, Vector3.up, Damp);
-                Vector3 d = cue - Neck;
+                Vector3 cue = BasisNeckCueCore.Solve(headPos, rot, HeadToNeckLocal, Vector3.up, Damp), d = cue - Neck;
                 float phantom = new Vector3(d.x, 0f, d.z).magnitude * 100f;
-                Assert.That(phantom, Is.EqualTo(reference).Within(1e-3f),
-                    $"yaw {yaw:0}: phantom {phantom:0.000} cm vs {reference:0.000} cm facing forward.");
+                Assert.That(phantom, Is.EqualTo(reference).Within(1e-3f), $"yaw {yaw:0}: phantom {phantom:0.000} cm vs {reference:0.000} cm facing forward.");
             }
         }
-
         [Test]
         public void Degenerate_InputsAreSafe()
         {
@@ -253,46 +181,32 @@ namespace Basis.Tests.IK
             Assert.That(zeroLever, Is.EqualTo(Head));
 
             Vector3 zeroUp = BasisNeckCueCore.Solve(Head, Gaze(-60f), HeadToNeckLocal, Vector3.zero, Damp);
-            Assert.That(float.IsNaN(zeroUp.x) || float.IsNaN(zeroUp.y) || float.IsNaN(zeroUp.z), Is.False,
-                "a zero player-up produced a NaN cue.");
+            Assert.That(float.IsNaN(zeroUp.x) || float.IsNaN(zeroUp.y) || float.IsNaN(zeroUp.z), Is.False,"a zero player-up produced a NaN cue.");
 
             // Straight up the body axis is the case worth pinning: head-forward carries no azimuth there,
             // so the naive rotation axis is undefined and the fallback has to hold. Fed the head target a
             // real vertical gaze produces, not a stationary head.
             Vector3 straightUp = Cue(-90f, RealLookUpCarry, Damp);
-            Assert.That(float.IsNaN(straightUp.x) || float.IsNaN(straightUp.y) || float.IsNaN(straightUp.z), Is.False,
-                "a vertical gaze produced a NaN cue.");
+            Assert.That(float.IsNaN(straightUp.x) || float.IsNaN(straightUp.y) || float.IsNaN(straightUp.z), Is.False,"a vertical gaze produced a NaN cue.");
             Vector3 vertical = straightUp - Neck;
-            Assert.That(new Vector3(vertical.x, 0f, vertical.z).magnitude * 100f, Is.LessThan(2f),
-                "a vertical gaze walked the neck out in front of the body.");
+            Assert.That(new Vector3(vertical.x, 0f, vertical.z).magnitude * 100f, Is.LessThan(2f),"a vertical gaze walked the neck out in front of the body.");
         }
-
         // ------------------------------------------------------------------ the downstream consumers
-
         [Test]
         public void Damping_StopsTheTrunkCounterbalance_FromSlidingThePelvisBack()
         {
             // The counterbalance is correct code doing its job on a bad input: told the trunk has folded
             // forward, it answers by sliding the pelvis back to keep the centre of mass over the feet. On a
             // pure look-up nothing folded, so any pelvis travel at all is the phantom leaking through.
-            float before = PelvisShiftCm(-60f, 0f);
-            float after = PelvisShiftCm(-60f, Damp);
+            float before = PelvisShiftCm(-60f, 0f), after = PelvisShiftCm(-60f, Damp);
             Assert.That(before, Is.GreaterThan(1.5f), $"the undamped cue only moved the pelvis {before:0.00} cm; premise changed.");
             Assert.That(after, Is.LessThan(0.5f), $"the pelvis still slid {after:0.00} cm back on a pure look-up.");
         }
-
         static float PelvisShiftCm(float pitchDeg, float damp)
         {
-            BasisTrunkCounterbalanceInput i = default;
-            i.HipsPos = Hips;
-            i.NeckCue = Cue(pitchDeg, RealLookUpCarry, damp);
-            i.PlayerUp = Vector3.up;
-            i.Gain = BasisTrunkCounterbalanceCore.DerivedGain;
-            i.MaxShift = 0.45f * (Head - Hips).magnitude;
-            BasisTrunkCounterbalanceCore.Solve(i, out BasisTrunkCounterbalanceResult r);
-            return (r.HipsPos - Hips).magnitude * 100f;
+            BasisTrunkCounterbalanceCore.Solve(Hips, Cue(pitchDeg, RealLookUpCarry, damp), Vector3.up, BasisTrunkCounterbalanceCore.DerivedGain, 0.45f * (Head - Hips).magnitude, out Vector3 newHips, out _, out _);
+            return (newHips - Hips).magnitude * 100f;
         }
-
         [Test]
         public void Damping_KeepsTheVirtualSpineChestTarget_OnTheBody()
         {
@@ -303,22 +217,17 @@ namespace Basis.Tests.IK
             // in the reported artifact, and it is why the fix has to land on the virtual spine's neck too
             // and not only on the FBIK cue.
             float tChest = (Neck - Chest).magnitude / (Neck - Hips).magnitude;
-            float before = ChordChestForwardCm(-60f, 0f, tChest);
-            float after = ChordChestForwardCm(-60f, Damp, tChest);
+            float before = ChordChestForwardCm(-60f, 0f, tChest), after = ChordChestForwardCm(-60f, Damp, tChest);
             Assert.That(before, Is.GreaterThan(2f), $"the undamped chord only moved the chest {before:0.00} cm; premise changed.");
-            Assert.That(after, Is.LessThan(before * 0.35f),
-                $"the chest target still slides {after:0.00} cm forward on a pure look-up (was {before:0.00}).");
+            Assert.That(after, Is.LessThan(before * 0.35f), $"the chest target still slides {after:0.00} cm forward on a pure look-up (was {before:0.00}).");
         }
-
         static float ChordChestForwardCm(float pitchDeg, float damp, float tChest)
         {
             Vector3 chest = Vector3.Lerp(Cue(pitchDeg, RealLookUpCarry, damp), Hips, tChest);
             Vector3 d = chest - Vector3.Lerp(Neck, Hips, tChest);
             return new Vector3(d.x, 0f, d.z).magnitude * 100f;
         }
-
         // ------------------------------------------------------------------ the cervical extreme block
-
         [Test]
         public void OnALookUp_TheChestDoesNotLeadThePelvis()
         {
@@ -331,12 +240,9 @@ namespace Basis.Tests.IK
             for (float pitch = -50f; pitch >= -90f; pitch -= 5f)
             {
                 BasisCervicalResult r = Extreme(pitch);
-                Assert.That(r.ChestForwardAmount, Is.LessThanOrEqualTo(r.HipsForwardAmount + 1e-5f),
-                    $"look-up {-pitch:0}: chest slid {r.ChestForwardAmount * 100f:0.00} cm forward, ahead of the " +
-                    $"pelvis' {r.HipsForwardAmount * 100f:0.00} cm.");
+                Assert.That(r.ChestForwardAmount, Is.LessThanOrEqualTo(r.HipsForwardAmount + 1e-5f), $"look-up {-pitch:0}: chest slid {r.ChestForwardAmount * 100f:0.00} cm forward, ahead of the " + $"pelvis' {r.HipsForwardAmount * 100f:0.00} cm.");
             }
         }
-
         [Test]
         public void OnALookDown_TheChestStillTravelsFurtherThanThePelvis()
         {
@@ -344,10 +250,8 @@ namespace Basis.Tests.IK
             // a deep look-down still sits the chest back further than the hips, exactly as before.
             BasisCervicalResult r = Extreme(80f);
             Assert.That(r.ChestForwardAmount, Is.LessThan(0f), "look-down did not sit the chest back.");
-            Assert.That(Mathf.Abs(r.ChestForwardAmount), Is.GreaterThan(Mathf.Abs(r.HipsForwardAmount)),
-                "look-down no longer moves the chest further than the hips.");
+            Assert.That(Mathf.Abs(r.ChestForwardAmount), Is.GreaterThan(Mathf.Abs(r.HipsForwardAmount)),"look-down no longer moves the chest further than the hips.");
         }
-
         [Test]
         public void TheExtremeBlock_StaysDormant_ThroughOrdinaryGaze()
         {
@@ -359,7 +263,6 @@ namespace Basis.Tests.IK
                 Assert.That(r.HipsForwardAmount, Is.EqualTo(0f), $"pitch {pitch:0}: hips translated inside the normal range.");
             }
         }
-
         // ------------------------------------------------------------------ the pelvis stance leash
         //
         // SECOND MECHANISM, same family. BasisVirtualSpineCore leashes the pelvis to the EYE, because the eye
@@ -374,42 +277,27 @@ namespace Basis.Tests.IK
         // The fix subtracts the swing the Eye->Head lock itself attributes to the gaze. That lock declares
         // head = eyePos + eyeRot * (tposeHead - tposeEye), i.e. the eye rigidly orbits the HEAD BONE -- so the
         // cancellation below is exact by construction rather than by tuning.
-
-        static readonly Vector3 EyeRest = new Vector3(0f, 1.600f, 0.090f);
-        static readonly Vector3 EyeFromHead = EyeRest - Head;
-
-        /// <summary>The eye, where the Eye->Head lock puts it for a given gaze and body position.</summary>
+        static readonly Vector3 EyeRest = new Vector3(0f, 1.600f, 0.090f), EyeFromHead = EyeRest - Head;
         static Vector3 EyePos(float pitchDeg, float yawDeg, Vector3 bodyTranslation)
         {
             Quaternion rot = Quaternion.AngleAxis(yawDeg, Vector3.up) * Gaze(pitchDeg);
             return Head + bodyTranslation + rot * EyeFromHead;
         }
-
-        /// <summary>What the leash is shown after the gaze swing is removed.</summary>
         static Vector3 StanceReference(float pitchDeg, float yawDeg, Vector3 bodyTranslation, float removal)
         {
             Vector3 eye = EyePos(pitchDeg, yawDeg, bodyTranslation);
             if (removal <= 0f) return eye;
 
-            BasisHeadPitchSwingInput i;
-            i.PitchDeg = pitchDeg;
-            i.YawDeg = yawDeg;
-            i.EyeFromNeck = EyeFromHead;
-            i.Strength = removal;
-            i.BackwardScale = 1f;
-            BasisHeadPitchSwingCore.Solve(i, out BasisHeadPitchSwingResult r);
-            return eye - r.Offset;
+            BasisHeadPitchSwingCore.Solve(pitchDeg, yawDeg, EyeFromHead, removal, 1f, out Vector3 offset, out _);
+            return eye - offset;
         }
-
         [Test]
         public void TheEye_WalksBackwards_OnALookUp()
         {
             // The premise, measured: this is what the leash was being fed and reading as a step.
             float travel = (EyePos(-60f, 0f, Vector3.zero) - EyeRest).z * 100f;
-            Assert.That(travel, Is.LessThan(-10f),
-                $"a 60 deg look-up only carried the eye {travel:0.0} cm; the artifact these tests guard is gone.");
+            Assert.That(travel, Is.LessThan(-10f), $"a 60 deg look-up only carried the eye {travel:0.0} cm; the artifact these tests guard is gone.");
         }
-
         [Test]
         public void TheStanceReference_IsUnmovedByAPureGaze()
         {
@@ -420,14 +308,11 @@ namespace Basis.Tests.IK
                 Vector3 rest = StanceReference(0f, yaw, Vector3.zero, 1f);
                 for (float pitch = -90f; pitch <= 90f; pitch += 5f)
                 {
-                    Vector3 stance = StanceReference(pitch, yaw, Vector3.zero, 1f);
-                    Vector3 d = stance - rest;
-                    Assert.That(new Vector3(d.x, 0f, d.z).magnitude, Is.LessThan(1e-4f),
-                        $"yaw {yaw:0}, pitch {pitch:0}: the standing spot moved {new Vector3(d.x, 0f, d.z).magnitude * 100f:0.00} cm on a pure gaze.");
+                    Vector3 stance = StanceReference(pitch, yaw, Vector3.zero, 1f), d = stance - rest;
+                    Assert.That(new Vector3(d.x, 0f, d.z).magnitude, Is.LessThan(1e-4f), $"yaw {yaw:0}, pitch {pitch:0}: the standing spot moved {new Vector3(d.x, 0f, d.z).magnitude * 100f:0.00} cm on a pure gaze.");
                 }
             }
         }
-
         [Test]
         public void TheStanceReference_StillSeesARealStep()
         {
@@ -439,22 +324,18 @@ namespace Basis.Tests.IK
             {
                 Vector3 still = StanceReference(pitch, 0f, Vector3.zero, 1f);
                 Vector3 stepped = StanceReference(pitch, 0f, step, 1f);
-                Assert.That((stepped - still - step).magnitude, Is.LessThan(1e-5f),
-                    $"pitch {pitch:0}: a real {step.magnitude * 100f:0} cm step did not pass through the leash intact.");
+                Assert.That((stepped - still - step).magnitude, Is.LessThan(1e-5f), $"pitch {pitch:0}: a real {step.magnitude * 100f:0} cm step did not pass through the leash intact.");
             }
         }
-
         [Test]
         public void ZeroRemoval_LeavesTheLeashOnTheRawEye()
         {
             // Same off-switch contract as the neck damping: an unset field is the shipped-before behaviour.
             for (float pitch = -90f; pitch <= 90f; pitch += 10f)
             {
-                Assert.That((StanceReference(pitch, 0f, Vector3.zero, 0f) - EyePos(pitch, 0f, Vector3.zero)).magnitude,
-                    Is.EqualTo(0f), $"pitch {pitch:0}: removal 0 was not a no-op.");
+                Assert.That((StanceReference(pitch, 0f, Vector3.zero, 0f) - EyePos(pitch, 0f, Vector3.zero)).magnitude, Is.EqualTo(0f), $"pitch {pitch:0}: removal 0 was not a no-op.");
             }
         }
-
         static BasisCervicalResult Extreme(float pitchDeg)
         {
             BasisCervicalInput i = default;

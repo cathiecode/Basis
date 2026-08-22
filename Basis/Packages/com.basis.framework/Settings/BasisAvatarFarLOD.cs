@@ -6,7 +6,6 @@ using Basis.Scripts.Avatar;
 using Basis.Scripts.BasisSdk;
 using Basis.Scripts.BasisSdk.Players;
 using Basis.Scripts.Networking;
-using Unity.Profiling;
 using UnityEngine;
 
 /// <summary>
@@ -42,8 +41,6 @@ public static class BasisAvatarFarLOD
     // Tick runs under the transmit marker, which reports one number for the whole loop. These
     // separate the budgeted swaps — the only work here that costs milliseconds — from the
     // per-player flag reconciliation, so a spike says which one it was.
-    static readonly ProfilerMarker sMarkerFarInstall = new ProfilerMarker("BasisDriver.Network.Transmit.FarLodInstall");
-    static readonly ProfilerMarker sMarkerFarReload = new ProfilerMarker("BasisDriver.Network.Transmit.FarLodReload");
 
     private static readonly System.Diagnostics.Stopwatch sTransitionClock = new System.Diagnostics.Stopwatch();
     private static long sTransitionBudgetTicks = long.MaxValue;
@@ -62,6 +59,10 @@ public static class BasisAvatarFarLOD
     /// </summary>
     public static void BeginTickBudget()
     {
+        // Retires far avatar versions whose last wearer went away. Deliberately here and not in
+        // the release itself: that runs inside Unity's destruction pass, where the prototype and
+        // its holder cannot be reliably destroyed. See DrainPendingTeardowns.
+        BasisFarAvatarBuilder.DrainPendingTeardowns();
         sTransitionClock.Reset();
         sTransitionBudgetTicks = (long)(MaxTransitionMillisecondsPerTick * (System.Diagnostics.Stopwatch.Frequency / 1000.0));
         sTickUnscaledTime = Time.unscaledTime;
@@ -78,7 +79,7 @@ public static class BasisAvatarFarLOD
     private static void ChargedReload(BasisRemotePlayer remote)
     {
         sTransitionClock.Start();
-        using (sMarkerFarReload.Auto())
+        using (BasisNetworkMarkers.TransmitFarLodReload.Auto())
         {
             remote.ReloadAvatar();
         }
@@ -138,7 +139,7 @@ public static class BasisAvatarFarLOD
         {
             transitionBudget--;
             sTransitionClock.Start();
-            using (sMarkerFarReload.Auto())
+            using (BasisNetworkMarkers.TransmitFarLodReload.Auto())
             {
                 BasisAvatarFactory.RemoveOldAvatarAndLoadFallback(remote, Vector3.zero, Quaternion.identity);
             }
@@ -204,7 +205,7 @@ public static class BasisAvatarFarLOD
                 {
                     bool installed;
                     sTransitionClock.Start();
-                    using (sMarkerFarInstall.Auto())
+                    using (BasisNetworkMarkers.TransmitFarLodInstall.Auto())
                     {
                         installed = BasisFarAvatarBuilder.TryInstall(remote);
                     }
@@ -225,7 +226,7 @@ public static class BasisAvatarFarLOD
             ChargedReload(remote);
         }
         else if (!wantsFar && !wearingFar && !remote.IsConsideredFallBackAvatar && !remote.IsLoadingAnAvatar &&
-                 ((!remote.InAvatarRange && !remote.AlwaysShowAvatar) || remote.HasFailedAvatarLoadGlobally))
+                 ((!remote.InAvatarRange && !remote.AvatarAlwaysLoaded) || remote.HasFailedAvatarLoadGlobally))
         {
             // A real avatar was kept up for a pending far install whose payload then died
             // (refused parse / cleared) — without this it would stay loaded past the range
@@ -241,7 +242,7 @@ public static class BasisAvatarFarLOD
             // one of the gates is refusing; name it instead of sitting silent. The master
             // switch being off is a setting, not a refusal — no warning for it.
             remote.FarLodNextFetchRetryTime = sTickUnscaledTime + 10f;
-            BasisDebug.LogWarning($"Far avatar for {remote.DisplayName} has a payload but is gated: enabled={Enabled} blocked={remote.IsEffectivelyBlocked} alwaysShow={remote.AlwaysShowAvatar}", BasisDebug.LogTag.Avatar);
+            BasisDebug.LogWarning($"Far avatar for {remote.DisplayName} has a payload but is gated: enabled={Enabled} blocked={remote.IsEffectivelyBlocked} alwaysShow={remote.AvatarAlwaysLoaded}", BasisDebug.LogTag.Avatar);
         }
     }
 
@@ -249,7 +250,7 @@ public static class BasisAvatarFarLOD
     /// Should this player be wearing the far avatar right now? No avatar-range check beyond
     /// the InAvatarRange flag: the far avatar IS the beyond-range representation, so a range
     /// of zero simply means everyone wears their far avatar; UseAvatarFarLod off is the
-    /// switch that drops players to the loading dummy instead. For AlwaysShowAvatar players
+    /// switch that drops players to the loading dummy instead. For always-loaded players
     /// the far avatar only bridges downloads and dead loads.
     /// </summary>
     public static bool WantsFarAvatar(BasisRemotePlayer remote)
@@ -257,7 +258,7 @@ public static class BasisAvatarFarLOD
         bool wantsFar = Enabled &&
             !remote.IsEffectivelyBlocked && remote.HasFarLodPayload &&
             (!remote.InAvatarRange || remote.HasFailedAvatarLoadGlobally || remote.IsLoadingAnAvatar);
-        if (remote.AlwaysShowAvatar && !remote.IsLoadingAnAvatar && !remote.HasFailedAvatarLoadGlobally)
+        if (remote.AvatarAlwaysLoaded && !remote.IsLoadingAnAvatar && !remote.HasFailedAvatarLoadGlobally)
         {
             wantsFar = false;
         }
@@ -275,7 +276,7 @@ public static class BasisAvatarFarLOD
         return Enabled &&
             !remote.IsEffectivelyBlocked && remote.HasFarLodPayload &&
             (!remote.InAvatarRange || remote.HasFailedAvatarLoadGlobally) &&
-            !(remote.AlwaysShowAvatar && !remote.HasFailedAvatarLoadGlobally);
+            !(remote.AvatarAlwaysLoaded && !remote.HasFailedAvatarLoadGlobally);
     }
 
     /// <summary>

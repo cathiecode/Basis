@@ -1,165 +1,98 @@
 using System.Runtime.CompilerServices;
 using Basis.Scripts.Common;
 using Unity.Collections;
-using Unity.Profiling;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 namespace Basis.IK
 {
     [Unity.Burst.BurstCompile]
     public partial struct BasisEerieMovement : Unity.Jobs.IJob
     {
-        public const float k_Epsilon = 1e-5f;
-        public const float k_MinMag = 1e-6f;
-        public const float k_SqrEpsilon = 1e-8f;
-
-        public const int Count = 22;
-        public const int UpperChestSlot = Count - 1;
-        public FixedList128Bytes<BasisBoneHandle> slotHandles;
+        public const float epsilon = 1e-5f, minMag = 1e-6f, sqrEpsilon = 1e-8f;
+        public const int Count = 22, UpperChestSlot = Count - 1;
         public FixedList512Bytes<Vector3> slotPositions;
-        public FixedList512Bytes<Quaternion> slotRotations;
-        public FixedList512Bytes<Quaternion> slotOffsets;
+        public FixedList512Bytes<Quaternion> slotRotations, slotOffsets;
         public FixedList64Bytes<bool> slotWeights;
-
         public BasisBoneHandle handleHips, handleSpine, handleChest, handleUpperChest, handleNeck, handleHead;
         public BasisBoneHandle handleLeftShoulder, handleLeftUpperArm, handleLeftLowerArm, handleLeftHand;
         public BasisBoneHandle handleRightShoulder, handleRightUpperArm, handleRightLowerArm, handleRightHand;
-        public BasisBoneHandle handleLeftUpperArmTwist, handleLeftLowerArmTwist;
-        public BasisBoneHandle handleRightUpperArmTwist, handleRightLowerArmTwist;
-        public BasisBoneHandle handleLeftUpperLeg, handleLeftLowerLeg, handleLeftFoot, handleLeftToe;
-        public BasisBoneHandle handleRightUpperLeg, handleRightLowerLeg, handleRightFoot, handleRightToe;
-
+        public BasisBoneHandle handleLeftUpperArmTwist, handleLeftLowerArmTwist, handleRightUpperArmTwist;
+        public BasisBoneHandle handleRightLowerArmTwist, handleLeftUpperLeg, handleLeftLowerLeg, handleLeftFoot;
+        public BasisBoneHandle handleLeftToe, handleRightUpperLeg, handleRightLowerLeg, handleRightFoot, handleRightToe;
         public NativeArray<BasisBoneHandle> chainHeadToSpine;
         public NativeArray<BasisSpineRestFrame> chainSpineRestFrames;
-        public NativeArray<BasisSpineRom> chainSpineRoms;
-
         public int chainChestIdx;
-
         public Vector3 targetPositionHead, targetPositionHips;
         public Quaternion targetRotationHead, targetRotationHips, targetRotationChest;
-
-        public Vector3 targetPositionChest, targetPositionChestRaw;
-        public Vector3 playerUp;
-
-        public Vector3 targetPositionLeftHand, hintPositionLeftHand;
-        public Vector3 targetPositionRightHand, hintPositionRightHand;
-        public Quaternion targetRotationLeftHand, hintRotationLeftHand;
-        public Quaternion targetRotationRightHand, hintRotationRightHand;
+        public Vector3 targetPositionChest, targetPositionChestRaw, playerUp, targetPositionLeftHand;
+        public Vector3 hintPositionLeftHand, targetPositionRightHand, hintPositionRightHand;
+        public Quaternion targetRotationLeftHand, hintRotationLeftHand, targetRotationRightHand, hintRotationRightHand;
         public Quaternion targetRotationLeftShoulder, targetRotationRightShoulder;
-
-        public Vector3 targetPositionLeftLowerLeg, hintPositionLeftLowerLeg;
-        public Vector3 targetPositionRightLowerLeg, hintPositionRightLowerLeg;
-        public Quaternion targetRotationLeftLowerLeg, hintRotationLeftLowerLeg;
-        public Quaternion targetRotationRightLowerLeg, hintRotationRightLowerLeg;
+        public Vector3 targetPositionLeftLowerLeg, hintPositionLeftLowerLeg, targetPositionRightLowerLeg;
+        public Vector3 hintPositionRightLowerLeg;
+        public Quaternion targetRotationLeftLowerLeg, hintRotationLeftLowerLeg, targetRotationRightLowerLeg;
+        public Quaternion hintRotationRightLowerLeg;
         public Vector3 kneeBendPrefLeft, kneeBendPrefRight, kneeAnteriorRef;
         public Quaternion leftDrivenTargetRot, rightDrivenTargetRot;
         public float leftToeBendDeg, rightToeBendDeg;
         public Vector3 leftToeBendAxis, rightToeBendAxis;
-
-        public Quaternion offsetRotationHips, offsetRotationHead, offsetRotationChest;
-        public Quaternion offsetRotationLeftFoot, offsetRotationRightFoot;
-        public Quaternion offsetRotationLeftToe, offsetRotationRightToe;
-        public Quaternion offsetRotationLeftShoulder, offsetRotationRightShoulder;
-        public Quaternion offsetRotationLeftHand, offsetRotationRightHand;
-        public Quaternion targetOffsetHead, targetOffsetChest;
-        public Quaternion targetOffsetLeftFoot, targetOffsetRightFoot;
-        public Quaternion targetOffsetLeftToe, targetOffsetRightToe;
-        public Quaternion targetOffsetLeftShoulder, targetOffsetRightShoulder;
-        public Quaternion targetOffsetLeftHand, targetOffsetRightHand;
-
-        public float enabledLeftHand, enabledRightHand;
-        public float enabledLeftLowerLeg, enabledRightLowerLeg;
+        public Quaternion offsetRotationHips, offsetRotationHead, offsetRotationChest, offsetRotationLeftFoot;
+        public Quaternion offsetRotationRightFoot, offsetRotationLeftToe, offsetRotationRightToe;
+        public Quaternion offsetRotationLeftShoulder, offsetRotationRightShoulder, offsetRotationLeftHand;
+        public Quaternion offsetRotationRightHand;
+        public float enabledLeftHand, enabledRightHand, enabledLeftLowerLeg, enabledRightLowerLeg;
         public float hintWeightLeftLowerLeg, hintWeightRightLowerLeg;
-        public bool hintWeightLeftHand, hintWeightRightHand;
-        public bool enabledSpineIK, enabledLeftShoulder, enabledRightShoulder;
-        public bool leftToeEnabled, rightToeEnabled;
-        public bool hasChestTracker, hasHipsTracker;
-        public bool proneBodyPose;
-        public bool hintIsTrackerLeftLowerLeg, hintIsTrackerRightLowerLeg;
-        public bool footIsTrackerLeftLeg, footIsTrackerRightLeg;
-
+        public bool hintWeightLeftHand, hintWeightRightHand, enabledSpineIK, enabledLeftShoulder, enabledRightShoulder;
+        public bool leftToeEnabled, rightToeEnabled, hasChestTracker, hasHipsTracker, proneBodyPose;
+        public bool hintIsTrackerLeftLowerLeg, hintIsTrackerRightLowerLeg, footIsTrackerLeftLeg, footIsTrackerRightLeg;
         public float tposeBakeScale;
-        public Vector3 tposeLengthHeadToHips, tposeLengthNeckToHips, tposeHeadToNeckLocal;
-        public Vector3 tposeLeftShoulderLocalDir, tposeRightShoulderLocalDir;
+        public Vector3 tposeLengthNeckToHips, tposeHeadToNeckLocal, tposeLeftShoulderLocalDir;
+        public Vector3 tposeRightShoulderLocalDir;
         public Quaternion tposeLeftShoulderRot, tposeRightShoulderRot, tposeChestRot;
-        public float tposeShoulderToHandLeft, tposeShoulderToHandRight;
-        public float tposeClavicleLenLeft, tposeClavicleLenRight;
+        public float tposeShoulderToHandLeft, tposeShoulderToHandRight, tposeClavicleLenLeft, tposeClavicleLenRight;
         public float tposeShoulderToElbowLeft, tposeShoulderToElbowRight;
-
+        public Quaternion tposeLeftLowerArmTwistBind, tposeLeftLowerArmChildBind, tposeRightLowerArmTwistBind;
+        public Quaternion tposeRightLowerArmChildBind, tposeLeftUpperArmTwistBind, tposeLeftUpperArmChildBind;
+        public Quaternion tposeRightUpperArmTwistBind, tposeRightUpperArmChildBind;
         public BasisIKLockMode ikLockMode;
         public int spineMaxIterations;
-        public float spineTolerance;
-        public float minHeadSpineHeight, maxBendDeg, minFactor, maxFactor, maxChestDeltaDeg;
-        public float spineBendPitch, spineBendYaw, spineBendRoll;
-        public float upperChestBendPitch, upperChestBendYaw, upperChestBendRoll;
-        public float spineMaxForwardDeg, spineMaxBackwardDeg, spineMaxLateralDeg;
-        public float spineSquishBoost, spineGazeFollow, neckGazeFollow;
-
-        public float neckExtensionDamp;
-        public float spineCCDRelax, neckMaxConeDeg, spineTwistKeep, spineNeckTwistKeep;
-        public float chestSpringHz, chestSpringDamping;
-        public float hipHingeStartDeg, hipHingeMaxAddDeg;
-        public float moveBodyBackWhenCrouching, crouchDepth, standingHeadHeight;
-        public float trunkCounterbalance;
-
-        public float trunkCounterbalanceMaxSpineFrac;
-
-        public float thoracicBendStiffen;
-
-        public float spineTautBandFrac;
-
-        public float bendTwistCoupling;
-
+        public float spineTolerance, minHeadSpineHeight, maxBendDeg, minFactor, maxFactor, maxChestDeltaDeg;
+        public float spineBendPitch, spineBendYaw, spineBendRoll, upperChestBendPitch, upperChestBendYaw;
+        public float upperChestBendRoll, spineMaxForwardDeg, spineMaxBackwardDeg, spineMaxLateralDeg, spineSquishBoost;
+        public float spineGazeFollow, neckGazeFollow, neckExtensionDamp, neckFlexionDamp, spineCCDRelax, neckMaxConeDeg;
+        public float spineTwistKeep, spineNeckTwistKeep, chestSpringHz, chestSpringDamping, hipHingeStartDeg;
+        public float hipHingeMaxAddDeg, moveBodyBackWhenCrouching, crouchDepth, standingHeadHeight, trunkCounterbalance;
+        public float trunkCounterbalanceMaxSpineFrac, thoracicBendStiffen, spineTautBandFrac, bendTwistCoupling;
         public float neckGazeFollowMaxDeg;
-
         public bool chestIkTarget;
         public float chestIkWeight, chestPosPullMaxDeg, chestPullMaxDist;
         public int chestIkIterations, chestIkHeadRestoreSweeps;
-
         public float chestArmSwingFactor, chestArmSwingMaxDeg, chestFollowChestShare;
-
         public bool anatDifferentialStiffness, anatShoulderSlide, anatCervicalLordosis, anatPelvicTwistRouting;
         public bool spineAnatomicalRom;
         public float lordosisPitchGainDeg, lordosisBaseDeg, lordosisNeckShare, lordosisMaxHeadPitchDeg;
-        public float lordosisExtremeStartDeg, lordosisExtremeFullDeg;
-        public float lordosisExtremeRollForwardMaxDeg, lordosisExtremeRollBackwardMaxDeg;
-        public float lordosisExtremeHipsHorizontalMax, lordosisExtremeChestHorizontalMax;
-        public float lordosisExtremeHipsHorizontalLookUp, lordosisExtremeChestHorizontalLookUp;
-        public float lordosisExtremeHipsDownMax, lordosisExtremeChestDownMax;
+        public float lordosisExtremeStartDeg, lordosisExtremeFullDeg, lordosisExtremeRollForwardMaxDeg;
+        public float lordosisExtremeRollBackwardMaxDeg, lordosisExtremeHipsHorizontalMax;
+        public float lordosisExtremeChestHorizontalMax, lordosisExtremeHipsHorizontalLookUp;
+        public float lordosisExtremeChestHorizontalLookUp, lordosisExtremeHipsDownMax, lordosisExtremeChestDownMax;
         public float lordosisExtremeHipsDownLookUp, lordosisExtremeChestDownLookUp;
-
         public bool shoulderSolveEnabled, shoulderShrugEnabled;
-        public float shoulderElevationFactor, shoulderProtractionFactor;
-
-        public float shoulderCoupleRatio, shoulderMaxDeg;
-
-        public float shoulderSlideStartDeg, shoulderSlideMaxDeg, shoulderSlideFraction;
-        public float lowerArmTwistFraction, upperArmTwistFraction;
-        public float swingSmoothRateDeg;
-        public bool protectElbow, collideTrackedElbow, elbowDragEnabled, useNeuralPole;
+        public float shoulderElevationFactor, shoulderProtractionFactor, shoulderCoupleRatio, shoulderMaxDeg;
+        public float shoulderSlideStartDeg, shoulderSlideMaxDeg, shoulderSlideFraction, lowerArmTwistFraction;
+        public float upperArmTwistFraction, swingSmoothRateDeg;
+        public bool protectElbow, collideTrackedElbow, elbowDragEnabled;
         public float elbowDragHz;
-
         public bool legSwivelSmoothing, kneeFootPoleHold, kneeFootPoleConditioning;
-
         public float trackedKneeSwivelMinCutoffHz, trackedKneeSwivelBeta, trackedKneeSwivelDerivCutoffHz;
-
         public bool collisionsEnabled;
         public float chestRadius, collisionSkin, handRadius, handSkin;
-
-        public NativeArray<Vector3> chestSpringState;
-        public NativeArray<int> chestSpringInit;
-        public const int k_SwingLeftElbow = 0, k_SwingRightElbow = 1, k_SwingCount = 2;
-        public NativeArray<Vector3> swingLastDir, swingLastAxis, swingLastTarget;
-        public NativeArray<Vector3> swingHintBend, swingHintAxis, swingHintDrag;
-        public NativeArray<Quaternion> swingHintBodyRot;
-        public NativeArray<int> swingContinuityInit, swingCollided, swingSmoothState, swingHintInit;
-        public NativeArray<float> swingHintReach;
-        public NativeArray<int> swingGuardSide;
-        public NativeArray<Vector3> swingPoleAnchor;
-        public NativeArray<Quaternion> swingPoleAnchorRot;
-        public NativeArray<int> swingPoleAnchorInit;
-        public NativeArray<Vector3> legSwivelRaw, legSwivelSmooth;
-        public NativeArray<int> legSwivelInit;
+        public NativeArray<BasisChestSpringState> chestSpring;
+        public const int swingLeftElbow = 0, swingRightElbow = 1, swingCount = 2;
+        public NativeArray<BasisSwingContinuityState> swingContinuity;
+        public NativeArray<BasisArmSlotState> armState;
+        public NativeArray<BasisLegSlotState> legState;
         public NativeArray<BasisLegDiagnostics> legDiagnostics;
+
         // One-element persistent state for animation-relative Virtual Spine. The job struct is copied when
         // scheduled, so lock/yaw state must live in native memory to survive between frames.
         public NativeArray<BasisAnimationRelativeVirtualSpineState> virtualSpineState;
@@ -170,55 +103,76 @@ namespace Basis.IK
         bool virtualSpineApplied;
 
         public BasisPoseStream poseStream;
-
-        public void Execute() => ProcessAnimation(poseStream);
-
-        static readonly ProfilerMarker sMarkerSpinePass = new ProfilerMarker("BasisEerie.Spine");
-        static readonly ProfilerMarker sMarkerShoulderPass = new ProfilerMarker("BasisEerie.Shoulders");
-        static readonly ProfilerMarker sMarkerLegPass = new ProfilerMarker("BasisEerie.Legs");
-        static readonly ProfilerMarker sMarkerArmPass = new ProfilerMarker("BasisEerie.Arms");
-        static readonly ProfilerMarker sMarkerToePass = new ProfilerMarker("BasisEerie.Toes");
-        static readonly ProfilerMarker sMarkerOverrides = new ProfilerMarker("BasisEerie.TrackerOverrides");
-
-        public void ProcessAnimation(BasisPoseStream stream)
+        public BasisIKGizmoRecorder gizmos;
+        static unsafe ref T Ref<T>(NativeArray<T> array, int index) where T : unmanaged
         {
-            stream.InvalidateWorldCache();
-            CaptureCalibrationOffsets();
-            ApplyAnimationRelativeVirtualSpine(stream);
-            sMarkerSpinePass.Begin();
-            SolveSpinePass(stream);
-            sMarkerSpinePass.End();
-            sMarkerShoulderPass.Begin();
-            SolveShoulderPass(stream);
-            sMarkerShoulderPass.End();
-            sMarkerLegPass.Begin();
-            SolveLegPass(stream);
-            sMarkerLegPass.End();
-            sMarkerArmPass.Begin();
-            SolveArmPass(stream);
-            sMarkerArmPass.End();
-            sMarkerToePass.Begin();
-            SolveToePass(stream);
-            sMarkerToePass.End();
-            sMarkerOverrides.Begin();
-            ApplyTrackerOverrides(stream);
-            sMarkerOverrides.End();
+            return ref UnsafeUtility.ArrayElementAsRef<T>(array.GetUnsafePtr(), index);
         }
-
-        void CaptureCalibrationOffsets()
+        BasisBoneHandle SlotHandle(int slot)
         {
-            targetOffsetHead = offsetRotationHead;
-            targetOffsetChest = offsetRotationChest;
-            targetOffsetLeftFoot = offsetRotationLeftFoot;
-            targetOffsetRightFoot = offsetRotationRightFoot;
-            targetOffsetLeftToe = offsetRotationLeftToe;
-            targetOffsetRightToe = offsetRotationRightToe;
-            targetOffsetLeftShoulder = offsetRotationLeftShoulder;
-            targetOffsetRightShoulder = offsetRotationRightShoulder;
-            targetOffsetLeftHand = offsetRotationLeftHand;
-            targetOffsetRightHand = offsetRotationRightHand;
+            switch (slot)
+            {
+                case 0: return handleHips;
+                case 1: return handleLeftUpperLeg;
+                case 2: return handleRightUpperLeg;
+                case 3: return handleLeftLowerLeg;
+                case 4: return handleRightLowerLeg;
+                case 5: return handleLeftFoot;
+                case 6: return handleRightFoot;
+                case 7: return handleSpine;
+                case 8: return handleChest;
+                case 9: return handleNeck;
+                case 10: return handleHead;
+                case 11: return handleLeftShoulder;
+                case 12: return handleRightShoulder;
+                case 13: return handleLeftUpperArm;
+                case 14: return handleRightUpperArm;
+                case 15: return handleLeftLowerArm;
+                case 16: return handleRightLowerArm;
+                case 17: return handleLeftHand;
+                case 18: return handleRightHand;
+                case 19: return handleLeftToe;
+                case 20: return handleRightToe;
+                case UpperChestSlot: return handleUpperChest;
+                default: return BasisBoneHandle.Unbound;
+            }
         }
-
+        public void Execute() => ProcessAnimation();
+        public void ProcessAnimation()
+        {
+            poseStream.InvalidateWorldCache();
+            RecordTargetGizmos();
+            ApplyAnimationRelativeVirtualSpine();
+            BasisEerieMarkers.Spine.Begin();
+            SolveSpinePass();
+            BasisEerieMarkers.Spine.End();
+            RecordSpineGizmos();
+            BasisEerieMarkers.Shoulders.Begin();
+            SolveShoulderPass();
+            BasisEerieMarkers.Shoulders.End();
+            RecordShoulderGizmos();
+            BasisEerieMarkers.Legs.Begin();
+            SolveLegPass();
+            BasisEerieMarkers.Legs.End();
+            RecordLegGizmos();
+            BasisEerieMarkers.Arms.Begin();
+            SolveArmPass();
+            BasisEerieMarkers.Arms.End();
+            RecordArmGizmos();
+            BasisEerieMarkers.Toes.Begin();
+            SolveToePass();
+            BasisEerieMarkers.Toes.End();
+            RecordToeGizmos();
+            BasisEerieMarkers.TrackerOverrides.Begin();
+            ApplyTrackerOverrides();
+            BasisEerieMarkers.TrackerOverrides.End();
+            RecordOverrideGizmos();
+            RecordFrameGizmos();
+            RecordLimitGizmos();
+            RecordReachGizmos();
+            RecordNumberGizmos();
+            RecordSkeletonGizmos();
+        }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int Slot(int humanBodyBone)
         {
@@ -237,7 +191,6 @@ namespace Basis.IK
                 slotPositions[s] = v;
             }
         }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetTargetRotation(int idx, in Quaternion q)
         {
@@ -247,7 +200,6 @@ namespace Basis.IK
                 slotRotations[s] = q;
             }
         }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetOffsetRotation(int idx, in Quaternion q)
         {
@@ -257,7 +209,6 @@ namespace Basis.IK
                 slotOffsets[s] = q;
             }
         }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetWeight(int idx, bool State)
         {
@@ -267,7 +218,6 @@ namespace Basis.IK
                 slotWeights[s] = State;
             }
         }
-
         public void RescaleTposeScalars(float newScale)
         {
             if (float.IsNaN(newScale) || float.IsInfinity(newScale) || newScale <= 0f || tposeBakeScale <= 0f)
@@ -287,7 +237,6 @@ namespace Basis.IK
             tposeClavicleLenRight *= k;
             tposeShoulderToElbowLeft *= k;
             tposeShoulderToElbowRight *= k;
-            tposeLengthHeadToHips *= k;
             tposeHeadToNeckLocal *= k;
             tposeLengthNeckToHips *= k;
 
@@ -297,32 +246,14 @@ namespace Basis.IK
         {
             if (chainHeadToSpine.IsCreated) chainHeadToSpine.Dispose();
             if (chainSpineRestFrames.IsCreated) chainSpineRestFrames.Dispose();
-            if (chainSpineRoms.IsCreated) chainSpineRoms.Dispose();
-
-            if (chestSpringState.IsCreated) chestSpringState.Dispose();
-            if (chestSpringInit.IsCreated) chestSpringInit.Dispose();
-
-            if (swingLastDir.IsCreated) swingLastDir.Dispose();
-            if (swingLastAxis.IsCreated) swingLastAxis.Dispose();
-            if (swingLastTarget.IsCreated) swingLastTarget.Dispose();
-            if (swingContinuityInit.IsCreated) swingContinuityInit.Dispose();
-            if (swingCollided.IsCreated) swingCollided.Dispose();
-            if (swingSmoothState.IsCreated) swingSmoothState.Dispose();
-            if (swingHintBend.IsCreated) swingHintBend.Dispose();
-            if (swingHintAxis.IsCreated) swingHintAxis.Dispose();
-            if (swingHintDrag.IsCreated) swingHintDrag.Dispose();
-            if (swingHintBodyRot.IsCreated) swingHintBodyRot.Dispose();
-            if (swingHintInit.IsCreated) swingHintInit.Dispose();
-            if (swingHintReach.IsCreated) swingHintReach.Dispose();
-            if (swingGuardSide.IsCreated) swingGuardSide.Dispose();
-            if (swingPoleAnchor.IsCreated) swingPoleAnchor.Dispose();
-            if (swingPoleAnchorRot.IsCreated) swingPoleAnchorRot.Dispose();
-            if (swingPoleAnchorInit.IsCreated) swingPoleAnchorInit.Dispose();
+            if (chestSpring.IsCreated) chestSpring.Dispose();
+            if (swingContinuity.IsCreated) swingContinuity.Dispose();
+            if (armState.IsCreated) armState.Dispose();
+            if (legState.IsCreated) legState.Dispose();
             if (legDiagnostics.IsCreated) legDiagnostics.Dispose();
-            if (legSwivelRaw.IsCreated) legSwivelRaw.Dispose();
-            if (legSwivelSmooth.IsCreated) legSwivelSmooth.Dispose();
-            if (legSwivelInit.IsCreated) legSwivelInit.Dispose();
             if (virtualSpineState.IsCreated) virtualSpineState.Dispose();
+
+            gizmos.Dispose();
         }
     }
 }

@@ -1,56 +1,22 @@
 using NUnit.Framework;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
-    /// <summary>
-    /// The cross-space conformance gate for the IK solve cores.
-    ///
-    /// One property covers the whole class of coordinate-space bugs:
-    ///
-    ///     EQUIVARIANCE:  Solve(T . inputs)  ==  T . Solve(inputs)      for any rigid T = (rotation, translation)
-    ///
-    /// Rotate and translate every world-space quantity a core is given -- joints, targets, hints, bind axes,
-    /// PlayerUp, bend normals -- and the solved pose must come back rotated and translated by exactly the same
-    /// T. Scalars the core reports (reach ratio, joint angle, penetration depth) must not move at all: they are
-    /// properties of the body, not of where the body happens to be standing.
-    ///
-    /// A core that reaches for a WORLD constant -- Vector3.up, Vector3.forward, Vector3.down -- instead of the
-    /// body/player frame it was handed cannot satisfy this, because the constant does not rotate with T. That is
-    /// exactly how both shipped defects looked:
-    ///   - SmoothKneeSwivel measured the knee against world forward, so a turn leaked into the knee DOF;
-    ///   - the T-pose capture stored a world-axes offset that the bone sim then rotated a second time.
-    /// Neither was reachable by the existing per-core gates, which all test one orientation. This one is
-    /// orientation-blind by construction, so a leak has nowhere to hide.
-    ///
-    /// Being equivariant is also what "the avatar behaves the same wherever you stand and whichever way you
-    /// face" means, formally: it is the property the whole rig is silently assumed to have.
-    ///
-    /// NOT transformed, on purpose: TargetOffset and the T-pose binds are LOCAL quantities (a bind rotation
-    /// relative to the avatar root), so a global re-orientation of the world must leave them alone. Transforming
-    /// them would test a different -- and wrong -- contract.
-    /// </summary>
     public class BasisIKEquivarianceTests
     {
         const float PosTolM = 1e-3f;     // 1 mm
-        const float RotTolDeg = 0.05f;
-        const float ScalarTol = 1e-3f;
-
-        /// <summary>A rigid transform T. Points rotate and translate; directions only rotate.</summary>
+        const float RotTolDeg = 0.05f, ScalarTol = 1e-3f;
         readonly struct Rigid
         {
             public readonly Quaternion R;
             public readonly Vector3 T;
             public readonly string Name;
-
             public Rigid(Quaternion r, Vector3 t, string name) { R = r; T = t; Name = name; }
-
             public Vector3 Point(Vector3 p) => R * p + T;
             public Vector3 Dir(Vector3 d) => R * d;
             public Quaternion Rot(Quaternion q) => R * q;
         }
-
         // Identity is included deliberately: it catches a broken harness (if identity fails, the test is wrong,
         // not the core). The rest span yaw only, tilt only, and the general case.
         //
@@ -69,29 +35,20 @@ namespace Basis.Tests.IK
             new Rigid(Quaternion.Euler(0f, 0f, -50f), Vector3.zero, "roll -50"),
             new Rigid(Quaternion.Euler(20f, 160f, -40f), new Vector3(-6f, 3f, 11f), "general"),
         };
-
         static void SamePoint(Vector3 expected, Vector3 actual, Rigid t, string what)
         {
-            Assert.That(Vector3.Distance(expected, actual), Is.LessThan(PosTolM),
-                $"[{t.Name}] {what} is not equivariant: expected {expected}, got {actual} " +
-                $"(off by {Vector3.Distance(expected, actual) * 100f:F2} cm)");
+            Assert.That(Vector3.Distance(expected, actual), Is.LessThan(PosTolM), $"[{t.Name}] {what} is not equivariant: expected {expected}, got {actual} " + $"(off by {Vector3.Distance(expected, actual) * 100f:F2} cm)");
         }
-
         static void SameRot(Quaternion expected, Quaternion actual, Rigid t, string what)
         {
-            Assert.That(Quaternion.Angle(expected, actual), Is.LessThan(RotTolDeg),
-                $"[{t.Name}] {what} is not equivariant: off by {Quaternion.Angle(expected, actual):F3} deg");
+            Assert.That(Quaternion.Angle(expected, actual), Is.LessThan(RotTolDeg), $"[{t.Name}] {what} is not equivariant: off by {Quaternion.Angle(expected, actual):F3} deg");
         }
-
         static void SameScalar(float expected, float actual, Rigid t, string what)
         {
             if (float.IsNaN(expected) && float.IsNaN(actual)) return;
-            Assert.That(actual, Is.EqualTo(expected).Within(ScalarTol),
-                $"[{t.Name}] {what} moved with the body: it is a property of the pose, not of world placement");
+            Assert.That(actual, Is.EqualTo(expected).Within(ScalarTol), $"[{t.Name}] {what} moved with the body: it is a property of the pose, not of world placement");
         }
-
         // --------------------------------------------------------------------------------- arm
-
         static BasisArmSolveInput ArmInput()
         {
             BasisArmSolveInput i = default;
@@ -110,7 +67,6 @@ namespace Basis.Tests.IK
             i.HintIsTracker = true;
             return i;
         }
-
         [Test]
         public void ArmSolve_IsEquivariant()
         {
@@ -140,14 +96,10 @@ namespace Basis.Tests.IK
                 SameScalar(base_.ElbowAngleDeg, r.ElbowAngleDeg, t, "arm ElbowAngleDeg");
                 SameScalar(base_.TargetDistance, r.TargetDistance, t, "arm TargetDistance");
                 SameScalar(base_.HandError, r.HandError, t, "arm HandError");
-                Assert.That(r.AxisSource, Is.EqualTo(base_.AxisSource),
-                    $"[{t.Name}] arm picked a different bend axis source ({base_.AxisSource} -> {r.AxisSource}); " +
-                    "the pole strategy must not depend on which way the player faces");
+                Assert.That(r.AxisSource, Is.EqualTo(base_.AxisSource), $"[{t.Name}] arm picked a different bend axis source ({base_.AxisSource} -> {r.AxisSource}); " +"the pole strategy must not depend on which way the player faces");
             }
         }
-
         // --------------------------------------------------------------------------------- leg
-
         // Reach ratio ~0.87: comfortably bent. A leg at or past full extension is a KINEMATIC SINGULARITY --
         // the knee angle is pinned at the reach clamp and its conditioning collapses, so float noise alone
         // swings it. Equivariance still holds there in exact arithmetic, but the pose says nothing about the
@@ -169,7 +121,6 @@ namespace Basis.Tests.IK
             i.BendNormal = Vector3.right;
             return i;
         }
-
         [Test]
         public void LegSolve_IsEquivariant()
         {
@@ -198,13 +149,10 @@ namespace Basis.Tests.IK
                 SameScalar(base_.ReachRatio, r.ReachRatio, t, "leg ReachRatio");
                 SameScalar(base_.KneeAngleDeg, r.KneeAngleDeg, t, "leg KneeAngleDeg");
                 SameScalar(base_.FootError, r.FootError, t, "leg FootError");
-                Assert.That(r.AxisSource, Is.EqualTo(base_.AxisSource),
-                    $"[{t.Name}] leg picked a different bend axis source ({base_.AxisSource} -> {r.AxisSource})");
+                Assert.That(r.AxisSource, Is.EqualTo(base_.AxisSource), $"[{t.Name}] leg picked a different bend axis source ({base_.AxisSource} -> {r.AxisSource})");
             }
         }
-
         // --------------------------------------------------------------------------------- crouch offset
-
         [Test]
         public void CrouchOffset_IsEquivariant()
         {
@@ -235,54 +183,30 @@ namespace Basis.Tests.IK
                 SamePoint(t.Point(base_.HipsPos), r.HipsPos, t, "crouch HipsPos");
                 SameScalar(base_.SetbackMeters, r.SetbackMeters, t, "crouch setback");
                 SameScalar(base_.LeanDeg, r.LeanDeg, t, "crouch lean");
-                Assert.That(r.Applied, Is.EqualTo(base_.Applied),
-                    $"[{t.Name}] crouch engaged differently depending on world placement");
+                Assert.That(r.Applied, Is.EqualTo(base_.Applied), $"[{t.Name}] crouch engaged differently depending on world placement");
             }
         }
-
         // --------------------------------------------------------------------------------- hip hinge
-
         [Test]
         public void HipHinge_IsEquivariant()
         {
-            BasisHipHingeInput baseIn = default;
-            baseIn.HeadPos = new Vector3(0f, 1.30f, 0.35f); // leaning forward
-            baseIn.HipsPos = new Vector3(0f, 0.95f, 0f);
-            baseIn.HipsRot = Quaternion.Euler(0f, 20f, 0f);
-            baseIn.PlayerUp = Vector3.up;
-            baseIn.StartDeg = 30f;
-            baseIn.MaxAddDeg = 15f;
-
-            BasisHipHingeCore.Solve(baseIn, out BasisHipHingeResult base_);
+            Vector3 headPos = new Vector3(0f, 1.30f, 0.35f); // leaning forward
+            Vector3 hipsPos = new Vector3(0f, 0.95f, 0f);
+            Quaternion hipsRot = Quaternion.Euler(0f, 20f, 0f);
+            const float startDeg = 30f, maxAddDeg = 15f;
+            bool baseApplied = BasisHipHingeCore.Solve(headPos, hipsPos, hipsRot, Vector3.up, startDeg, maxAddDeg, out Quaternion baseHipsRot, out float baseLeanDeg, out float baseAddDeg);
 
             foreach (Rigid t in Transforms)
             {
-                BasisHipHingeInput i = baseIn;
-                i.HeadPos = t.Point(baseIn.HeadPos);
-                i.HipsPos = t.Point(baseIn.HipsPos);
-                i.HipsRot = t.Rot(baseIn.HipsRot);
-                i.PlayerUp = t.Dir(baseIn.PlayerUp);
+                bool applied = BasisHipHingeCore.Solve(t.Point(headPos), t.Point(hipsPos), t.Rot(hipsRot), t.Dir(Vector3.up), startDeg, maxAddDeg, out Quaternion newHipsRot, out float leanDeg, out float addDeg);
 
-                BasisHipHingeCore.Solve(i, out BasisHipHingeResult r);
-
-                SameRot(t.Rot(base_.HipsRot), r.HipsRot, t, "hip hinge HipsRot");
-                SameScalar(base_.LeanDeg, r.LeanDeg, t, "hip hinge LeanDeg");
-                SameScalar(base_.AddDeg, r.AddDeg, t, "hip hinge AddDeg");
-                Assert.That(r.Applied, Is.EqualTo(base_.Applied),
-                    $"[{t.Name}] hip hinge engaged differently depending on world placement");
+                SameRot(t.Rot(baseHipsRot), newHipsRot, t, "hip hinge HipsRot");
+                SameScalar(baseLeanDeg, leanDeg, t, "hip hinge LeanDeg");
+                SameScalar(baseAddDeg, addDeg, t, "hip hinge AddDeg");
+                Assert.That(applied, Is.EqualTo(baseApplied), $"[{t.Name}] hip hinge engaged differently depending on world placement");
             }
         }
-
         // --------------------------------------------------------------------------------- cervical
-
-        /// <summary>
-        /// Head pitches MUST span both sides of MaxHeadPitchDeg (80). The head-pitch clamp is a branch that only
-        /// runs past that threshold, and it used to measure pitch against WORLD up (world XZ as the horizon,
-        /// Cross(Vector3.up, ...) as the yaw axis) while the rest of the core used ReferenceUp -- so the core
-        /// disagreed with itself the moment the torso tilted. The first draft of this gate fed a 55 deg
-        /// look-down, never reached the branch, and passed while the bug was live. A gate that green-lights code
-        /// it never executes is worse than no gate: exercise the clamp.
-        /// </summary>
         static readonly Quaternion[] CervicalGazes =
         {
             Quaternion.Euler(0f, 0f, 0f),      // level
@@ -290,7 +214,6 @@ namespace Basis.Tests.IK
             Quaternion.Euler(88f, 25f, 0f),    // past the 80 deg clamp: look-down branch
             Quaternion.Euler(-88f, -40f, 0f),  // past the clamp the other way: look-up branch
         };
-
         [Test]
         public void Cervical_IsEquivariant()
         {
@@ -299,7 +222,6 @@ namespace Basis.Tests.IK
                 CervicalEquivarianceAtGaze(gaze);
             }
         }
-
         static void CervicalEquivarianceAtGaze(Quaternion gaze)
         {
             BasisCervicalInput baseIn = default;
@@ -338,73 +260,50 @@ namespace Basis.Tests.IK
                 SameScalar(base_.HipsForwardAmount, r.HipsForwardAmount, t, $"cervical HipsForwardAmount ({at})");
                 SameScalar(base_.ChestDownAmount, r.ChestDownAmount, t, $"cervical ChestDownAmount ({at})");
                 SameScalar(base_.HeadPitchClampedDeg, r.HeadPitchClampedDeg, t, $"cervical HeadPitchClampedDeg ({at})");
-                Assert.That(r.HasExtreme, Is.EqualTo(base_.HasExtreme),
-                    $"[{t.Name}] cervical extreme-look engaged differently depending on world placement ({at})");
+                Assert.That(r.HasExtreme, Is.EqualTo(base_.HasExtreme), $"[{t.Name}] cervical extreme-look engaged differently depending on world placement ({at})");
             }
         }
-
-        /// <summary>
-        /// Reproduces the old world-framed pitch clamp and asserts it violates equivariance under a torso tilt,
-        /// so the defect is measured rather than remembered. Yaw alone does NOT expose it (world up lies on the
-        /// yaw axis), which is why it survived: you have to bend over.
-        /// </summary>
         [Test]
         public void Legacy_CervicalPitchClamp_BreaksUnderTorsoTilt_WorldUpReference()
         {
             Quaternion gaze = Quaternion.Euler(88f, 25f, 0f); // past the 80 deg clamp
 
-            float basePitch = LegacyWorldFramedPitchDeg(gaze);
-            float worst = 0f;
+            float basePitch = LegacyWorldFramedPitchDeg(gaze), worst = 0f;
             foreach (Rigid t in Transforms)
             {
                 float measured = LegacyWorldFramedPitchDeg(t.Rot(gaze));
                 worst = Mathf.Max(worst, Mathf.Abs(Mathf.DeltaAngle(basePitch, measured)));
             }
 
-            Assert.That(worst, Is.GreaterThan(20f),
-                $"the legacy world-framed head-pitch clamp is expected to break under a torso tilt (worst {worst:F1} deg); " +
-                "if it no longer does, the defect model is wrong");
+            Assert.That(worst, Is.GreaterThan(20f), $"the legacy world-framed head-pitch clamp is expected to break under a torso tilt (worst {worst:F1} deg); " +"if it no longer does, the defect model is wrong");
         }
-
-        /// <summary>The pitch measurement exactly as BasisCervicalSolveCore computed it before the fix.</summary>
         static float LegacyWorldFramedPitchDeg(Quaternion headRot)
         {
             Vector3 hf = headRot * Vector3.forward;
             float horizMag = Mathf.Sqrt(hf.x * hf.x + hf.z * hf.z);
             return (horizMag > 1e-6f) ? Mathf.Atan2(-hf.y, horizMag) * Mathf.Rad2Deg : (hf.y < 0f ? 90f : -90f);
         }
-
         // --------------------------------------------------------------------------------- twist
-
         [Test]
         public void TwistSolve_IsEquivariant()
         {
-            BasisTwistSolveInput baseIn = default;
-            baseIn.ParentRotation = Quaternion.Euler(10f, 40f, -75f);
-            baseIn.ChildRotation = Quaternion.Euler(10f, 40f, -20f); // rolled about the bone axis
-            baseIn.ParentToChild = new Vector3(0.26f, -0.05f, 0f);
-            baseIn.Fraction = 0.5f;
-
-            BasisTwistSolveCore.Solve(baseIn, out BasisTwistSolveResult base_);
+            Quaternion parentRot = Quaternion.Euler(10f, 40f, -75f);
+            Quaternion childRot = Quaternion.Euler(10f, 40f, -20f); // rolled about the bone axis
+            Vector3 parentToChild = new Vector3(0.26f, -0.05f, 0f);
+            const float fraction = 0.5f;
+            bool baseApply = BasisTwistSolveCore.Solve(parentRot, childRot, parentToChild, fraction, default, default, out Quaternion baseTwistWorld, out _, out float baseTwistAngleDeg);
 
             foreach (Rigid t in Transforms)
             {
-                BasisTwistSolveInput i = baseIn;
-                i.ParentRotation = t.Rot(baseIn.ParentRotation);
-                i.ChildRotation = t.Rot(baseIn.ChildRotation);
-                i.ParentToChild = t.Dir(baseIn.ParentToChild);
+                bool apply = BasisTwistSolveCore.Solve(t.Rot(parentRot), t.Rot(childRot), t.Dir(parentToChild), fraction, default, default, out Quaternion twistWorld, out _, out float twistAngleDeg);
 
-                BasisTwistSolveCore.Solve(i, out BasisTwistSolveResult r);
-
-                Assert.That(r.Apply, Is.EqualTo(base_.Apply), $"[{t.Name}] twist Apply flipped");
-                if (!base_.Apply) continue;
-                SameRot(t.Rot(base_.TwistWorldRotation), r.TwistWorldRotation, t, "twist TwistWorldRotation");
-                SameScalar(base_.TwistAngleDeg, r.TwistAngleDeg, t, "twist TwistAngleDeg");
+                Assert.That(apply, Is.EqualTo(baseApply), $"[{t.Name}] twist Apply flipped");
+                if (!baseApply) continue;
+                SameRot(t.Rot(baseTwistWorld), twistWorld, t, "twist TwistWorldRotation");
+                SameScalar(baseTwistAngleDeg, twistAngleDeg, t, "twist TwistAngleDeg");
             }
         }
-
         // --------------------------------------------------------------------------------- elbow protect
-
         [Test]
         public void ElbowProtect_IsEquivariant()
         {
@@ -441,9 +340,7 @@ namespace Basis.Tests.IK
 
                 BasisElbowProtectCore.Solve(i, out BasisElbowProtectResult r);
 
-                Assert.That(r.Engaged, Is.EqualTo(base_.Engaged),
-                    $"[{t.Name}] elbow protect engaged differently depending on world placement -- " +
-                    "torso collision must not care which way the player faces");
+                Assert.That(r.Engaged, Is.EqualTo(base_.Engaged), $"[{t.Name}] elbow protect engaged differently depending on world placement -- " +"torso collision must not care which way the player faces");
                 SamePoint(t.Point(base_.DesiredElbow), r.DesiredElbow, t, "elbow protect DesiredElbow");
                 SamePoint(t.Point(base_.ElbowCenter), r.ElbowCenter, t, "elbow protect ElbowCenter");
                 SameScalar(base_.WorstPenetration, r.WorstPenetration, t, "elbow protect WorstPenetration");
@@ -451,9 +348,7 @@ namespace Basis.Tests.IK
                 SameScalar(base_.ResidualClearance, r.ResidualClearance, t, "elbow protect ResidualClearance");
             }
         }
-
         // --------------------------------------------------------------------------------- swivel smoother
-
         [Test]
         public void SwivelSmoother_IsEquivariant()
         {
@@ -491,21 +386,7 @@ namespace Basis.Tests.IK
                 SameScalar(base_.SmoothSwivelDeg, r.SmoothSwivelDeg, t, "swivel SmoothSwivelDeg");
             }
         }
-
         // --------------------------------------------------------------------------------- precision vs distance
-
-        /// <summary>
-        /// The OTHER half of "does the avatar behave the same wherever you stand": float32 precision.
-        ///
-        /// Equivariance above is a statement about the reference FRAME and is gated tightly. This gates
-        /// DISTANCE, which is a genuinely different failure: a solve far from the world origin differences two
-        /// large coordinates to recover a 30 cm bone, and the mantissa runs out. Nothing is wrong with the
-        /// maths -- there is simply less of it left. Worth measuring rather than tolerating, because it is the
-        /// number that says how large a world can get before the IK visibly degrades.
-        ///
-        /// Pure translation, so the solved pose must translate with it and every scalar must hold still.
-        /// The measured curve is written to the test log.
-        /// </summary>
         [Test]
         public void ArmSolve_DegradesGracefully_FarFromWorldOrigin()
         {
@@ -513,13 +394,11 @@ namespace Basis.Tests.IK
             BasisArmSolveCore.Solve(baseIn, out BasisArmSolveResult base_);
 
             var log = new System.Text.StringBuilder("arm IK precision vs distance from world origin:\n");
-            float worstPosMmAtOneKm = 0f;
-            float worstAngDegAtOneKm = 0f;
+            float worstPosMmAtOneKm = 0f, worstAngDegAtOneKm = 0f;
 
             foreach (float d in new[] { 0f, 100f, 1_000f, 10_000f })
             {
                 Vector3 t = new Vector3(d * 0.70710678f, 0f, d * 0.70710678f);
-
                 BasisArmSolveInput i = baseIn;
                 i.Shoulder = baseIn.Shoulder + t;
                 i.Elbow = baseIn.Elbow + t;
@@ -545,10 +424,8 @@ namespace Basis.Tests.IK
 
             // A millimetre of elbow drift is far below anything visible; if this ever trips, the solve has
             // started differencing large coordinates somewhere it did not before.
-            Assert.That(worstPosMmAtOneKm, Is.LessThan(1f),
-                $"elbow drifted {worstPosMmAtOneKm:F3} mm within 1 km of the origin\n{log}");
-            Assert.That(worstAngDegAtOneKm, Is.LessThan(0.5f),
-                $"elbow angle drifted {worstAngDegAtOneKm:F3} deg within 1 km of the origin\n{log}");
+            Assert.That(worstPosMmAtOneKm, Is.LessThan(1f), $"elbow drifted {worstPosMmAtOneKm:F3} mm within 1 km of the origin\n{log}");
+            Assert.That(worstAngDegAtOneKm, Is.LessThan(0.5f), $"elbow angle drifted {worstAngDegAtOneKm:F3} deg within 1 km of the origin\n{log}");
         }
     }
 }

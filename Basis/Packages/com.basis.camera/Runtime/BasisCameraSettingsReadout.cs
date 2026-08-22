@@ -38,7 +38,8 @@ public static class BasisCameraSettingsReadout
         Builder.Clear();
 
         Section("camera.placement");
-        Row("camera.pinSpace", PinSpaceLabel(pinSpace));
+        Row("camera.anchor", PinSpaceLabel(pinSpace));
+        Row("camera.anchorFollowsBody", OnOff(settings.anchorFollowsBody));
 
         Section("camera.lens");
         Row("camera.fieldOfView", Number(settings.fov));
@@ -56,6 +57,13 @@ public static class BasisCameraSettingsReadout
         Row("camera.focusMode", BasisLocalization.Get(settings.useManualFocus ? "camera.focusManual" : "camera.focusAuto"));
         Row("camera.focusDistance", Number(settings.depthFocusDistance));
 
+        Section("camera.body");
+        Row("camera.body.kind", BasisLocalization.Get(
+            BasisCameraBodies.TitleKey(BasisCameraBodies.Sanitize(settings.cameraBody))));
+
+        BasisCameraBodyTraits body = BasisCameraBodies.Get(BasisCameraBodies.Sanitize(settings.cameraBody));
+        if (body.HasFlash) Row("camera.body.flash", OnOff(settings.flashEnabled));
+
         Section("camera.exposureColour");
         Row("camera.exposure", ExposureLabel(settings.exposureIndex));
         Row("camera.exposureOnCamera", OnOff(settings.showExposureOnCamera));
@@ -64,6 +72,10 @@ public static class BasisCameraSettingsReadout
         Row("camera.hueShift", Number(settings.hueShift));
         Row("camera.whiteBalanceTemp", Number(settings.whiteBalanceTemperature));
         Row("camera.whiteBalanceTint", Number(settings.whiteBalanceTint));
+        Row("camera.splitToning.shadows", Swatch(settings.splitToningShadows));
+        Row("camera.splitToning.highlights", Swatch(settings.splitToningHighlights));
+        Row("camera.splitToning.balance", Number(settings.splitToningBalance));
+        Row("camera.filmLift", Number(settings.filmLift));
         Row("camera.tonemapping", TonemappingLabel(settings.captureTonemapping));
 
         Section("camera.effects");
@@ -74,6 +86,11 @@ public static class BasisCameraSettingsReadout
         Row("camera.vignetteSmoothness", Number(settings.vignetteSmoothness));
         Row("camera.chromaticAberration", Number(settings.chromaticAberration));
         Row("camera.filmGrain", Number(settings.filmGrain));
+        Row("camera.filmGrain.type", FilmGrainTypeLabel(settings.filmGrainType));
+        Row("camera.filmGrain.response", Number(settings.filmGrainResponse));
+        Row("camera.bloomTint", Swatch(settings.bloomTint));
+        Row("camera.vignetteColour", Swatch(settings.vignetteColour));
+        Row("camera.vignetteRounded", OnOff(settings.vignetteRounded));
         Row("camera.lensDistortion", Number(settings.lensDistortion));
         Row("camera.lensDistortionScale", Number(settings.lensDistortionScale));
         Row("camera.panini", Number(settings.paniniDistance));
@@ -82,7 +99,9 @@ public static class BasisCameraSettingsReadout
         Row("camera.motionBlurClamp", Number(settings.motionBlurClamp));
         Row("camera.motionBlurQuality", MotionBlurQualityLabel(settings.motionBlurQuality));
         Row("camera.motionBlurMode", MotionBlurModeLabel(settings.motionBlurMode));
-        Row("camera.volumetricFog", Number(settings.VolumetricFogVolumedensity));
+        Row("settings.graphics.fog.override", OnOff(settings.overrideVolumetricFog));
+        if (settings.overrideVolumetricFog)
+            Row("settings.graphics.fog.density", Number(settings.VolumetricFogVolumedensity));
 
         Section("camera.output");
         Row("camera.photoResolution", ResolutionLabel(metaData, settings.resolutionIndex));
@@ -161,6 +180,21 @@ public static class BasisCameraSettingsReadout
     /// <summary>Trailing zeros are noise on a readout — 40 and 2.8 rather than 40.00 and 2.80.</summary>
     private static string Number(float value) => value.ToString("0.###");
 
+    /// <summary>A colour as the hex the panel's own colour rows show, which is what can be typed back in.</summary>
+    private static string Swatch(Color value) => "#" + ColorUtility.ToHtmlStringRGB(value);
+
+    /// <summary>
+    /// The grain texture by name. Written out rather than looked up in the language table: these are
+    /// URP's own identifiers and a translated "Large01" would name nothing.
+    /// </summary>
+    private static string FilmGrainTypeLabel(int type)
+    {
+        int highest = (int)UnityEngine.Rendering.Universal.FilmGrainLookup.Large02;
+        return type >= 0 && type <= highest
+            ? ((UnityEngine.Rendering.Universal.FilmGrainLookup)type).ToString()
+            : type.ToString();
+    }
+
     private static string Vector(Vector3 value) =>
         $"{Number(value.x)}, {Number(value.y)}, {Number(value.z)}";
 
@@ -210,11 +244,13 @@ public static class BasisCameraSettingsReadout
         switch (pinSpace)
         {
             case (int)BasisHandHeldCameraInteractable.CameraPinSpace.HandHeld:
-                return BasisLocalization.Get("camera.pinSpace.handHeld");
+                return BasisLocalization.Get("camera.anchor.hand");
             case (int)BasisHandHeldCameraInteractable.CameraPinSpace.PlaySpace:
-                return BasisLocalization.Get("camera.pinSpace.playSpace");
+                return BasisLocalization.Get("camera.anchor.playspace");
+            case (int)BasisHandHeldCameraInteractable.CameraPinSpace.Attached:
+                return BasisLocalization.Get("camera.anchor.attached");
             default:
-                return BasisLocalization.Get("camera.pinSpace.worldSpace");
+                return BasisLocalization.Get("camera.anchor.world");
         }
     }
 
@@ -264,6 +300,7 @@ public static class BasisCameraSettingsReadout
             case BasisCameraBackgroundMode.White: return BasisLocalization.Get("camera.background.white");
             case BasisCameraBackgroundMode.Magenta: return BasisLocalization.Get("camera.background.magenta");
             case BasisCameraBackgroundMode.Custom: return BasisLocalization.Get("camera.background.custom");
+            case BasisCameraBackgroundMode.Transparent: return BasisLocalization.Get("camera.background.transparent");
             default: return BasisLocalization.Get("camera.background.world");
         }
     }

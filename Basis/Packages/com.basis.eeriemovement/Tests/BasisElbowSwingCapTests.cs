@@ -2,23 +2,11 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using Basis.IK;
-
 namespace Basis.Tests.IK
 {
-    /// <summary>
-    /// Guards <see cref="BasisElbowSwingCapCore"/> -- the stateful half of the reach-behind fix. It keeps
-    /// the accurate elbow field (correct out-and-back pose) and bounds how fast the bend may rotate
-    /// relative to the HAND, so a topological core flips the elbow no faster than a human elbow tracks
-    /// (gain ~1x, p99 4.6x measured) instead of teleporting.
-    ///
-    /// These drive the core through the SAME sequence the job feeds it: a hand sweeping through
-    /// BasisElbowFieldModel's down-and-back core (azimuth ~130, ~20 below level), which is where the raw
-    /// field flips ~70 deg in half a degree of hand motion.
-    /// </summary>
     public class BasisElbowSwingCapTests
     {
         const float k_MaxGain = BasisElbowSwingCapCore.MaxGain;
-
         static float3 Dir(float azDeg, float elDeg)
         {
             float az = azDeg * Mathf.Deg2Rad, el = elDeg * Mathf.Deg2Rad;
@@ -26,23 +14,18 @@ namespace Basis.Tests.IK
         }
         static float3 FieldBend(float3 dir)   // the OLD field's raw bend (what ships as default), perp to dir
             => BasisElbowFieldModel.BendDirection(dir, BasisElbowFieldModel.Elbow(dir), out _);
-
-        /// <summary>Run a hand trajectory through the cap, returning the capped bend per frame.</summary>
         static float3[] Run(float3[] hand, float maxGain)
         {
             var outb = new float3[hand.Length];
             float3 prevBend = default, prevAxis = default; bool init = false;
             for (int i = 0; i < hand.Length; i++)
             {
-                float3 axis = math.normalize(hand[i]);
-                float3 raw = FieldBend(axis);
-                float3 capped = !init ? raw
-                    : BasisElbowSwingCapCore.Apply(prevBend, prevAxis, axis, raw, maxGain);
+                float3 axis = math.normalize(hand[i]), raw = FieldBend(axis);
+                float3 capped = !init ? raw : BasisElbowSwingCapCore.Apply(prevBend, prevAxis, axis, raw, maxGain);
                 outb[i] = capped; prevBend = capped; prevAxis = axis; init = true;
             }
             return outb;
         }
-
         static float Transport(float3 prev, float3 axis, out float3 tp)
         {
             tp = prev - axis * math.dot(prev, axis);
@@ -50,13 +33,6 @@ namespace Basis.Tests.IK
             if (l > 1e-6f) tp /= l;
             return l;
         }
-
-        /// <summary>
-        /// ⭐⭐ THE BOUND. Sweeping the hand through the core, the capped bend may never rotate (about the
-        /// current shoulder->hand axis) by more than MaxGain times the hand's own rotation that frame. That
-        /// is the whole guarantee: the reach-behind flip is bounded to the human tracking ceiling. On the
-        /// raw field this same sweep flips ~70 deg in one 0.5-degree step (gain ~140x); capped it is <= 5x.
-        /// </summary>
         [Test]
         public void TheCap_BoundsBendRotation_ToTheHumanGain_ThroughTheCore()
         {
@@ -72,24 +48,15 @@ namespace Basis.Tests.IK
                 // atan2 angle metric, matching the core's own budget arithmetic: Vector3.Angle's acos
                 // loses ~1.3% at these 0.17-degree steps (acos ulp amplification near dot=1), which is
                 // wider than this assert's 1% slack and reads as a phantom cap leak.
-                float3 prevAxisN = math.normalize(hand[i - 1]);
-                float3 axis = math.normalize(hand[i]);
+                float3 prevAxisN = math.normalize(hand[i - 1]), axis = math.normalize(hand[i]);
                 float dHand = math.degrees(math.atan2(math.length(math.cross(prevAxisN, axis)), math.dot(prevAxisN, axis)));
                 if (dHand < 1e-4f) continue;
                 Transport(capped[i - 1], axis, out float3 tp);
                 float rot = math.degrees(math.atan2(math.length(math.cross(tp, capped[i])), math.dot(tp, capped[i])));
                 worstGain = Mathf.Max(worstGain, rot / dHand);
             }
-            Assert.LessOrEqual(worstGain, k_MaxGain + 0.05f,
-                $"the capped bend rotated {worstGain:F1}x the hand through the core -- the cap ({k_MaxGain}x) " +
-                "did not bind. That is the reach-behind snap leaking through.");
+            Assert.LessOrEqual(worstGain, k_MaxGain + 0.05f, $"the capped bend rotated {worstGain:F1}x the hand through the core -- the cap ({k_MaxGain}x) " +"did not bind. That is the reach-behind snap leaking through.");
         }
-
-        /// <summary>
-        /// ⭐ THE NO-OP. Everywhere the field turns slower than the cap -- ordinary reaching, the whole
-        /// workspace outside the ~2-degree cores -- the cap must return the field BIT-FOR-BIT, so it adds
-        /// no lag and cannot drift. A front reach never approaches a core.
-        /// </summary>
         [Test]
         public void TheCap_IsExactlyTheField_OnOrdinaryReaching()
         {
@@ -100,17 +67,9 @@ namespace Basis.Tests.IK
             for (int i = 0; i < n; i++)
             {
                 float3 raw = FieldBend(math.normalize(hand[i]));
-                Assert.AreEqual(0f, math.distance(raw, capped[i]), 1e-5f,
-                    $"the cap changed the bend at a non-core pose (frame {i}) -- it must be a bit-exact no-op " +
-                    "where the field is slower than the cap, or it lags ordinary reaching");
+                Assert.AreEqual(0f, math.distance(raw, capped[i]), 1e-5f, $"the cap changed the bend at a non-core pose (frame {i}) -- it must be a bit-exact no-op " +"where the field is slower than the cap, or it lags ordinary reaching");
             }
         }
-
-        /// <summary>
-        /// ⭐ FRAMERATE INDEPENDENCE. It is a GAIN cap (per hand-step), not a velocity cap, precisely so the
-        /// same hand path gives the same pose at any frame rate. Sample the same sweep at 1x and 2x density;
-        /// the poses at the shared times must agree. (The velocity blends this project tried did not.)
-        /// </summary>
         [Test]
         public void TheCap_IsFramerateIndependent()
         {
@@ -125,25 +84,14 @@ namespace Basis.Tests.IK
             float worst = 0f;
             for (int i = 0; i < a.Length; i++)
                 worst = Mathf.Max(worst, Vector3.Angle((Vector3)a[i], (Vector3)b[2 * i]));
-            Assert.Less(worst, 1.5f,
-                $"the same reach-behind sweep gave poses {worst:F1} deg apart at 1x vs 2x frame density -- a " +
-                "gain cap must be framerate-independent");
+            Assert.Less(worst, 1.5f, $"the same reach-behind sweep gave poses {worst:F1} deg apart at 1x vs 2x frame density -- a " +"gain cap must be framerate-independent");
         }
-
-        /// <summary>
-        /// ⭐ SELF-CORRECTING. Unlike the reverted hold-the-pole coast, this always chases the field, so a
-        /// stale or wrong carried pole (a tracker just dropped, a hitch) re-acquires the field within a few
-        /// frames rather than freezing. Seed a deliberately wrong pole and sweep a normal reach; it must
-        /// converge to the field.
-        /// </summary>
         [Test]
         public void TheCap_ReacquiresTheField_FromAStalePole()
         {
-            float3 axisStart = math.normalize(Dir(10f, -10f));
-            float3 raw0 = FieldBend(axisStart);
+            float3 axisStart = math.normalize(Dir(10f, -10f)), raw0 = FieldBend(axisStart);
             float3 wrong = math.normalize(math.cross(axisStart, raw0));   // 90 deg off, perpendicular, on the circle
             float3 prevBend = wrong, prevAxis = axisStart;
-
             float dev = 180f;
             for (int i = 1; i <= 60; i++)
             {
@@ -153,24 +101,17 @@ namespace Basis.Tests.IK
                 dev = Vector3.Angle((Vector3)capped, (Vector3)raw);
                 prevBend = capped; prevAxis = axis;
             }
-            Assert.Less(dev, 2f, $"after 60 frames of ordinary reaching the capped bend was still {dev:F1} deg " +
-                "off the field -- it must re-acquire, not hold a stale pole");
+            Assert.Less(dev, 2f, $"after 60 frames of ordinary reaching the capped bend was still {dev:F1} deg " +"off the field -- it must re-acquire, not hold a stale pole");
         }
-
-        /// <summary>The output must always be a UNIT vector PERPENDICULAR to the shoulder->hand axis -- it is
-        /// the elbow's circle, and the two-bone solver relies on it.</summary>
         [Test]
         public void TheCappedBend_StaysUnitAndPerpendicular()
         {
             var rng = new System.Random(1234);
             for (int t = 0; t < 5000; t++)
             {
-                float3 curAxis = math.normalize(new float3(
-                    (float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1)));
-                float3 prevAxis = math.normalize(curAxis + 0.1f * new float3(
-                    (float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1)));
-                float3 raw = FieldBend(curAxis);
-                float3 pRaw = FieldBend(prevAxis);
+                float3 curAxis = math.normalize(new float3((float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1)));
+                float3 prevAxis = math.normalize(curAxis + 0.1f * new float3((float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1), (float)(rng.NextDouble() * 2 - 1)));
+                float3 raw = FieldBend(curAxis), pRaw = FieldBend(prevAxis);
                 if (!math.all(math.isfinite(raw)) || !math.all(math.isfinite(pRaw))) continue;
                 float3 b = BasisElbowSwingCapCore.Apply(pRaw, prevAxis, curAxis, raw, k_MaxGain);
                 Assert.IsTrue(math.all(math.isfinite(b)), $"cap went non-finite at axis {curAxis}");

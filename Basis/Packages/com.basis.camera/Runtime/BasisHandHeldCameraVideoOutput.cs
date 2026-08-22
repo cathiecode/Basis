@@ -92,9 +92,27 @@ public partial class BasisHandHeldCamera
 #if BASIS_VIDEO_OUTPUT_SUPPORTED
     /// <summary>Sender names in use process-wide, so simultaneous cameras publish separate outputs (#854).</summary>
     private static readonly HashSet<string> ActiveVideoOutputNames = new HashSet<string>();
+
+    /// <summary>The name actually published, which carries the duplicate suffix the setting must not.</summary>
+    private string activeSenderName = string.Empty;
 #endif
+    public Shader TransparentVideoOutputShader;
+    private static readonly int TransparentMaskTexId = Shader.PropertyToID("_MaskTex");
+    private static readonly int TransparentScaleOffsetId = Shader.PropertyToID("_ScaleOffset");
+
     private RenderTexture videoStreamTexture;
+    private RenderTexture transparentVideoMaskTexture;
+    private Material transparentVideoOutputMaterial;
     private BasisRenderRateLimiter videoPacing;
+
+    private bool CanPreserveVideoOutputAlpha()
+    {
+#if BASIS_VIDEO_OUTPUT_SUPPORTED
+        return IsVideoOutputActive && videoSink != null && videoSink.SupportsAlpha;
+#else
+        return false;
+#endif
+    }
 
     // ---- MJPEG web stream ----------------------------------------------------------
     // Kept independent of the platform sink above rather than folded in beside it: the two
@@ -109,7 +127,22 @@ public partial class BasisHandHeldCamera
 
     private BasisWebVideoOutputSink webSink;
     private RenderTexture webStreamTexture;
-    private BasisRenderRateLimiter webPacing;
+
+    /// <summary>
+    /// Paces what the stream publishes. Not a <see cref="BasisRenderRateLimiter"/>: that one is
+    /// asked "may this frame run" and answers off its own clock, which is exactly what a stream
+    /// hanging off another rate-limited camera must not do.
+    /// </summary>
+    private BasisStreamFramePacer webStreamPacer;
+
+    /// <summary>
+    /// Set when the capture camera finishes a render, cleared when that render has been handed
+    /// to the stream. The one signal that a newer picture exists.
+    /// </summary>
+    private bool streamFrameIsFresh;
+
+    /// <summary>Called from the render pipeline when the capture camera has finished drawing.</summary>
+    private void MarkStreamFrameFresh() => streamFrameIsFresh = true;
 
     /// <summary>Address to open, or empty when not serving.</summary>
     public string WebStreamUrl => webSink != null ? webSink.Url : string.Empty;
@@ -119,6 +152,15 @@ public partial class BasisHandHeldCamera
 
     /// <summary>True when any live output is consuming the render texture.</summary>
     public bool IsAnyVideoOutputActive => IsVideoOutputActive || IsWebStreamActive;
+
+    /// <summary>
+    /// Why the last attempt to start a live output refused, or empty when none did. Every refusal
+    /// below returned a bare false, so the toggle sprang back with nothing said anywhere the
+    /// operator was looking — and the two that do log are silenced by the Disable Logging setting
+    /// and by a tag filter. The panel reads this so a refusal always says which one it was.
+    /// </summary>
+    [NonSerialized]
+    public string LiveOutputFailure = string.Empty;
 
     // ---- transport selection -------------------------------------------------------
 
@@ -151,12 +193,39 @@ public partial class BasisHandHeldCamera
     public bool StartLiveOutput()
     {
         StopLiveOutput();
-        return VideoTransport == BasisVideoTransport.Web ? StartWebStream() : StartVideoOutput();
+        LiveOutputFailure = string.Empty;
+
+        bool started;
+        try
+        {
+            started = VideoTransport == BasisVideoTransport.Web ? StartWebStream() : StartVideoOutput();
+        }
+        catch (Exception e)
+        {
+            // An exception on the way up left the toggle the only thing that had moved: the sink
+            // was half-built, the render texture and the claimed sender name were still held, and
+            // the panel never reached the line that puts the switch back. Unwound and reported as
+            // a refusal like any other.
+            started = false;
+            LiveOutputFailure = $"{GetVideoTransportName(VideoTransport)} threw on start ({e.GetType().Name}: {e.Message}).";
+            BasisDebug.LogError($"{LiveOutputFailure} {e}", BasisDebug.LogTag.Camera);
+            StopWebStream();
+            StopVideoOutput();
+        }
+        if (started) return true;
+
+        if (string.IsNullOrEmpty(LiveOutputFailure))
+        {
+            LiveOutputFailure = $"{GetVideoTransportName(VideoTransport)} refused to start and gave no reason.";
+        }
+        BasisDebug.LogError($"Live output refused: {LiveOutputFailure}", BasisDebug.LogTag.Camera);
+        return false;
     }
 
     /// <summary>Stops every transport, whichever one happens to be up.</summary>
     public void StopLiveOutput()
     {
+        LiveOutputFailure = string.Empty;
         StopWebStream();
         StopVideoOutput();
     }
@@ -180,7 +249,11 @@ public partial class BasisHandHeldCamera
     public bool StartWebStream()
     {
         StopWebStream();
-        if (captureCamera == null) return false;
+        if (captureCamera == null)
+        {
+            LiveOutputFailure = "This camera has no capture camera to publish.";
+            return false;
+        }
 
         BasisVideoOutputSettings settings = VideoOutputSettings;
         settings.Width = Mathf.Clamp(settings.Width, 16, 8192);
@@ -192,6 +265,7 @@ public partial class BasisHandHeldCamera
         webSink = new BasisWebVideoOutputSink();
         if (!webSink.Start(port))
         {
+            LiveOutputFailure = webSink.FailureMessage ?? $"No free port from {port} upwards to serve the stream on.";
             webSink = null;
             return false;
         }
@@ -204,7 +278,10 @@ public partial class BasisHandHeldCamera
         };
         webStreamTexture.Create();
 
-        webPacing = default;
+        webStreamPacer.Reset();
+        // The render texture already holds a frame, so the first viewer gets a picture without
+        // waiting for the capture camera to come round again.
+        streamFrameIsFresh = true;
         IsWebStreamActive = true;
         UpdateRenderGate();
         BasisDebug.Log($"Web stream started at {webSink.Url} — open it in a browser, or add it to OBS as a Browser source.", BasisDebug.LogTag.Camera);
@@ -276,11 +353,21 @@ public partial class BasisHandHeldCamera
             return;
         }
         // Nobody watching: skip the blit as well as the encode, so an idle stream is free.
-        if (!webSink.HasClients) return;
+        if (!webSink.HasClients)
+        {
+            webStreamPacer.Reset();
+            return;
+        }
 
         Texture source = renderTexture;
-        if (source == null) return;
-        if (!webPacing.AllowThisFrame(Time.unscaledDeltaTime, VideoOutputSettings.FrameRate, true)) return;
+
+        // Publish renders, not clock ticks — see BasisStreamFramePacer. The sink is asked whether
+        // it would take a frame before the slot is spent, so a tick that arrives mid-readback
+        // costs nothing and the next one sends the newest picture rather than waiting out another
+        // whole interval.
+        bool ready = source != null && webSink.CanAcceptFrame;
+        if (!webStreamPacer.AllowThisFrame(Time.unscaledDeltaTime, VideoOutputSettings.FrameRate, streamFrameIsFresh, ready)) return;
+        streamFrameIsFresh = false;
 
         GetStreamBlitCrop(source, webStreamTexture, out Vector2 scale, out Vector2 offset);
         Graphics.Blit(source, webStreamTexture, scale, offset);
@@ -292,19 +379,33 @@ public partial class BasisHandHeldCamera
     {
 #if BASIS_VIDEO_OUTPUT_SUPPORTED
         StopVideoOutput();
-        if (captureCamera == null) return false;
+        if (captureCamera == null)
+        {
+            LiveOutputFailure = "This camera has no capture camera to publish.";
+            return false;
+        }
+
+        // A film body has no output to stream. Refused rather than started silently and dropped,
+        // so the panel's own failure line is what says so.
+        if (!BodyAllowsLiveFeed)
+        {
+            LiveOutputFailure = $"A {BodyTraits.Kind} body has no output socket — it only shows its own viewfinder. Switch the body on the Presets tab.";
+            return false;
+        }
         BasisVideoOutputSettings settings = VideoOutputSettings;
         settings.Width = Mathf.Clamp(settings.Width, 16, 8192);
         settings.Height = Mathf.Clamp(settings.Height, 16, 8192);
 
+        // The suffix is kept off settings.SenderName. Written back, a second camera turned the
+        // operator's own name into "Basis Camera 2" permanently, and the start after that read
+        // that as the base and published "Basis Camera 2 2".
         string baseName = string.IsNullOrEmpty(settings.SenderName) ? "Basis Camera" : settings.SenderName;
-        string senderName = baseName;
-        for (int Suffix = 2; ActiveVideoOutputNames.Contains(senderName); Suffix++)
+        activeSenderName = baseName;
+        for (int Suffix = 2; ActiveVideoOutputNames.Contains(activeSenderName); Suffix++)
         {
-            senderName = $"{baseName} {Suffix}";
+            activeSenderName = $"{baseName} {Suffix}";
         }
-        settings.SenderName = senderName;
-        ActiveVideoOutputNames.Add(senderName);
+        ActiveVideoOutputNames.Add(activeSenderName);
 
 #if BASIS_VIDEO_OUTPUT_V4L2
         RenderTextureFormat format = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.BGRA32) ? RenderTextureFormat.BGRA32 : RenderTextureFormat.ARGB32;
@@ -319,17 +420,29 @@ public partial class BasisHandHeldCamera
         videoStreamTexture = new RenderTexture(new RenderTextureDescriptor(settings.Width, settings.Height, format, 0) { sRGB = true }) { name = "BasisVideoOutput" };
         videoStreamTexture.Create();
 
-        if (!videoSink.Start(settings, captureCamera.gameObject))
+        string requestedName = settings.SenderName;
+        settings.SenderName = activeSenderName;
+        bool sinkStarted = videoSink.Start(settings, captureCamera.gameObject);
+        settings.SenderName = requestedName;
+        if (!sinkStarted)
         {
+            // Read before the stop: that clears the sink, and its own account of why it would not
+            // start is the only thing that separates a missing shader from the wrong graphics API.
+            LiveOutputFailure = videoSink.FailureMessage ?? $"{VideoOutputBackendName} would not start.";
             StopVideoOutput();
             return false;
         }
         videoPacing = default;
         IsVideoOutputActive = true;
+        if (backgroundMode == BasisCameraBackgroundMode.Transparent && videoSink.SupportsAlpha)
+        {
+            PrepareTransparentVideoOutputResources(renderTexture);
+        }
         UpdateRenderGate();
-        BasisDebug.Log($"{VideoOutputBackendName} output started as '{settings.SenderName}': {settings.Width}x{settings.Height} @ {settings.FrameRate}fps", BasisDebug.LogTag.Camera);
+        BasisDebug.Log($"{VideoOutputBackendName} output started as '{activeSenderName}': {settings.Width}x{settings.Height} @ {settings.FrameRate}fps", BasisDebug.LogTag.Camera);
         return true;
 #else
+        LiveOutputFailure = "This build carries no shared-texture video backend — use the web stream instead.";
         return false;
 #endif
     }
@@ -340,7 +453,11 @@ public partial class BasisHandHeldCamera
 #if BASIS_VIDEO_OUTPUT_SUPPORTED
         bool wasActive = IsVideoOutputActive;
         IsVideoOutputActive = false;
-        ActiveVideoOutputNames.Remove(VideoOutputSettings.SenderName);
+        if (!string.IsNullOrEmpty(activeSenderName))
+        {
+            ActiveVideoOutputNames.Remove(activeSenderName);
+            activeSenderName = string.Empty;
+        }
         if (videoSink != null)
         {
             videoSink.Stop();
@@ -352,6 +469,7 @@ public partial class BasisHandHeldCamera
             Destroy(videoStreamTexture);
             videoStreamTexture = null;
         }
+        ReleaseTransparentVideoOutputResources();
         if (wasActive) UpdateRenderGate();
 #endif
     }
@@ -389,12 +507,141 @@ public partial class BasisHandHeldCamera
 #if BASIS_VIDEO_OUTPUT_V4L2
         // Readback of Unity RTs is bottom-up; V4L2 wants rows top-down. Flipping the crop means
         // negating its scale and moving the offset to the far edge of the same band.
-        Graphics.Blit(source, videoStreamTexture, new Vector2(scale.x, -scale.y), new Vector2(offset.x, offset.y + scale.y));
-#else
-        Graphics.Blit(source, videoStreamTexture, scale, offset);
+        scale.y = -scale.y;
+        offset.y += -scale.y;
 #endif
-        videoSink.PushFrame(videoStreamTexture);
+
+        bool transparent = backgroundMode == BasisCameraBackgroundMode.Transparent && videoSink.SupportsAlpha;
+        bool outputHasAlpha = false;
+        if (transparent)
+        {
+            try
+            {
+                // Render the RGB and alpha mask as a matched pair. This callback runs before Unity's
+                // normal camera render, so render explicitly here and suppress the duplicate automatic
+                // render for this frame.
+                captureCamera.Render();
+                captureCamera.enabled = false;
+                outputHasAlpha = BlitTransparentVideoOutput(source, scale, offset);
+            }
+            catch (Exception ex)
+            {
+                BasisDebug.LogErrorOnce($"Transparent video output failed: {ex}", BasisDebug.LogTag.Camera);
+            }
+        }
+
+        if (!outputHasAlpha)
+        {
+            Graphics.Blit(source, videoStreamTexture, scale, offset);
+        }
+
+        videoSink.PushFrame(videoStreamTexture, outputHasAlpha);
 #endif
+    }
+
+    private bool BlitTransparentVideoOutput(Texture source, Vector2 scale, Vector2 offset)
+    {
+        if (!TransparentVideoOutputResourcesReady(source)) return false;
+        if (!RenderTransparentVideoMask(source)) return false;
+
+        transparentVideoOutputMaterial.SetTexture(TransparentMaskTexId, transparentVideoMaskTexture);
+        transparentVideoOutputMaterial.SetVector(
+            TransparentScaleOffsetId,
+            new Vector4(scale.x, scale.y, offset.x, offset.y));
+        Graphics.Blit(source, videoStreamTexture, transparentVideoOutputMaterial);
+        return true;
+    }
+
+    private bool PrepareTransparentVideoOutputResources(Texture source)
+    {
+        if (source == null) return false;
+
+        if (transparentVideoOutputMaterial == null)
+        {
+            if (TransparentVideoOutputShader == null)
+            {
+                BasisDebug.LogErrorOnce("Transparent video output shader is unavailable.", BasisDebug.LogTag.Camera);
+                return false;
+            }
+            transparentVideoOutputMaterial = new Material(TransparentVideoOutputShader) { name = "Basis Transparent Video Output" };
+        }
+
+        int samples = source is RenderTexture sourceRenderTexture ? sourceRenderTexture.antiAliasing : 1;
+        if (transparentVideoMaskTexture != null &&
+            (transparentVideoMaskTexture.width != source.width ||
+             transparentVideoMaskTexture.height != source.height ||
+             transparentVideoMaskTexture.antiAliasing != samples))
+        {
+            transparentVideoMaskTexture.Release();
+            Destroy(transparentVideoMaskTexture);
+            transparentVideoMaskTexture = null;
+        }
+
+        if (transparentVideoMaskTexture == null)
+        {
+            var descriptor = new RenderTextureDescriptor(source.width, source.height, RenderTextureFormat.ARGB32, 24)
+            {
+                msaaSamples = samples,
+                useMipMap = false,
+                autoGenerateMips = false,
+                sRGB = false
+            };
+            transparentVideoMaskTexture = new RenderTexture(descriptor) { name = "BasisTransparentVideoMask" };
+            transparentVideoMaskTexture.Create();
+        }
+
+        return true;
+    }
+
+    private bool TransparentVideoOutputResourcesReady(Texture source)
+    {
+        if (source == null || transparentVideoOutputMaterial == null || transparentVideoMaskTexture == null) return false;
+
+        int samples = source is RenderTexture sourceRenderTexture ? sourceRenderTexture.antiAliasing : 1;
+        return transparentVideoMaskTexture.width == source.width
+            && transparentVideoMaskTexture.height == source.height
+            && transparentVideoMaskTexture.antiAliasing == samples;
+    }
+
+    private bool RenderTransparentVideoMask(Texture source)
+    {
+        if (captureCamera == null || CameraData == null || !TransparentVideoOutputResourcesReady(source)) return false;
+
+        RenderTexture previousTarget = captureCamera.targetTexture;
+        bool previousPostProcessing = CameraData.renderPostProcessing;
+        CameraClearFlags previousClearFlags = captureCamera.clearFlags;
+        Color previousBackgroundColor = captureCamera.backgroundColor;
+        try
+        {
+            captureCamera.targetTexture = transparentVideoMaskTexture;
+            CameraData.renderPostProcessing = false;
+            captureCamera.clearFlags = CameraClearFlags.SolidColor;
+            captureCamera.backgroundColor = Color.clear;
+            captureCamera.Render();
+            return true;
+        }
+        finally
+        {
+            captureCamera.targetTexture = previousTarget;
+            CameraData.renderPostProcessing = previousPostProcessing;
+            captureCamera.clearFlags = previousClearFlags;
+            captureCamera.backgroundColor = previousBackgroundColor;
+        }
+    }
+
+    private void ReleaseTransparentVideoOutputResources()
+    {
+        if (transparentVideoMaskTexture != null)
+        {
+            transparentVideoMaskTexture.Release();
+            Destroy(transparentVideoMaskTexture);
+            transparentVideoMaskTexture = null;
+        }
+        if (transparentVideoOutputMaterial != null)
+        {
+            Destroy(transparentVideoOutputMaterial);
+            transparentVideoOutputMaterial = null;
+        }
     }
 
     /// <summary>
@@ -440,6 +687,61 @@ namespace Basis
         Web,
     }
 
+    /// <summary>
+    /// Decides when a live output publishes a frame.
+    /// <para>
+    /// A stream hanging off a rate-limited camera has two clocks available and only one of them
+    /// is real. Pacing on its own accumulator — which is what this replaced — puts a second clock
+    /// next to the camera's, and two accumulators at the same nominal rate sampled once a frame
+    /// beat against each other: some slots land on a frame the camera has not redrawn, and the
+    /// same picture is encoded and sent twice; some fresh renders fall between slots and are
+    /// thrown away. The average frame rate comes out right, which is why this reads as working
+    /// code, and the picture arrives unevenly, which is the part a viewer sees.
+    /// </para>
+    /// <para>
+    /// So the fresh render is what drives it, and the frame rate is only a ceiling. The slack is
+    /// the other half of that: a source running at the stream rate delivers frames a hair early
+    /// as often as a hair late, and holding those back for a full interval is what would halve a
+    /// 30fps source to 15.
+    /// </para>
+    /// </summary>
+    public struct BasisStreamFramePacer
+    {
+        /// <summary>How early a fresh frame may be published, as a fraction of the frame interval.</summary>
+        public const float IntervalSlack = 0.9f;
+
+        /// <summary>Credit is capped at this many intervals, so a stall is not paid back as a burst.</summary>
+        public const float MaxBankedIntervals = 2f;
+
+        private float elapsed;
+
+        /// <summary>Drops banked time. For a stream that has just started or has no viewers.</summary>
+        public void Reset() => elapsed = 0f;
+
+        /// <summary>
+        /// Advances the clock and answers whether this tick should publish a frame.
+        /// </summary>
+        /// <param name="deltaTime">Time since the last tick.</param>
+        /// <param name="frameRate">Ceiling in frames per second. 0 or below publishes every fresh frame.</param>
+        /// <param name="frameIsFresh">Whether the source has drawn a picture that has not been published.</param>
+        /// <param name="sinkIsReady">Whether the sink would take a frame right now. A sink that would
+        /// not is never charged for the slot, so the next tick publishes instead of the next interval.</param>
+        public bool AllowThisFrame(float deltaTime, float frameRate, bool frameIsFresh, bool sinkIsReady)
+        {
+            float interval = frameRate > 0f ? 1f / frameRate : 0f;
+            elapsed += deltaTime;
+            if (interval > 0f && elapsed > interval * MaxBankedIntervals) elapsed = interval * MaxBankedIntervals;
+
+            if (!frameIsFresh || !sinkIsReady) return false;
+            if (interval > 0f && elapsed < interval * IntervalSlack) return false;
+
+            // Carry the remainder rather than zeroing, so a source running well above the stream
+            // rate is held to the stream rate exactly instead of drifting above it.
+            elapsed = interval > 0f ? Mathf.Max(0f, elapsed - interval) : 0f;
+            return true;
+        }
+    }
+
     public class BasisVideoOutputSettings
     {
         public int Width = 1920;
@@ -477,23 +779,71 @@ namespace Basis
         /// <summary>Consecutive ports tried before giving up.</summary>
         private const int PortAttempts = 16;
 
+        /// <summary>Longest the worker waits with nothing to do before it looks for new viewers.</summary>
+        private const int IdleWaitMs = 15;
+
+        /// <summary>Shorter wait while a connection is still mid-handshake, so it lands promptly.</summary>
+        private const int HandshakeWaitMs = 5;
+
+        /// <summary>How long a connection may sit without sending a request before it is closed.</summary>
+        private const int HandshakeTimeoutMs = 2000;
+
+        /// <summary>How long one frame may stay on the wire before the viewer is written off.</summary>
+        private const int WriteStallTimeoutMs = 4000;
+
         private static readonly byte[] FrameTrailer = Encoding.ASCII.GetBytes("\r\n");
+
+        /// <summary>A connected viewer. One frame is on the wire at a time; the rest are dropped.</summary>
+        private sealed class Viewer
+        {
+            public TcpClient Client;
+            public NetworkStream Stream;
+
+            /// <summary>Header, frame and trailer as one write, so a frame cannot be interleaved.</summary>
+            public byte[] Scratch = Array.Empty<byte>();
+
+            /// <summary>Set while a frame is on the wire. Written by the worker, cleared by the write callback.</summary>
+            public volatile bool Writing;
+
+            /// <summary>Set by the write callback. The worker owns the actual removal.</summary>
+            public volatile bool Dead;
+            public string Failure;
+            public int WriteStartedTick;
+        }
+
+        /// <summary>A connection that has been accepted but has not sent its request line yet.</summary>
+        private sealed class Handshake
+        {
+            public TcpClient Client;
+            public int DeadlineTick;
+        }
 
         private TcpListener listener;
         private Thread worker;
         private volatile bool running;
         private volatile int clientCount;
 
-        /// <summary>Touched only by the worker thread while running.</summary>
-        private readonly List<TcpClient> clients = new List<TcpClient>();
+        /// <summary>
+        /// Wakes the worker the moment a frame lands instead of leaving it to poll. Never disposed:
+        /// nothing here touches its <see cref="ManualResetEventSlim.WaitHandle"/>, so it holds no
+        /// kernel object, and disposing it would race the worker's own wait on the way out.
+        /// </summary>
+        private readonly ManualResetEventSlim frameSignal = new ManualResetEventSlim(false);
+
+        /// <summary>Both touched only by the worker thread while running.</summary>
+        private readonly List<Viewer> clients = new List<Viewer>();
+        private readonly List<Handshake> handshakes = new List<Handshake>();
 
         /// <summary>
-        /// Raw readback bytes handed from the main thread to the worker for encoding.
-        /// Ownership flips on <see cref="rawReady"/>: false means the main thread may fill it,
-        /// true means the worker is encoding it. Neither side touches it out of turn, so one
-        /// buffer is enough and nothing is allocated per frame.
+        /// Raw readback bytes on their way from the main thread to the worker, plus the one spare
+        /// buffer they pass back and forth. The worker takes <see cref="rawFrame"/> out under the
+        /// lock and returns it as <see cref="rawSpare"/> once it has encoded it, so the main thread
+        /// always has somewhere to write and an encode in progress never blocks the next readback.
+        /// Nothing is allocated per frame once both buffers exist.
         /// </summary>
         private byte[] rawFrame;
+        private byte[] rawSpare;
+        private readonly object rawLock = new object();
         private volatile bool rawReady;
         private int rawWidth;
         private int rawHeight;
@@ -518,6 +868,13 @@ namespace Basis
         public int Port { get; private set; }
         public string Url => $"http://127.0.0.1:{Port}/";
         public bool HasClients => clientCount > 0;
+
+        /// <summary>
+        /// True when a frame pushed now would actually be taken. Asked before the blit so a tick
+        /// that cannot publish costs nothing and, more importantly, does not spend the caller's
+        /// pacing slot on a frame that is about to be thrown away.
+        /// </summary>
+        public bool CanAcceptFrame => running && clientCount > 0 && !readbackInFlight && !rawReady;
 
         public bool Start(int port)
         {
@@ -551,12 +908,12 @@ namespace Basis
             return true;
         }
 
-        /// <summary>Main thread. Requests a readback of the frame; the encode happens in the callback.</summary>
+        /// <summary>Main thread. Requests a readback of the frame; the encode happens on the worker.</summary>
         public void PushFrame(RenderTexture frame, int quality)
         {
             // One readback in flight at a time: queueing them would just build latency, and
             // the newest frame is the only one a live stream cares about.
-            if (!running || readbackInFlight || clientCount == 0) return;
+            if (!CanAcceptFrame) return;
 
             frameWidth = frame.width;
             frameHeight = frame.height;
@@ -568,22 +925,33 @@ namespace Basis
         public void Stop()
         {
             running = false;
+            frameSignal.Set();
             try { listener?.Stop(); } catch (Exception) { }
             listener = null;
 
             if (worker != null)
             {
-                worker.Join(250);
+                worker.Join(500);
                 worker = null;
             }
 
             for (int Index = 0; Index < clients.Count; Index++)
             {
-                try { clients[Index].Close(); } catch (Exception) { }
+                try { clients[Index].Client.Close(); } catch (Exception) { }
             }
             clients.Clear();
+            for (int Index = 0; Index < handshakes.Count; Index++)
+            {
+                try { handshakes[Index].Client.Close(); } catch (Exception) { }
+            }
+            handshakes.Clear();
             clientCount = 0;
-            rawReady = false;
+            lock (rawLock)
+            {
+                rawReady = false;
+                rawFrame = null;
+                rawSpare = null;
+            }
             lock (frameLock) pendingFrame = null;
         }
 
@@ -600,21 +968,75 @@ namespace Basis
             if (encodeOnMainThread)
             {
                 byte[] jpeg = EncodeJpeg(request.GetData<byte>().ToArray(), frameWidth, frameHeight, frameQuality);
-                if (jpeg != null) lock (frameLock) pendingFrame = jpeg;
+                if (jpeg != null)
+                {
+                    lock (frameLock) pendingFrame = jpeg;
+                    frameSignal.Set();
+                }
                 return;
             }
 
-            // Worker still busy with the previous frame: drop this one. Handing over anyway
-            // would mean encoding frames nobody can keep up with.
-            if (rawReady) return;
-
             NativeArray<byte> data = request.GetData<byte>();
-            if (rawFrame == null || rawFrame.Length != data.Length) rawFrame = new byte[data.Length];
-            data.CopyTo(rawFrame);
-            rawWidth = frameWidth;
-            rawHeight = frameHeight;
-            rawQuality = frameQuality;
-            rawReady = true;
+
+            byte[] target;
+            lock (rawLock)
+            {
+                target = rawSpare;
+                rawSpare = null;
+            }
+            if (target == null || target.Length != data.Length) target = new byte[data.Length];
+            data.CopyTo(target);
+
+            lock (rawLock)
+            {
+                // A frame still sitting here means the worker has not started on it. This one is
+                // newer, so it takes its place instead of queueing behind it.
+                if (rawFrame != null && rawSpare == null) rawSpare = rawFrame;
+                rawFrame = target;
+                rawWidth = frameWidth;
+                rawHeight = frameHeight;
+                rawQuality = frameQuality;
+                rawReady = true;
+            }
+            frameSignal.Set();
+        }
+
+        /// <summary>
+        /// Worker thread. Takes the waiting frame out from under the lock <em>before</em> encoding
+        /// it and hands the buffer straight back afterwards, so the readback that lands during the
+        /// encode has somewhere to go. Encoding in place is what used to make every second frame
+        /// arrive to find the slot still busy and be dropped.
+        /// </summary>
+        private byte[] TakeRawAndEncode()
+        {
+            if (encodeOnMainThread) return null;
+
+            byte[] raw;
+            int width;
+            int height;
+            int quality;
+            lock (rawLock)
+            {
+                if (!rawReady) return null;
+                raw = rawFrame;
+                rawFrame = null;
+                rawReady = false;
+                width = rawWidth;
+                height = rawHeight;
+                quality = rawQuality;
+            }
+
+            try
+            {
+                return EncodeJpeg(raw, width, height, quality);
+            }
+            finally
+            {
+                lock (rawLock)
+                {
+                    if (rawSpare == null) rawSpare = raw;
+                }
+            }
         }
 
         /// <summary>
@@ -654,19 +1076,18 @@ namespace Basis
                 {
                     while (listener != null && listener.Pending())
                     {
-                        AcceptClient();
+                        QueueHandshake(listener.AcceptTcpClient());
                         didWork = true;
                     }
 
-                    if (rawReady && !encodeOnMainThread)
+                    if (ReapViewers()) didWork = true;
+                    if (handshakes.Count > 0 && ServiceHandshakes()) didWork = true;
+
+                    byte[] jpeg = TakeRawAndEncode();
+                    if (jpeg != null)
                     {
-                        byte[] jpeg = EncodeJpeg(rawFrame, rawWidth, rawHeight, rawQuality);
-                        rawReady = false;
-                        if (jpeg != null)
-                        {
-                            Broadcast(jpeg);
-                            didWork = true;
-                        }
+                        Broadcast(jpeg);
+                        didWork = true;
                     }
 
                     byte[] pending = TakeFrame();
@@ -683,25 +1104,80 @@ namespace Basis
                     BasisDebug.LogError($"Web stream worker error: {e.GetType().Name}: {e.Message}", BasisDebug.LogTag.Camera);
                 }
 
-                if (!didWork) Thread.Sleep(1);
+                if (didWork) continue;
+
+                // Woken by the main thread the instant a frame lands, so the encode starts with the
+                // readback rather than up to a scheduler tick after it. Polling on Thread.Sleep(1)
+                // was worth as much as 15ms of jitter a frame on Windows, where the sleep rounds up
+                // to whatever timer resolution the process happens to be running at.
+                frameSignal.Wait(handshakes.Count > 0 ? HandshakeWaitMs : IdleWaitMs);
+                frameSignal.Reset();
             }
         }
 
-        private void AcceptClient()
+        /// <summary>Parks a fresh connection until it says what it wants. See <see cref="ServiceHandshakes"/>.</summary>
+        private void QueueHandshake(TcpClient client)
         {
-            TcpClient client = listener.AcceptTcpClient();
-            if (clients.Count >= MaxClients)
+            // Budgeted separately from the viewers. A connection that has not asked for anything
+            // yet is usually a browser's speculative preconnect, and counting those against the
+            // viewer cap lets them keep the real request out.
+            if (handshakes.Count >= MaxClients)
             {
-                client.Close();
+                try { client.Close(); } catch (Exception) { }
                 return;
             }
 
             client.NoDelay = true;
-            // A viewer that stops reading must not wedge the worker forever, but the timeout
-            // has to outlast an ordinary hitch or we would drop healthy clients.
+            // Only the handshake writes synchronously, and it is a few hundred bytes; frames go
+            // out asynchronously, where this timeout does not apply.
             client.SendTimeout = 2000;
             client.ReceiveTimeout = 250;
+            handshakes.Add(new Handshake { Client = client, DeadlineTick = Environment.TickCount + HandshakeTimeoutMs });
+        }
 
+        /// <summary>
+        /// Reads the request line off every connection that has actually sent one. Deferred rather
+        /// than read inline off the accept because browsers open speculative connections and then
+        /// send nothing on them: a blocking read on one of those parked this thread — and with it
+        /// the encode, and every other viewer's frames — for the whole receive timeout.
+        /// </summary>
+        private bool ServiceHandshakes()
+        {
+            bool progressed = false;
+            for (int Index = handshakes.Count - 1; Index >= 0; Index--)
+            {
+                Handshake handshake = handshakes[Index];
+                bool ready;
+                try
+                {
+                    ready = handshake.Client.Available > 0;
+                }
+                catch (Exception)
+                {
+                    ready = false;
+                    handshake.DeadlineTick = Environment.TickCount - 1;
+                }
+
+                if (!ready && Environment.TickCount - handshake.DeadlineTick < 0) continue;
+
+                handshakes.RemoveAt(Index);
+                progressed = true;
+                try
+                {
+                    if (ready) AdmitViewer(handshake.Client);
+                    else handshake.Client.Close();
+                }
+                catch (Exception e)
+                {
+                    BasisDebug.Log($"Web stream handshake dropped: {e.GetType().Name}: {e.Message}", BasisDebug.LogTag.Camera);
+                    try { handshake.Client.Close(); } catch (Exception) { }
+                }
+            }
+            return progressed;
+        }
+
+        private void AdmitViewer(TcpClient client)
+        {
             NetworkStream stream = client.GetStream();
             string path = ReadRequestPath(stream);
 
@@ -716,6 +1192,14 @@ namespace Basis
                 return;
             }
 
+            // The cap is on viewers of the stream itself, since that is what costs a write per
+            // frame each. Serving the page above is a few hundred bytes and is always allowed.
+            if (clients.Count >= MaxClients)
+            {
+                client.Close();
+                return;
+            }
+
             byte[] header = Encoding.ASCII.GetBytes(
                 "HTTP/1.0 200 OK\r\n" +
                 "Connection: close\r\n" +
@@ -724,7 +1208,7 @@ namespace Basis
                 $"Content-Type: multipart/x-mixed-replace; boundary={Boundary}\r\n\r\n");
             stream.Write(header, 0, header.Length);
 
-            clients.Add(client);
+            clients.Add(new Viewer { Client = client, Stream = stream });
             clientCount = clients.Count;
             BasisDebug.Log($"Web stream viewer connected ({clients.Count} total).", BasisDebug.LogTag.Camera);
         }
@@ -773,35 +1257,111 @@ namespace Basis
             stream.Write(body, 0, body.Length);
         }
 
+        /// <summary>
+        /// Worker thread. Hands each viewer the frame as a single asynchronous write and moves on.
+        /// <para>
+        /// This used to poll each socket for writability and then write the frame synchronously,
+        /// which reads as safe and is not: the poll only says the send buffer has room for
+        /// <em>something</em>, so a frame several times that size still blocked until the viewer
+        /// drained it. One browser tab slow to decode therefore stalled the encode, the other
+        /// viewers, and the next readback along with it — for up to the send timeout — and the
+        /// stream came back as a burst. Now a viewer that is still draining simply misses this
+        /// frame.
+        /// </para>
+        /// </summary>
         private void Broadcast(byte[] frame)
         {
+            if (clients.Count == 0) return;
+
             byte[] part = Encoding.ASCII.GetBytes(
                 $"--{Boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: {frame.Length}\r\n\r\n");
+            int total = part.Length + frame.Length + FrameTrailer.Length;
 
             for (int Index = clients.Count - 1; Index >= 0; Index--)
             {
-                TcpClient client = clients[Index];
+                Viewer viewer = clients[Index];
+
+                // Still draining the last frame: skip this one for this viewer. Queueing instead
+                // is what turns a live stream into an ever-growing delay.
+                if (viewer.Writing) continue;
+
+                if (viewer.Scratch.Length < total) viewer.Scratch = new byte[total + (total >> 2)];
+                Buffer.BlockCopy(part, 0, viewer.Scratch, 0, part.Length);
+                Buffer.BlockCopy(frame, 0, viewer.Scratch, part.Length, frame.Length);
+                Buffer.BlockCopy(FrameTrailer, 0, viewer.Scratch, part.Length + frame.Length, FrameTrailer.Length);
+
+                viewer.WriteStartedTick = Environment.TickCount;
+                viewer.Writing = true;
                 try
                 {
-                    // Still draining the last frame: skip this one for this viewer. Queueing
-                    // instead is what turns a live stream into an ever-growing delay.
-                    if (!client.Client.Poll(0, SelectMode.SelectWrite)) continue;
-
-                    NetworkStream stream = client.GetStream();
-                    stream.Write(part, 0, part.Length);
-                    stream.Write(frame, 0, frame.Length);
-                    stream.Write(FrameTrailer, 0, FrameTrailer.Length);
+                    viewer.Stream.BeginWrite(viewer.Scratch, 0, total, WriteCompleted, viewer);
                 }
                 catch (Exception e)
                 {
-                    // Closing the tab is normal, but a write that fails for any other reason
-                    // used to end the stream with no trace of why.
-                    BasisDebug.Log($"Web stream client dropped: {e.GetType().Name}: {e.Message}", BasisDebug.LogTag.Camera);
-                    try { client.Close(); } catch (Exception) { }
-                    clients.RemoveAt(Index);
+                    viewer.Writing = false;
+                    DropViewer(Index, $"{e.GetType().Name}: {e.Message}");
                 }
             }
             clientCount = clients.Count;
+        }
+
+        /// <summary>Thread pool. Only ever touches its own viewer, never the list the worker owns.</summary>
+        private void WriteCompleted(IAsyncResult result)
+        {
+            Viewer viewer = (Viewer)result.AsyncState;
+            try
+            {
+                viewer.Stream.EndWrite(result);
+            }
+            catch (Exception e)
+            {
+                viewer.Failure = $"{e.GetType().Name}: {e.Message}";
+                viewer.Dead = true;
+            }
+            finally
+            {
+                viewer.Writing = false;
+            }
+        }
+
+        /// <summary>
+        /// Worker thread. Clears out viewers the write callback marked dead, and any whose frame
+        /// has been on the wire long enough that the connection is plainly not coming back: an
+        /// asynchronous write has no send timeout behind it, so nothing else would free that slot.
+        /// </summary>
+        private bool ReapViewers()
+        {
+            bool removed = false;
+            for (int Index = clients.Count - 1; Index >= 0; Index--)
+            {
+                Viewer viewer = clients[Index];
+                if (viewer.Dead)
+                {
+                    DropViewer(Index, viewer.Failure);
+                    removed = true;
+                    continue;
+                }
+
+                if (viewer.Writing && Environment.TickCount - viewer.WriteStartedTick > WriteStallTimeoutMs)
+                {
+                    DropViewer(Index, $"no progress for {WriteStallTimeoutMs}ms");
+                    removed = true;
+                }
+            }
+            return removed;
+        }
+
+        /// <summary>Worker thread. Closes a viewer and takes it off the list.</summary>
+        private void DropViewer(int index, string reason)
+        {
+            Viewer viewer = clients[index];
+            clients.RemoveAt(index);
+            clientCount = clients.Count;
+            try { viewer.Client.Close(); } catch (Exception) { }
+
+            // Closing the tab is normal, but a write that fails for any other reason used to end
+            // the stream with no trace of why.
+            BasisDebug.Log($"Web stream client dropped: {reason ?? "closed"}.", BasisDebug.LogTag.Camera);
         }
 
         private byte[] TakeFrame()
@@ -830,23 +1390,28 @@ namespace Basis
         private float registrationDeadline;
         private bool registrationChecked;
 
-        public string FailureMessage => null;
+        public string FailureMessage { get; private set; }
+        public bool SupportsAlpha = true;
 
         public bool Start(BasisVideoOutputSettings settings, GameObject host)
         {
+            FailureMessage = null;
+
             // Spout shares a D3D texture handle; there is no path through any other API,
             // and the plugin fails silently rather than telling us. Say so up front.
             GraphicsDeviceType device = SystemInfo.graphicsDeviceType;
             if (device != GraphicsDeviceType.Direct3D11 && device != GraphicsDeviceType.Direct3D12)
             {
-                BasisDebug.LogError($"Spout output needs Direct3D11 or Direct3D12, but this player is running on {device}.", BasisDebug.LogTag.Camera);
+                FailureMessage = $"Spout needs Direct3D11 or Direct3D12; this player is running on {device}.";
+                BasisDebug.LogError(FailureMessage, BasisDebug.LogTag.Camera);
                 return false;
             }
 
             Shader blitShader = Shader.Find(BlitShaderPath);
             if (blitShader == null)
             {
-                BasisDebug.LogError($"Spout blit shader '{BlitShaderPath}' was stripped from the build — keep it in Always Included Shaders.", BasisDebug.LogTag.Camera);
+                FailureMessage = $"Spout blit shader '{BlitShaderPath}' was stripped from the build — keep it in Always Included Shaders.";
+                BasisDebug.LogError(FailureMessage, BasisDebug.LogTag.Camera);
                 return false;
             }
             resources = ScriptableObject.CreateInstance<SpoutResources>();
@@ -863,9 +1428,10 @@ namespace Basis
             return true;
         }
 
-        public void PushFrame(RenderTexture frame)
+        public void PushFrame(RenderTexture frame, bool keepAlpha)
         {
             if (sender == null) return;
+            sender.keepAlpha = keepAlpha;
             sender.sourceTexture = frame;
             VerifyRegistration();
         }
@@ -928,17 +1494,38 @@ namespace Basis
         // In Always Included Shaders so the runtime-created SyphonResources survives build stripping.
         private const string BlitShaderPath = "Hidden/Klak/Syphon/Blit";
 
+        /// <summary>Grace period before the server is expected to appear in Syphon's server directory.</summary>
+        private const float RegistrationGraceSeconds = 2f;
+
         private SyphonServer server;
         private SyphonResources resources;
+        private string serverName;
+        private float registrationDeadline;
+        private bool registrationChecked;
 
-        public string FailureMessage => null;
+        public string FailureMessage { get; private set; }
+        public bool SupportsAlpha = true;
 
         public bool Start(BasisVideoOutputSettings settings, GameObject host)
         {
+            FailureMessage = null;
+
+            // KlakSyphon publishes an IOSurface backed by a Metal texture; there is no path
+            // through any other graphics API, and the plugin hands back a null server rather
+            // than telling us. Say so up front.
+            GraphicsDeviceType device = SystemInfo.graphicsDeviceType;
+            if (device != GraphicsDeviceType.Metal)
+            {
+                FailureMessage = $"Syphon needs Metal; this player is running on {device}.";
+                BasisDebug.LogError(FailureMessage, BasisDebug.LogTag.Camera);
+                return false;
+            }
+
             Shader blitShader = Shader.Find(BlitShaderPath);
             if (blitShader == null)
             {
-                BasisDebug.LogError($"Syphon blit shader '{BlitShaderPath}' was stripped from the build — keep it in Always Included Shaders.", BasisDebug.LogTag.Camera);
+                FailureMessage = $"Syphon blit shader '{BlitShaderPath}' was stripped from the build — keep it in Always Included Shaders.";
+                BasisDebug.LogError(FailureMessage, BasisDebug.LogTag.Camera);
                 return false;
             }
             resources = ScriptableObject.CreateInstance<SyphonResources>();
@@ -948,24 +1535,81 @@ namespace Basis
             server.KeepAlpha = false;
             server.CaptureMethod = CaptureMethod.Texture;
             server.ServerName = settings.SenderName;
+
+            serverName = settings.SenderName;
+            registrationDeadline = Time.unscaledTime + RegistrationGraceSeconds;
+            registrationChecked = false;
             return true;
         }
 
-        public void PushFrame(RenderTexture frame)
+        public void PushFrame(RenderTexture frame, bool keepAlpha)
         {
-            // Property setters tear the server down, so only assign when the texture changes.
-            if (server != null && server.SourceTexture != frame)
+            if (server == null) return;
+            server.KeepAlpha = keepAlpha;
+
+            // Changing the source texture tears the server down, so only assign when it changes.
+            if (server.SourceTexture != frame)
             {
                 server.SourceTexture = frame;
             }
+            VerifyRegistration();
+        }
+
+        /// <summary>
+        /// The server is only created on the first frame after a source texture exists, and
+        /// Plugin_CreateServer returns a null instance on failure without raising anything, so a
+        /// dead stream is otherwise indistinguishable from a live one. Once the grace period is
+        /// up, ask Syphon whether the server is actually published. This only logs — a false
+        /// negative here must not tear down a stream that works.
+        /// </summary>
+        private void VerifyRegistration()
+        {
+            if (registrationChecked || Time.unscaledTime < registrationDeadline) return;
+            registrationChecked = true;
+
+            List<string> names = new List<string>();
+            try
+            {
+                names.AddRange(SyphonServerDirectory.EnumerateServerNames());
+            }
+            catch (Exception e)
+            {
+                BasisDebug.LogError($"Syphon plugin unreachable ({e.GetType().Name}: {e.Message}). KlakSyphon.bundle may be missing from the build.", BasisDebug.LogTag.Camera);
+                return;
+            }
+
+            for (int Index = 0; Index < names.Count; Index++)
+            {
+                // The directory reports servers as "<app>/<server>", so compare the server half.
+                string entry = names[Index];
+                if (string.IsNullOrEmpty(entry)) continue;
+                int slash = entry.LastIndexOf('/');
+                string published = slash >= 0 ? entry.Substring(slash + 1) : entry;
+                if (!string.Equals(published, serverName, StringComparison.Ordinal)) continue;
+                BasisDebug.Log($"Syphon server '{serverName}' is published — select it as a Syphon source.", BasisDebug.LogTag.Camera);
+                return;
+            }
+
+            BasisDebug.LogError(
+                $"Syphon server '{serverName}' never registered (Syphon reports: {(names.Count == 0 ? "no servers" : string.Join(", ", names))}). " +
+                "Syphon needs the player on Metal, with KlakSyphon.bundle present in the build.",
+                BasisDebug.LogTag.Camera);
         }
 
         public void Stop()
         {
-            if (server != null) UnityEngine.Object.Destroy(server);
+            if (server != null)
+            {
+                // Drop the texture first: assigning null tears the plugin down and stops the
+                // end-of-frame capture coroutine, which would otherwise still blit from the
+                // stream RT after this returns — the caller releases it immediately.
+                server.SourceTexture = null;
+                UnityEngine.Object.Destroy(server);
+            }
             if (resources != null) UnityEngine.Object.Destroy(resources);
             server = null;
             resources = null;
+            serverName = null;
         }
     }
 #endif
@@ -998,6 +1642,7 @@ namespace Basis
         private static readonly HashSet<string> ClaimedDevices = new HashSet<string>();
 
         public string FailureMessage { get; private set; }
+        public bool SupportsAlpha = false;
 
         [DllImport("libc", EntryPoint = "open", SetLastError = true)]
         private static extern int Open(string path, int flags);
@@ -1068,7 +1713,7 @@ namespace Basis
             return true;
         }
 
-        public void PushFrame(RenderTexture frame)
+        public void PushFrame(RenderTexture frame, bool keepAlpha)
         {
             if (fd < 0 || FailureMessage != null) return;
             AsyncGPUReadback.Request(frame, 0, TextureFormat.BGRA32, readbackCallback);

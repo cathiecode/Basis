@@ -97,7 +97,9 @@ namespace Basis.Scripts.Avatar
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
-            // Role announcements come through SteamVR, which only runs on desktop.
+            // The built-in SteamVR-role path only means anything on desktop, but a registered source
+            // can announce anywhere — standalone headsets announce their own solved body parts — so
+            // Android runs the scan too and simply never matches the SteamVR convention.
             switch (Application.platform)
             {
                 case RuntimePlatform.WindowsPlayer:
@@ -106,6 +108,7 @@ namespace Basis.Scripts.Avatar
                 case RuntimePlatform.LinuxEditor:
                 case RuntimePlatform.OSXPlayer:
                 case RuntimePlatform.OSXEditor:
+                case RuntimePlatform.Android:
                     break;
                 default:
                     return;
@@ -198,6 +201,15 @@ namespace Basis.Scripts.Avatar
 
         private static bool TryMapInput(BasisInput input, out BasisBoneTrackedRole role)
         {
+            // Hand-tracking devices are excluded from full-body calibration everywhere, so they must
+            // not announce a body part either — a stale SteamVR role on one would otherwise both bind
+            // it and trigger the automatic calibration pass below.
+            if (BasisIgnoredCalibrationTrackers.ShouldIgnore(input))
+            {
+                role = BasisBoneTrackedRole.CenterEye;
+                return false;
+            }
+
             // Package sources first: they announce more specific conventions, and a Suppress
             // claim must win over the generic SteamVR-role path (e.g. SlimeVR trackers carry a
             // SteamVR role too, so falling through would re-bind them behind their own toggle).
