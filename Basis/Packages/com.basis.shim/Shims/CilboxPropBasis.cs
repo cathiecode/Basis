@@ -12,12 +12,22 @@ namespace Cilbox
 			"Basis.Shims.*",
 			"Basis.BasisImageDownloader",
 			"Basis.IBasisImageDownload",
+			"Basis.BasisStringDownloader",
+			"Basis.IBasisStringDownload",
             "Basis.Scripts.Networking.NetworkedAvatar.BasisNetworkPlayer",
             "Basis.Scripts.Networking.BasisNetworkPlayers", // Restrictive, see method whitelist (TryGetPlayerByUUID only).
             "Basis.Scripts.BasisSdk.BasisAvatar",           // Restrictive, see method whitelist (empty) + Animator field only.
             "Basis.Scripts.Drivers.BasisLocalAvatarDriver", // Restrictive, see method whitelist (empty) + HeadScale field only.
             "BasisPickupSyncNetworking",                    // Concrete runtime type of the pickup's BasisNetworkBehaviour field; held only, methods blocked (see below).
 			"Basis.Scripts.Drivers.BasisLocalCameraDriver", // read-only static CameraInstance (field below)
+			// Example-package button (com.basis.examples). Restrictive, see method whitelist below:
+			// only set_ButtonDown is reachable, so a prop can wire a handler but not read the current
+			// one, trigger ButtonUp, or call TriggerButtonDown()/TriggerButtonUp() directly.
+			"Basis.Scripts.BasisSdk.Interactions.BasisInteractableButton",
+			// ButtonDown/ButtonUp's delegate type. Needed to construct/assign a handler; the delegate's
+			// own Invoke is unreachable regardless (CheckMethodAllowed blanket-denies any "Invoke" method).
+			"Basis.Scripts.BasisSdk.Interactions.BasisInteractableButton+ClickEvent",
+			"Basis.Scripts.BasisSdk.Players.BasisTeleportMode",
 
 			// System IO
 			"System.IO.BinaryReader",
@@ -201,6 +211,16 @@ namespace Cilbox
 				new HashSet<string>
 				{
 					"TryGetIdentifier",
+					"get_CreatorUUID",
+				}
+			},
+			// The prop box can already correlate a UUID to a player through TryGetPlayerByUUID,
+			// so handing it the creator string directly grants nothing new.
+			{
+				typeof(BasisContent),
+				new HashSet<string>
+				{
+					"CreatorUUID",
 				}
 			},
             {
@@ -251,6 +271,16 @@ namespace Cilbox
 			{
 				typeof(global::BasisPickupSyncNetworking),
 				new HashSet<string>()
+			},
+			// BasisInteractableButton: only the setter a prop needs to wire its own "pressed" handler.
+			// ButtonUp, both getters and TriggerButtonDown/Up are withheld until a script actually
+			// needs them - get_ButtonDown/Up would hand back another script's live delegate.
+			{
+				typeof(Basis.Scripts.BasisSdk.Interactions.BasisInteractableButton),
+				new HashSet<string>
+				{
+					"set_ButtonDown",
+				}
 			},
 		};
 

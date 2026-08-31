@@ -38,6 +38,13 @@ namespace Basis.Cinematics
         None = 3,
     }
 
+    public enum BasisCameraAimPoint
+    {
+        Normal = 0,
+        Head = 1,
+        FullBody = 2,
+    }
+
     /// <summary>How the dolly modifier decides where along its track the camera sits.</summary>
     public enum BasisCameraDollyMode
     {
@@ -52,16 +59,16 @@ namespace Basis.Cinematics
     /// <summary>What decides where the camera points. Exactly one is fitted at a time.</summary>
     public enum BasisCameraRotationModifier
     {
-        /// <summary>The operator drives.</summary>
-        FreeLook = 0,
+        /// <summary>Keep whatever rotation it already had.</summary>
+        Hold = 0,
         /// <summary>Subject dead centre, every frame.</summary>
         LookAtSubject = 1,
         /// <summary>Screen composition with a dead zone and a soft zone.</summary>
         Compose = 2,
         /// <summary>Copy the subject's own facing, for over-the-shoulder shots.</summary>
         MatchSubject = 3,
-        /// <summary>Keep whatever rotation it already had.</summary>
-        Hold = 4,
+        /// <summary>Point down the dolly track, so the shot looks the way the move is travelling.</summary>
+        AimAlongTrack = 4,
     }
 
     /// <summary>
@@ -150,6 +157,13 @@ namespace Basis.Cinematics
             BasisCameraSubjectModifier.None,
         };
 
+        public static readonly BasisCameraAimPoint[] AimPoints =
+        {
+            BasisCameraAimPoint.Normal,
+            BasisCameraAimPoint.Head,
+            BasisCameraAimPoint.FullBody,
+        };
+
         public static readonly BasisCameraPositionModifier[] PositionModifiers =
         {
             BasisCameraPositionModifier.FreeFly,
@@ -162,11 +176,11 @@ namespace Basis.Cinematics
 
         public static readonly BasisCameraRotationModifier[] RotationModifiers =
         {
-            BasisCameraRotationModifier.FreeLook,
+            BasisCameraRotationModifier.Hold,
             BasisCameraRotationModifier.LookAtSubject,
             BasisCameraRotationModifier.Compose,
             BasisCameraRotationModifier.MatchSubject,
-            BasisCameraRotationModifier.Hold,
+            BasisCameraRotationModifier.AimAlongTrack,
         };
 
         public static readonly BasisCameraEffectDescriptor[] Effects =
@@ -218,6 +232,16 @@ namespace Basis.Cinematics
             }
         }
 
+        public static string NameKey(BasisCameraAimPoint aim)
+        {
+            switch (aim)
+            {
+                case BasisCameraAimPoint.Head: return "camera.aimPoint.head";
+                case BasisCameraAimPoint.FullBody: return "camera.aimPoint.fullBody";
+                default: return "camera.aimPoint.normal";
+            }
+        }
+
         public static string NameKey(BasisCameraPositionModifier modifier)
         {
             switch (modifier)
@@ -238,8 +262,8 @@ namespace Basis.Cinematics
                 case BasisCameraRotationModifier.LookAtSubject: return "camera.modifier.lookAtSubject";
                 case BasisCameraRotationModifier.Compose: return "camera.modifier.compose";
                 case BasisCameraRotationModifier.MatchSubject: return "camera.modifier.matchSubject";
-                case BasisCameraRotationModifier.Hold: return "camera.modifier.hold";
-                default: return "camera.modifier.freeLook";
+                case BasisCameraRotationModifier.AimAlongTrack: return "camera.modifier.aimAlongTrack";
+                default: return "camera.modifier.hold";
             }
         }
 
@@ -284,7 +308,7 @@ namespace Basis.Cinematics
 
         /// <summary>Whether the rotation slot takes the channel off the operator.</summary>
         public static bool DrivesRotation(BasisCameraRotationModifier modifier)
-            => modifier != BasisCameraRotationModifier.FreeLook;
+            => modifier != BasisCameraRotationModifier.Hold;
 
         /// <summary>Whether the fitted subject slot resolves to anybody at all.</summary>
         public static bool ResolvesSubject(BasisCameraSubjectModifier modifier)

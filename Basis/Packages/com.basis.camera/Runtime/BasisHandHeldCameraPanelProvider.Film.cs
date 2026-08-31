@@ -71,7 +71,7 @@ namespace Basis.BasisUI.HandHeldCamera
 
         // ---------- Building ----------
 
-        /// <summary>The colour half, appended to the exposure and colour section.</summary>
+        /// <summary>The film grading: the Film Look section.</summary>
         private void BuildFilmColourControls(RectTransform content)
         {
             _filmLiftSlider = PanelSlider.CreateNew(content);
@@ -79,13 +79,13 @@ namespace Basis.BasisUI.HandHeldCamera
                 BasisLocalization.Get("camera.filmLift"),
                 BasisHandHeldCameraUI.MinFilmLift * 100f, BasisHandHeldCameraUI.MaxFilmLift * 100f,
                 false, 1, ValueDisplayMode.Percentage));
-            _filmLiftSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.filmLift.description"));
+            _filmLiftSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.filmLift.description"));
             _filmLiftSlider.OnValueChanged = v => _activeCamera?.HandHeld.ChangeFilmLift(v / 100f);
 
             _splitShadowHueSlider = PanelSlider.CreateNew(content);
             _splitShadowHueSlider.SetSliderSettings(PanelSlider.SliderSettings.Degrees(
                 BasisLocalization.Get("camera.splitToning.shadows"), 0f, 360f, true, 0));
-            _splitShadowHueSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.splitToning.shadows.description"));
+            _splitShadowHueSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.splitToning.shadows.description"));
             _splitShadowHueSlider.OnValueChanged = _ => PushSplitToning();
 
             _splitShadowStrengthSlider = PanelSlider.CreateNew(content);
@@ -96,7 +96,7 @@ namespace Basis.BasisUI.HandHeldCamera
             _splitHighlightHueSlider = PanelSlider.CreateNew(content);
             _splitHighlightHueSlider.SetSliderSettings(PanelSlider.SliderSettings.Degrees(
                 BasisLocalization.Get("camera.splitToning.highlights"), 0f, 360f, true, 0));
-            _splitHighlightHueSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.splitToning.highlights.description"));
+            _splitHighlightHueSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.splitToning.highlights.description"));
             _splitHighlightHueSlider.OnValueChanged = _ => PushSplitToning();
 
             _splitHighlightStrengthSlider = PanelSlider.CreateNew(content);
@@ -109,16 +109,15 @@ namespace Basis.BasisUI.HandHeldCamera
                 BasisLocalization.Get("camera.splitToning.balance"),
                 BasisHandHeldCameraUI.MinSplitToningBalance, BasisHandHeldCameraUI.MaxSplitToningBalance,
                 false, 0, ValueDisplayMode.Raw));
-            _splitBalanceSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.splitToning.balance.description"));
+            _splitBalanceSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.splitToning.balance.description"));
             _splitBalanceSlider.OnValueChanged = v => _activeCamera?.HandHeld.ChangeSplitToningBalance(v);
         }
 
-        /// <summary>The texture half, appended to the effects section.</summary>
-        private void BuildFilmEffectsControls(RectTransform content)
+        private void BuildGrainShapeControls(RectTransform content)
         {
             _grainTypeDropdown = PanelDropdown.CreateNewEntry(content);
             _grainTypeDropdown.Descriptor.SetTitle(BasisLocalization.Get("camera.filmGrain.type"));
-            _grainTypeDropdown.Descriptor.SetDescription(BasisLocalization.Get("camera.filmGrain.type.description"));
+            _grainTypeDropdown.Descriptor.SetTooltip(BasisLocalization.Get("camera.filmGrain.type.description"));
             _grainTypeDropdown.AssignLocalizedEntries(
                 new List<string>(GrainTypeKeys), new List<string>(GrainTypeKeys));
             _grainTypeDropdown.OnValueChanged = _ =>
@@ -132,24 +131,30 @@ namespace Basis.BasisUI.HandHeldCamera
             _grainResponseSlider = PanelSlider.CreateNew(content);
             _grainResponseSlider.SetSliderSettings(PanelSlider.SliderSettings.Percentage(
                 BasisLocalization.Get("camera.filmGrain.response")));
-            _grainResponseSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.filmGrain.response.description"));
+            _grainResponseSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.filmGrain.response.description"));
             _grainResponseSlider.OnValueChanged = v => _activeCamera?.HandHeld.ChangeFilmGrainResponse(v / 100f);
+        }
 
+        private void BuildBloomTintControls(RectTransform content)
+        {
             _bloomTintHueSlider = PanelSlider.CreateNew(content);
             _bloomTintHueSlider.SetSliderSettings(PanelSlider.SliderSettings.Degrees(
                 BasisLocalization.Get("camera.bloomTint"), 0f, 360f, true, 0));
-            _bloomTintHueSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.bloomTint.description"));
+            _bloomTintHueSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.bloomTint.description"));
             _bloomTintHueSlider.OnValueChanged = _ => PushBloomTint();
 
             _bloomTintStrengthSlider = PanelSlider.CreateNew(content);
             _bloomTintStrengthSlider.SetSliderSettings(PanelSlider.SliderSettings.Percentage(
                 BasisLocalization.Get("camera.bloomTint.strength")));
             _bloomTintStrengthSlider.OnValueChanged = _ => PushBloomTint();
+        }
 
+        private void BuildVignetteColourControls(RectTransform content)
+        {
             _vignetteColourHueSlider = PanelSlider.CreateNew(content);
             _vignetteColourHueSlider.SetSliderSettings(PanelSlider.SliderSettings.Degrees(
                 BasisLocalization.Get("camera.vignetteColour"), 0f, 360f, true, 0));
-            _vignetteColourHueSlider.Descriptor.SetDescription(BasisLocalization.Get("camera.vignetteColour.description"));
+            _vignetteColourHueSlider.Descriptor.SetTooltip(BasisLocalization.Get("camera.vignetteColour.description"));
             _vignetteColourHueSlider.OnValueChanged = _ => PushVignetteColour();
 
             _vignetteColourStrengthSlider = PanelSlider.CreateNew(content);
@@ -159,7 +164,7 @@ namespace Basis.BasisUI.HandHeldCamera
 
             _vignetteRoundedToggle = PanelToggle.CreateNewEntry(content);
             _vignetteRoundedToggle.Descriptor.SetTitle(BasisLocalization.Get("camera.vignetteRounded"));
-            _vignetteRoundedToggle.Descriptor.SetDescription(BasisLocalization.Get("camera.vignetteRounded.description"));
+            _vignetteRoundedToggle.Descriptor.SetTooltip(BasisLocalization.Get("camera.vignetteRounded.description"));
             _vignetteRoundedToggle.OnValueChanged = v =>
             {
                 _activeCamera?.HandHeld.ChangeVignetteRounded(v);
@@ -276,6 +281,45 @@ namespace Basis.BasisUI.HandHeldCamera
             Color.RGBToHSV(tone, out float toneHue, out float toneSaturation, out _);
             hue?.SetValueWithoutNotify(Mathf.Round(toneHue * 360f));
             strength?.SetValueWithoutNotify(Mathf.Clamp01(toneSaturation / SplitToningSaturation) * 100f);
+        }
+
+        // ---------- Reset defaults ----------
+
+        /// <summary>
+        /// Where the options gesture returns each film control. Decomposed out of the camera
+        /// defaults by the same maths that seeds them, rather than written out as zeroes: every
+        /// colour here has a neutral that is white, black or grey instead of nothing, and a hand
+        /// written default that drifted from the settings object is a reset that quietly grades the
+        /// shot. Without these the whole Film Look section — and the grading controls the bloom,
+        /// vignette and grain sections borrow from it — had no default to go back to, so the
+        /// gesture was never offered on them at all.
+        /// </summary>
+        private void AssignFilmResetDefaults(BasisHandHeldCameraUI.CameraSettings defaults)
+        {
+            _grainTypeDropdown?.SetResetDefault(GrainTypeKeys[NearestGrainStep(defaults.filmGrainType)]);
+            _grainResponseSlider?.SetResetDefault(defaults.filmGrainResponse * 100f);
+
+            Color.RGBToHSV(defaults.bloomTint, out float bloomHue, out float bloomSaturation, out _);
+            _bloomTintHueSlider?.SetResetDefault(Mathf.Round(bloomHue * 360f));
+            _bloomTintStrengthSlider?.SetResetDefault(Mathf.Clamp01(bloomSaturation / BloomTintSaturation) * 100f);
+
+            Color.RGBToHSV(defaults.vignetteColour, out float vignetteHue, out _, out float vignetteValue);
+            _vignetteColourHueSlider?.SetResetDefault(Mathf.Round(vignetteHue * 360f));
+            _vignetteColourStrengthSlider?.SetResetDefault(Mathf.Clamp01(vignetteValue / VignetteColourValue) * 100f);
+            _vignetteRoundedToggle?.SetResetDefault(defaults.vignetteRounded);
+
+            SetSplitToneResetDefault(defaults.splitToningShadows, _splitShadowHueSlider, _splitShadowStrengthSlider);
+            SetSplitToneResetDefault(defaults.splitToningHighlights, _splitHighlightHueSlider, _splitHighlightStrengthSlider);
+            _splitBalanceSlider?.SetResetDefault(defaults.splitToningBalance);
+
+            _filmLiftSlider?.SetResetDefault(defaults.filmLift * 100f);
+        }
+
+        private static void SetSplitToneResetDefault(Color tone, PanelSlider hue, PanelSlider strength)
+        {
+            Color.RGBToHSV(tone, out float toneHue, out float toneSaturation, out _);
+            hue?.SetResetDefault(Mathf.Round(toneHue * 360f));
+            strength?.SetResetDefault(Mathf.Clamp01(toneSaturation / SplitToningSaturation) * 100f);
         }
 
         /// <summary>

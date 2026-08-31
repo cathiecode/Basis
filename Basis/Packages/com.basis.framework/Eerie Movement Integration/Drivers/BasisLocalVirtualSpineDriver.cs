@@ -14,7 +14,7 @@ namespace Basis.IK
     {
         private bool initialized;
         private float lenNeckToChest, lenChestToSpine, lenSpineToHips, lenSpineTotal, chestTransform, spineTransform, restHipsLocalY;
-        private float restHeadLocalY;
+        private float restHeadLocalY, hipsRestDropY;
         private float3 hipsFromEyeTposeXZ, headFromEyeTposeXZ, yawPivotFromEyeTposeXZ, eyeFromHeadTpose;
         private float tposeNeckMinusEyeY;
         private readonly BasisNodPivotSampler nodPivotSampler = new BasisNodPivotSampler(30);
@@ -124,11 +124,7 @@ namespace Basis.IK
 
             bool isVR = BasisDeviceManagement.IsCurrentModeVR();
 
-            float torsoYawDeadzoneDeg = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
-            if (isVR && !Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue)
-            {
-                torsoYawDeadzoneDeg = 0f;
-            }
+            float torsoYawDeadzoneDeg = isVR ? (Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawPlayInVR.RawValue ? Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneVRDeg.RawValue : 0f) : Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawDeadzoneDeg.RawValue;
 
             if (BasisLocalPlayer.Instance.LocalCharacterDriver.IsProne)
             {
@@ -188,7 +184,7 @@ namespace Basis.IK
                 TorsoYawBlendSpeed = Basis.BasisUI.BasisSettingsDefaults.VSpineTorsoYawBlendSpeed.RawValue,
 
                 HipsFreeze = (byte)(HipsFreezeToTpose ? 1 : 0),
-                IsLocomoting = (byte)(BasisLocalPlayer.Instance.LocalCharacterDriver.MovementVector.sqrMagnitude > 0.001f ? 1 : 0),
+                IsLocomoting = (byte)(BasisLocalPlayer.Instance.LocalCharacterDriver.IsLocomoting ? 1 : 0),
 
                 LenTotal = lenSpineTotal,
                 TChest = chestTransform,
@@ -207,6 +203,7 @@ namespace Basis.IK
                 PostureModel = (byte)(Basis.BasisUI.BasisSettingsDefaults.VSpinePostureModel.RawValue ? 1 : 0),
                 HipsCompressionStrength = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsCompressionStrength.RawValue,
                 HipsMaxDropMeters = Basis.BasisUI.BasisSettingsDefaults.VSpineHipsMaxDropMeters.RawValue * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale,
+                HipsRestDropY = hipsRestDropY,
             };
 
             new BasisVirtualSpineCore.BasisVirtualSpineSolveJob

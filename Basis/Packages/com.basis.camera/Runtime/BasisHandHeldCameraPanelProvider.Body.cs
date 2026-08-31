@@ -3,12 +3,11 @@ using UnityEngine;
 namespace Basis.BasisUI.HandHeldCamera
 {
     /// <summary>
-    /// The camera you are holding, on the preset page: which body it is, what the shutter is doing,
-    /// and whether the flash is armed.
+    /// The camera you are holding, at the top of the Image tab: which body it is, what the shutter
+    /// is doing, and whether the flash is armed — the camera whose picture the rest of the tab tunes.
     ///
-    /// <para>Everything else on this page is a setting. This section is not — the shutter waits on
-    /// a wind-on or a print coming up, and nothing on the panel can talk it out of that. It sits
-    /// with the preset picker because the picker is what hands you a body in the first place.</para>
+    /// <para>Everything else on that tab is a setting. This section is not — the shutter waits on
+    /// a wind-on or a print coming up, and nothing on the panel can talk it out of that.</para>
     ///
     /// <para>Polled on the panel tick rather than driven by an event from the camera, like every
     /// other control on this page. The state moves on a timer nobody presses — a wind-on finishing,
@@ -23,6 +22,8 @@ namespace Basis.BasisUI.HandHeldCamera
         private PanelToggle _bodyFlashToggle;
 
         private bool? _lastBodyFlash;
+        private RectTransform _bodyPageContent;
+        private int _bodyCheckCountdown;
 
         /// <summary>
         /// What the status card currently reads. The card is rewritten on the same quarter-second
@@ -95,7 +96,20 @@ namespace Basis.BasisUI.HandHeldCamera
 
             _lastBodyStatus = status;
             _bodyStatus.SetDescription(status);
-            RebuildModeLayout(_bodyGroup);
+            RebuildBodyLayout();
+        }
+
+        private void TickBodySection()
+        {
+            if (--_bodyCheckCountdown > 0) return;
+            _bodyCheckCountdown = ModeCheckInterval;
+            RefreshBodyControls();
+        }
+
+        private void RebuildBodyLayout()
+        {
+            if (_bodyGroup == null || _bodyPageContent == null) return;
+            PanelElementDescriptor.RebuildLayoutChain(_bodyGroup.ContentParent, _bodyPageContent);
         }
 
         /// <summary>
@@ -140,6 +154,8 @@ namespace Basis.BasisUI.HandHeldCamera
             _bodyGroup = null;
             _bodyStatus = null;
             _bodyFlashToggle = null;
+            _bodyPageContent = null;
+            _bodyCheckCountdown = 0;
 
             // Forces the card to be written on the next open. It is rebuilt holding the help line,
             // so a remembered status would skip the one write that gives it its real height.

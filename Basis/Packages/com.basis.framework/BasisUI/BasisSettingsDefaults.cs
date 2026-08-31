@@ -53,6 +53,8 @@ namespace Basis.BasisUI
 
         public static BasisSettingsBinding<bool> ShowDeveloperTab = new("showdevelopertab", new BasisPlatformDefault<bool>(false));
 
+        public static BasisSettingsBinding<bool> ShowFrameTimeMs = new("showframetimems", new BasisPlatformDefault<bool>(false));
+
         public static BasisSettingsBinding<bool> CustomScale = new("customscale", new BasisPlatformDefault<bool>(false));
 
         // Key bumped to _v2: BasisSettingsSystem.LoadString persists a default the first time it is read, so
@@ -320,6 +322,214 @@ namespace Basis.BasisUI
         public const float MOTION_BLUR_CLAMP_MIN = 0f;
         public const float MOTION_BLUR_CLAMP_MAX = 0.2f;
 
+        public static BasisSettingsBinding<bool> UseGlobalIllumination = new("useglobalillumination", new BasisPlatformDefault<bool>(false));
+        // Screen Space marches the depth buffer and can only gather what the frame already drew. Ray Traced
+        // traces the scene itself against an acceleration structure, so it also carries light from behind the
+        // camera and shades what it hits with the real lights and emissive materials - and it needs a GPU
+        // with ray tracing, falling back to Screen Space on one that has none.
+        public static BasisSettingsBinding<string> GlobalIlluminationMode = new("globalilluminationmode", new BasisPlatformDefault<string>("Screen Space"));
+        // A quick way to snap Intensity, Saturation and Emitter Intensity together rather than one at a
+        // time: Natural is each at its own default, Unnatural pushes all three to an exaggerated,
+        // stylised look. Only ever written by the preset dropdown - nothing reads it to decide how to
+        // render, so it never needs to agree with where the three sliders actually sit.
+        public static BasisSettingsBinding<string> GlobalIlluminationPreset = new("globalilluminationpreset", new BasisPlatformDefault<string>("Natural"));
+        // Avatars are skinned meshes, so this is what decides whether the people in the room bounce and
+        // occlude light in the pose they are standing in. Dynamic re-bakes them on a per-frame budget.
+        public static BasisSettingsBinding<string> GlobalIlluminationSkinnedMeshes = new("globalilluminationskinnedmeshes", new BasisPlatformDefault<string>("Proxy"));
+        public static BasisSettingsBinding<string> GlobalIlluminationQuality = new("globalilluminationquality", new BasisPlatformDefault<string>("Medium"));
+        // Half resolution is what makes the effect affordable at VR framerates; Full is for photo mode and
+        // for people who would rather spend the frame on it.
+        public static BasisSettingsBinding<string> GlobalIlluminationResolution = new("globalilluminationresolution", new BasisPlatformDefault<string>("Half"));
+        public static BasisSettingsBinding<string> GlobalIlluminationFallback = new("globalilluminationfallback", new BasisPlatformDefault<string>("Reflection Probe"));
+        // Ray traced skips a baked-emissive surface's light by default, because that light already sits in
+        // the lightmap and injecting it again lights the room twice from one lamp. Turning this on trades
+        // that correctness for a stronger bounce - useful in a world with no lightmap to speak of, or when
+        // the doubled light is simply the look being asked for. Screen space has no equivalent: it always
+        // reads whatever is already on screen, baked-emissive or not, so this only applies to Ray Traced.
+        public static BasisSettingsBinding<bool> GlobalIlluminationIgnoreBakedEmission = new("globalilluminationignorebakedemission", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<float> GlobalIlluminationIntensity = new("globalilluminationintensity", new BasisPlatformDefault<float>(1f));
+        public const float GI_INTENSITY_MIN = 0.1f;
+        public const float GI_INTENSITY_MAX = 4f;
+        public static BasisSettingsBinding<float> GlobalIlluminationSaturation = new("globalilluminationsaturation", new BasisPlatformDefault<float>(1f));
+        public const float GI_SATURATION_MIN = 0.1f;
+        public const float GI_SATURATION_MAX = 2f;
+        // Near-field obscurance is the effect's own ambient occlusion, gathered from the same rays, so it
+        // costs nothing extra to turn up.
+        public static BasisSettingsBinding<float> GlobalIlluminationObscurance = new("globalilluminationobscurance", new BasisPlatformDefault<float>(0.5f));
+        public const float GI_OBSCURANCE_MIN = 0.05f;
+        public const float GI_OBSCURANCE_MAX = 1f;
+        public static BasisSettingsBinding<float> GlobalIlluminationRayLength = new("globalilluminationraylength", new BasisPlatformDefault<float>(16f));
+        public const float GI_RAY_LENGTH_MIN = 1f;
+        public const float GI_RAY_LENGTH_MAX = 64f;
+        public static BasisSettingsBinding<float> GlobalIlluminationSmoothing = new("globalilluminationsmoothing", new BasisPlatformDefault<float>(1f));
+        public const float GI_SMOOTHING_MIN = 0.25f;
+        public const float GI_SMOOTHING_MAX = 2f;
+        // How much of this frame's trace replaces the accumulated bounce. Low keeps the image stillest but
+        // smears the bounce behind anything that moves, which is a comfort question in VR, so it is the
+        // player's call rather than the world's.
+        public static BasisSettingsBinding<float> GlobalIlluminationTemporalResponse = new("globalilluminationtemporalresponse", new BasisPlatformDefault<float>(0.15f));
+        public const float GI_TEMPORAL_RESPONSE_MIN = 0.05f;
+        public const float GI_TEMPORAL_RESPONSE_MAX = 1f;
+        public static BasisSettingsBinding<bool> GlobalIlluminationTemporalFilter = new("globalilluminationtemporalfilter", new BasisPlatformDefault<bool>(true));
+        public static BasisSettingsBinding<bool> GlobalIlluminationWideBlur = new("globalilluminationwideblur", new BasisPlatformDefault<bool>(true));
+        public static BasisSettingsBinding<bool> GlobalIlluminationRayReuse = new("globalilluminationrayreuse", new BasisPlatformDefault<bool>(true));
+        // Emitters carry light from sources the trace cannot see: a sign or a strip light is under one
+        // texel at traced resolution, and anything behind the camera is off screen entirely.
+        public static BasisSettingsBinding<bool> GlobalIlluminationEmitters = new("globalilluminationemitters", new BasisPlatformDefault<bool>(true));
+        public static BasisSettingsBinding<float> GlobalIlluminationEmitterIntensity = new("globalilluminationemitterintensity", new BasisPlatformDefault<float>(3f));
+        public const float GI_EMITTER_INTENSITY_MIN = 0.1f;
+        public const float GI_EMITTER_INTENSITY_MAX = 8f;
+        // Off by default: a realtime reflection probe pays for the whole effect once per face.
+        public static BasisSettingsBinding<bool> GlobalIlluminationReflectionProbes = new("globalilluminationreflectionprobes", new BasisPlatformDefault<bool>(false));
+        /// <summary>
+        /// Whether mirrors show the bounce. On by default because the alternative is a mirror rendering the
+        /// room without any of the light the same room has when looked at directly, which reads as a broken
+        /// mirror rather than as a performance setting. Each mirror camera pays for its own gather, so this
+        /// is the lever for a world where that is too much.
+        /// </summary>
+        public static BasisSettingsBinding<bool> GlobalIlluminationMirrors = new("globalilluminationmirrors", new BasisPlatformDefault<bool>(true));
+        /// <summary>
+        /// Ray traced reflections. A single mirror ray per pixel, shaded with the same lights and emitters
+        /// the diffuse gather uses. Off by default, and independent of it - a diffuse gather is worth having
+        /// without reflections, and reflections are worth having over a screen space diffuse gather.
+        /// </summary>
+        public static BasisSettingsBinding<bool> GlobalIlluminationSpecular = new("globalilluminationspecular", new BasisPlatformDefault<bool>(false));
+        // Which layers the ray traced trace walks. World And Avatars is what it walked before this was a
+        // choice; narrowing it to Avatars is the cheap option, because the acceleration structure then
+        // holds a handful of capsules instead of the whole room.
+        public static BasisSettingsBinding<string> GlobalIlluminationLayers = new("globalilluminationlayers", new BasisPlatformDefault<string>("World And Avatars"));
+
+        // The tracing internals, exposed so a look problem can be found by moving the thing that causes it
+        // rather than by rebuilding. Every one of these was a constant in the shader or the pass until it
+        // was needed to explain an artifact; the defaults below are exactly the values they were fixed at.
+
+        /// <summary>
+        /// How far a surface can be from the thing above it and still be darkened by it. The obscurance
+        /// term is measured against this distance, so a hard edged band at exactly this radius - and no
+        /// darkening at all past it - is what it looks like when it is shorter than the room needs.
+        /// </summary>
+        public static BasisSettingsBinding<float> GlobalIlluminationObscuranceRadius = new("globalilluminationobscuranceradius", new BasisPlatformDefault<float>(0.5f));
+        public const float GI_OBSCURANCE_RADIUS_MIN = 0.05f;
+        public const float GI_OBSCURANCE_RADIUS_MAX = 4f;
+
+        /// <summary>Where the bounce stops being traced at all. Past this the surface keeps its direct light only.</summary>
+        public static BasisSettingsBinding<float> GlobalIlluminationFadeDistance = new("globalilluminationfadedistance", new BasisPlatformDefault<float>(120f));
+        public const float GI_FADE_DISTANCE_MIN = 1f;
+        public const float GI_FADE_DISTANCE_MAX = 512f;
+
+        /// <summary>
+        /// How far off its own surface a ray starts. Too small and a surface shadows itself in a mottled
+        /// band; too large and contact darkening lifts away from the corner it belongs in.
+        /// </summary>
+        public static BasisSettingsBinding<float> GlobalIlluminationNormalBias = new("globalilluminationnormalbias", new BasisPlatformDefault<float>(0.02f));
+        public const float GI_NORMAL_BIAS_MIN = 0f;
+        public const float GI_NORMAL_BIAS_MAX = 0.5f;
+
+        /// <summary>
+        /// Added to that offset per metre of view distance, because the position a ray starts from is
+        /// reconstructed from a half precision buffer whose error grows with distance.
+        /// </summary>
+        public static BasisSettingsBinding<float> GlobalIlluminationDistanceBias = new("globalilluminationdistancebias", new BasisPlatformDefault<float>(0.0015f));
+        public const float GI_DISTANCE_BIAS_MIN = 0f;
+        public const float GI_DISTANCE_BIAS_MAX = 0.02f;
+
+        /// <summary>How dim a path may get before it stops being worth another bounce.</summary>
+        public static BasisSettingsBinding<float> GlobalIlluminationBounceThreshold = new("globalilluminationbouncethreshold", new BasisPlatformDefault<float>(0.02f));
+        public const float GI_BOUNCE_THRESHOLD_MIN = 0.001f;
+        public const float GI_BOUNCE_THRESHOLD_MAX = 0.5f;
+
+        /// <summary>The ceiling one sample may contribute, which is what stops a single bright hit becoming a speckle.</summary>
+        public static BasisSettingsBinding<float> GlobalIlluminationFireflyClamp = new("globalilluminationfireflyclamp", new BasisPlatformDefault<float>(6f));
+        public const float GI_FIREFLY_CLAMP_MIN = 1f;
+        public const float GI_FIREFLY_CLAMP_MAX = 32f;
+
+
+        // Ray traced ambient occlusion. Off by default because it is a real slice of the frame and it
+        // needs a ray tracing GPU for the traced path.
+        public static BasisSettingsBinding<bool> UseRayTracedAmbientOcclusion = new("useraytracedambientocclusion", new BasisPlatformDefault<bool>(false));
+        // Auto traces against the scene on a ray tracing GPU and drops to the screen space estimator on one
+        // without. Direct3D11 has no ray tracing path at all, so it always lands on Screen Space there.
+        // Screen space rather than the traced path: this is the backend everything can run, and nobody
+        // should be handed the expensive one without asking for it. The master toggle above is still off
+        // by default, so this only decides how it gathers once somebody turns it on.
+        public static BasisSettingsBinding<string> RayTracedAmbientOcclusionMode = new("raytracedambientocclusionmode", new BasisPlatformDefault<string>("Screen Space"));
+        public static BasisSettingsBinding<string> RayTracedAmbientOcclusionQuality = new("raytracedambientocclusionquality", new BasisPlatformDefault<string>("Medium"));
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionIntensity = new("raytracedambientocclusionintensity", new BasisPlatformDefault<float>(1f));
+        public const float RTAO_INTENSITY_MIN = 0.05f;
+        public const float RTAO_INTENSITY_MAX = 1f;
+        // How far a surface looks for occluders, in metres. The whole range is contact shadow scale - two to
+        // ten centimetres - because that is the distance an avatar's own geometry occludes itself over.
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionRadius = new("raytracedambientocclusionradius", new BasisPlatformDefault<float>(RTAO_RADIUS_MIN));
+        public const float RTAO_RADIUS_MIN = 0.02f;
+        public const float RTAO_RADIUS_MAX = 0.1f;
+        // Avatars are skinned meshes, so this decides whether people in the room cast contact shadows.
+        // Dynamic re-bakes them on a per-frame budget, which is CPU the traced path does not otherwise spend.
+        // Avatars only by default: this effect was built for the people in the room, and the wider sets pay
+        // for acceleration structure rebuilds over the whole world to darken corners a screen space
+        // estimator already handles.
+        public static BasisSettingsBinding<string> RayTracedAmbientOcclusionLayers = new("raytracedambientocclusionlayers", new BasisPlatformDefault<string>("Avatars"));
+
+        public static BasisSettingsBinding<string> RayTracedAmbientOcclusionSkinnedMeshes = new("raytracedambientocclusionskinnedmeshes", new BasisPlatformDefault<string>("Proxy"));
+
+        // The tracing internals, exposed so a look problem can be found by moving the thing that causes it.
+        // Every one was a fixed value on the renderer feature; the defaults below are what it was fixed at.
+
+        /// <summary>
+        /// How far off its own surface a ray starts. Avatars are traced as capsules rather than as their
+        /// real mesh, so a ray leaving the visible surface of a body can begin INSIDE that body's capsule
+        /// and report itself as fully occluded - a hard edged dark patch on the shape of the capsule. This
+        /// is the offset that decides whether it escapes.
+        /// </summary>
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionNormalBias = new("raytracedambientocclusionnormalbias", new BasisPlatformDefault<float>(0.005f));
+        public const float RTAO_NORMAL_BIAS_MIN = 0f;
+        public const float RTAO_NORMAL_BIAS_MAX = 0.5f;
+
+        /// <summary>Added to that offset per metre of view distance, for the depth buffer's growing error.</summary>
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionDistanceBias = new("raytracedambientocclusiondistancebias", new BasisPlatformDefault<float>(0.0005f));
+        public const float RTAO_DISTANCE_BIAS_MIN = 0f;
+        public const float RTAO_DISTANCE_BIAS_MAX = 0.02f;
+
+        /// <summary>How quickly a hit stops darkening as it gets further from the surface that cast the ray.</summary>
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionFalloff = new("raytracedambientocclusionfalloff", new BasisPlatformDefault<float>(1f));
+        public const float RTAO_FALLOFF_MIN = 0f;
+        public const float RTAO_FALLOFF_MAX = 8f;
+
+        /// <summary>The contrast curve on the result. Above one deepens the dark end, below one flattens it.</summary>
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionPower = new("raytracedambientocclusionpower", new BasisPlatformDefault<float>(1f));
+        public const float RTAO_POWER_MIN = 0.25f;
+        public const float RTAO_POWER_MAX = 4f;
+
+        /// <summary>Where the effect starts fading out with distance, and where it has gone entirely.</summary>
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionFadeStart = new("raytracedambientocclusionfadestart", new BasisPlatformDefault<float>(40f));
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionFadeEnd = new("raytracedambientocclusionfadeend", new BasisPlatformDefault<float>(60f));
+        public const float RTAO_FADE_MIN = 0f;
+        public const float RTAO_FADE_MAX = 256f;
+
+        /// <summary>How much of the occlusion is held back off glossy surfaces, where it reads as dirt.</summary>
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionSpecularRelief = new("raytracedambientocclusionspecularrelief", new BasisPlatformDefault<float>(0f));
+        public const float RTAO_SPECULAR_RELIEF_MIN = 0f;
+        public const float RTAO_SPECULAR_RELIEF_MAX = 1f;
+        // URP multiplies the whole indirect term by the occlusion but only lerps the direct term toward it by
+        // this much, so in a scene carried by a bright directional light the effect reads far weaker than the
+        // occlusion buffer looks. Raising this pulls the shaded image back toward the buffer.
+        public static BasisSettingsBinding<float> RayTracedAmbientOcclusionDirectStrength = new("raytracedambientocclusiondirectstrength", new BasisPlatformDefault<float>(0.5f));
+        // Each denoise pass reuses the same edge aware kernel with its taps spread twice as far, so the reach
+        // doubles per pass for the same cost. More passes means less grain and softer contact shadows.
+        public static BasisSettingsBinding<string> RayTracedAmbientOcclusionDenoise = new("raytracedambientocclusiondenoise", new BasisPlatformDefault<string>("High"));
+        // Mirrors and the handheld camera each trace and denoise their own view. Correct, and a real
+        // multiple of the cost, so it is the first thing to turn off when the frame gets tight.
+        public static BasisSettingsBinding<bool> RayTracedAmbientOcclusionOtherCameras = new("raytracedambientocclusionothercameras", new BasisPlatformDefault<bool>(true));
+        // Lighting feeds URP's lighting, which is honest but only reaches shaders that read the occlusion
+        // texture and is clamped by a material's own occlusion map. Final Image multiplies the finished
+        // opaque frame the way Unity's own SSAO does in After Opaque, so it lands on everything.
+        public static BasisSettingsBinding<string> RayTracedAmbientOcclusionApply = new("raytracedambientocclusionapply", new BasisPlatformDefault<string>("Lighting"));
+        public const float RTAO_DIRECT_STRENGTH_MIN = 0f;
+        public const float RTAO_DIRECT_STRENGTH_MAX = 1f;
+        public static BasisSettingsBinding<bool> DevRtaoDebugView = new("devrtaodebugview", new BasisPlatformDefault<bool>(false));
+        // Which buffer the debug view draws. An artifact looks the same in the finished picture whichever
+        // stage made it, so stepping through these is how you find the one that did.
+        public static BasisSettingsBinding<string> DevRtaoDebugStage = new("devrtaodebugstage", new BasisPlatformDefault<string>("Final"));
+
         // Commented out 2026-08-04: the realtime-reflection-probe driver these described was
         // never implemented — no UI exposes them and nothing reads them (the Performance Mode
         // table only wrote the bool). Restore both together with the probe driver.
@@ -350,6 +560,7 @@ namespace Basis.BasisUI
 
         public static BasisSettingsBinding<bool> DevVariableRateShading = new("devvariablerateshading", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<bool> DevVariableRateShadingDesktop = new("devvariablerateshadingdesktop", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<string> DevGiDebugView = new("devgidebugview", new BasisPlatformDefault<string>("Off"));
 
         public static BasisSettingsBinding<bool> EyeTrackingPreferOsc = new("eyetrackingpreferosc", new BasisPlatformDefault<bool>(true));
         public static BasisSettingsBinding<bool> EyeFoveationAutoManage = new("eyefoveationautomanage", new BasisPlatformDefault<bool>(true));
@@ -370,6 +581,12 @@ namespace Basis.BasisUI
         public static BasisSettingsBinding<bool> GizmoSkeletonLines = new("gizmoskeletonlines_v2", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<bool> GizmoCalibrationSpheres = new("gizmocalibrationspheres_v2", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<bool> GizmoJiggleVisuals = new("gizmojigglevisuals_v2", new BasisPlatformDefault<bool>(false));
+        /// <summary>
+        /// The capsules that stand in for avatar bodies in the ray traced lighting. They are the one part
+        /// of that picture which does NOT match what is on screen, so being able to look at them is the
+        /// difference between diagnosing an artefact and guessing at it.
+        /// </summary>
+        public static BasisSettingsBinding<bool> GizmoAvatarProxy = new("gizmoavatarproxy", new BasisPlatformDefault<bool>(false));
 
         public static BasisSettingsBinding<bool> TrackerGizmos = new("trackergizmos", new BasisPlatformDefault<bool>(false));
 
@@ -428,6 +645,11 @@ namespace Basis.BasisUI
         // through the world so a marker buried inside an avatar stays readable.
         public static BasisSettingsBinding<bool> GizmoDrawOnTop = new("gizmodrawontop", new BasisPlatformDefault<bool>(false));
 
+        // Which cameras see the gizmos. Off (the default) keeps them on OverlayUI, which the
+        // handheld camera culls, so they stay out of photos, streams and the follow PIP; on moves
+        // them to the layer the world itself is on, so every camera in the scene renders them.
+        public static BasisSettingsBinding<bool> GizmoRenderInAllCameras = new("gizmorenderinallcameras", new BasisPlatformDefault<bool>(false));
+
         // Network value-sync debug gizmos (see BasisSyncGizmos): from→to interpolation
         // window, live-position sphere, extrapolation overshoot, jitter-buffer-health colour.
         public static BasisSettingsBinding<bool> GizmoNetworkSync = new("gizmonetworksync", new BasisPlatformDefault<bool>(false));
@@ -483,11 +705,25 @@ namespace Basis.BasisUI
         // at the start of each calibration; leave off in normal play.
         public static BasisSettingsBinding<bool> DumpCalibrationCsv = new("devdumpcalibrationcsv", new BasisPlatformDefault<bool>(false));
 
+        public static BasisSettingsBinding<bool> SpawnAnchorHandles = new("spawnanchorhandles", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<bool> SpawnAnchorSeatOnSurface = new("spawnanchorseatonsurface", new BasisPlatformDefault<bool>(true));
+        public static BasisSettingsBinding<bool> SpawnAnchorPositionSnap = new("spawnanchorpositionsnap", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<float> SpawnAnchorPositionSnapSize = new("spawnanchorpositionsnapsize", new BasisPlatformDefault<float>(0.25f));
+        public static BasisSettingsBinding<bool> SpawnAnchorRotationSnap = new("spawnanchorrotationsnap", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<float> SpawnAnchorRotationSnapDegrees = new("spawnanchorrotationsnapdegrees", new BasisPlatformDefault<float>(15f));
+
         public static BasisSettingsBinding<bool> EnableShaderPrewarm = new("enableshaderprewarm", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<bool> EnableMaterialCorrection = new("enablematerialcorrection", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<bool> EnableShaderBlocklist = new("enableshaderblocklist", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<string> ShaderBlocklistPatterns = new("shaderblocklistpatterns", new BasisPlatformDefault<string>(string.Empty));
-        public static BasisSettingsBinding<bool> EnableGraphicsStatePrewarm = new("enablegraphicsstateprewarm", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<bool> EnableGraphicsStatePrewarm = new("enablegraphicsstateprewarm_v2", new BasisPlatformDefault<bool> { windows = true, android = false, ios = false, linux = false, other = false });
+        // Default OFF everywhere, unlike EnableGraphicsStatePrewarm above: staggering renderer
+        // visibility let avatars read as nude while loading (BasisAvatarPsoReveal.BeginStagedReveal
+        // is hard-disabled regardless of this value now). Key bumped _v2 so installs that already
+        // persisted the old windows=true default actually pick up "off" instead of keeping it.
+        public static BasisSettingsBinding<bool> EnableStagedAvatarReveal = new("enablestagedavatarreveal_v2", new BasisPlatformDefault<bool>(false));
+        // MB, not bytes — matches AvatarDownloadSize's convention for a PanelSlider.ValueDisplayMode.MemorySize binding.
+        public static BasisSettingsBinding<float> PsoCacheSizeMb = new("psocachesizemb", new BasisPlatformDefault<float>(10240f));
         public static BasisSettingsBinding<bool> ContentPoliceLogging = new("contentpolicelogging", new BasisPlatformDefault<bool>(false));
 
         /// <summary>
@@ -531,8 +767,6 @@ namespace Basis.BasisUI
 
         public static BasisSettingsBinding<bool> AvatarPreviewMirror = new("avatarpreviewmirror", new BasisPlatformDefault<bool>(true));
 
-        public static BasisSettingsBinding<bool> CameraHud = new("camerahud", new BasisPlatformDefault<bool>(false));
-
         public static BasisSettingsBinding<bool> LimitHandHeldCameraRate = new("limithandheldcamerarate", new BasisPlatformDefault<bool>(false));
 
         public static BasisSettingsBinding<float> HandHeldCameraRenderHz = new("handheldcamerarenderhz_v2", new BasisPlatformDefault<float>(30));
@@ -558,7 +792,7 @@ namespace Basis.BasisUI
         public static BasisSettingsBinding<float> MicrophoneIconOffsetY = new("microphoneiconoffsety", new BasisPlatformDefault<float>(0f));
 
         // Swaps the microphone glyph for a shader-drawn circle outline that grows with voice level.
-        public static BasisSettingsBinding<bool> MicrophoneIconLevelRing = new("microphoneiconlevelring", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<bool> MicrophoneIconLevelRing = new("microphoneiconlevelring_v2", new BasisPlatformDefault<bool>(true));
 
         public static BasisSettingsBinding<bool> AvatarRangeIndicator = new("avatarrangeindicator", new BasisPlatformDefault<bool>(false));
         public static BasisSettingsBinding<bool> HearingRangeIndicator = new("hearingrangeindicator", new BasisPlatformDefault<bool>(false));
@@ -694,6 +928,13 @@ namespace Basis.BasisUI
         public static BasisSettingsBinding<float> JiggleColliderLodMidDistance = new("jigglecolliderlodmiddistance", new BasisPlatformDefault<float>(50));
         public static BasisSettingsBinding<float> JiggleColliderLodFarDistance = new("jigglecolliderlodfardistance", new BasisPlatformDefault<float>(100));
 
+        // Distance-based pause of remote avatars' jiggle SIMULATION itself (Verlet integrate +
+        // transform I/O), not just colliders — see BasisJiggleSimulationLOD. Off by default:
+        // unlike the collider LOD above, this has never been run in a headset session; the
+        // maintainer should verify it looks right before flipping it on.
+        public static BasisSettingsBinding<bool> UseJiggleSimulationDistanceLod = new("usejigglesimulationdistancelod", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<float> JiggleSimulationLodDistance = new("jigglesimulationloddistance", new BasisPlatformDefault<float>(120));
+
         // Animators default on at 1 — extras are a common perf trap (every child
         // Animator ticks every frame). Excess Animators are trimmed, not blocked.
         public static BasisSettingsBinding<bool> UsePerfLimitAnimators = new("useperflimitanimators", new BasisPlatformDefault<bool>(true));
@@ -756,12 +997,21 @@ namespace Basis.BasisUI
         // paying a full extra skinned draw per shadow cascade each.
         public static BasisSettingsBinding<bool> UseAvatarShadowLod = new("useavatarshadowlod", new BasisPlatformDefault<bool>(true));
         public static BasisSettingsBinding<bool> UseAvatarVisibilityCull = new("useavatarvisibilitycull", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<bool> ShowPerformanceBar = new("showperformancebar", new BasisPlatformDefault<bool>(false));
+        // UI-formatting only (which legend the CPU field renders) — no LoadAll mirror needed, the
+        // settings panel reads RawValue directly each refresh.
+        public static BasisSettingsBinding<bool> PerformanceBarDetailed = new("performancebardetailed", new BasisPlatformDefault<bool>(false));
 
         // URP's GPU Resident Drawer occlusion test, for world geometry (MeshRenderer only — avatars
         // are skinned and the drawer never sees them). Read at boot only: the drawer snapshots its
         // settings when it is built, and rebuilding it re-registers every renderer in the scene, so
         // changing this mid-session waits for a restart. See BasisGpuOcclusionCulling.
         public static BasisSettingsBinding<bool> UseGpuOcclusionCulling = new("usegpuocclusionculling", new BasisPlatformDefault<bool>(false));
+
+        // Graphics API name (GraphicsDeviceType.ToString()) the player should start on. Empty means
+        // whatever the build picks. Unity only takes this from the command line, so a change lands
+        // by relaunching into it — see BasisGraphicsApiSelection.
+        public static BasisSettingsBinding<string> GraphicsApi = new("graphicsapi", new BasisPlatformDefault<string>(string.Empty));
 
         // Shows the baked far avatar carried in a player's bundle (driven by the same
         // networked bone data) whenever their real avatar isn't loaded — past the max avatar
@@ -807,6 +1057,12 @@ namespace Basis.BasisUI
             linux = "Capped",
             other = "On"
         });
+
+        /// <summary>
+        /// Display refresh rate to ask the headset for. Auto keeps whatever the OpenXR runtime
+        /// chose. A rate the headset does not enumerate falls back to the closest one it does.
+        /// </summary>
+        public static BasisSettingsBinding<string> HeadsetRefreshRate = new("headsetrefreshrate", new BasisPlatformDefault<string>("Auto"));
 
         public static BasisSettingsBinding<float> RenderResolution = new("render resolution", new BasisPlatformDefault<float>(1));
 
@@ -1547,9 +1803,18 @@ namespace Basis.BasisUI
         public static BasisSettingsBinding<float> FBIKSpineBendPitch = new("fbikspinebendpitch", new BasisPlatformDefault<float>(0.45f));
         public static BasisSettingsBinding<float> FBIKSpineBendYaw = new("fbikspinebendyaw", new BasisPlatformDefault<float>(0.10f));
         public static BasisSettingsBinding<float> FBIKSpineBendRoll = new("fbikspinebendroll", new BasisPlatformDefault<float>(0.35f));
+        public static BasisSettingsBinding<float> FBIKChestBendPitch = new("fbikchestbendpitch", new BasisPlatformDefault<float>(0.20f));
+        public static BasisSettingsBinding<float> FBIKChestBendYaw = new("fbikchestbendyaw", new BasisPlatformDefault<float>(0.15f));
+        public static BasisSettingsBinding<float> FBIKChestBendRoll = new("fbikchestbendroll", new BasisPlatformDefault<float>(0.15f));
         public static BasisSettingsBinding<float> FBIKUpperChestBendPitch = new("fbikupperchestbendpitch", new BasisPlatformDefault<float>(0.25f));
         public static BasisSettingsBinding<float> FBIKUpperChestBendYaw = new("fbikupperchestbendyaw", new BasisPlatformDefault<float>(0.30f));
         public static BasisSettingsBinding<float> FBIKUpperChestBendRoll = new("fbikupperchestbendroll", new BasisPlatformDefault<float>(0.20f));
+        // OFF by default (_v2 re-keys the installs that ran the 0.5 build). Splitting a head turn onto the neck
+        // bone is anatomically right, but in-headset it made the neck read worse -- it stacks on whatever the
+        // torso-yaw deadzone already leaves for the neck to carry. Live-tunable; needs a headset A/B before it
+        // is turned back on.
+        public static BasisSettingsBinding<float> FBIKNeckYawShare = new("fbikneckyawshare_v2", new BasisPlatformDefault<float>(0f));
+        public static BasisSettingsBinding<float> FBIKSpineStretchMax = new("fbikspinestretchmax", new BasisPlatformDefault<float>(0.03f));
         // Spine relax: hip hinge coupling
         public static BasisSettingsBinding<float> FBIKHipHingeStartDeg = new("fbikhiphingestartdeg_v2", new BasisPlatformDefault<float>(40f));
         public static BasisSettingsBinding<float> FBIKHipHingeMaxAddDeg = new("fbikhiphingemaxadddeg_v2", new BasisPlatformDefault<float>(52f));
@@ -1609,6 +1874,11 @@ namespace Basis.BasisUI
         // Width of the spine CCD's taut band as a fraction of hips->head length. Must exceed the sub-millimetre
         // compressions an upright head commands through the neck-pivot lever, or the solver sits on its
         // full-extension singularity.
+        // ⚠ MEASURED 2026-08-25: narrowing this to 0.003 to cut the head's few-millimetre band residual
+        // reintroduces the standing buzz it exists to prevent (buzz-band, both avatar-scale gates and the
+        // full-extension continuity gate all go red) and costs corpus accuracy (1.61 -> 1.73 cm mean). The
+        // width is not the knob -- the regularizer's TAIL is, and it is quartic in SolveSequentialSpineIK so
+        // the head is released within a fraction of a millimetre once the compression is real.
         public static BasisSettingsBinding<float> FBIKSpineTautBandFrac = new("fbikspinetautbandfrac", new BasisPlatformDefault<float>(0.015f));
         // Lateral bend -> a little same-side axial rotation, so a sustained lean reads as a spinal coupling
         // rather than a pure hinge.
@@ -1810,7 +2080,12 @@ namespace Basis.BasisUI
 
         // Off forces the yaw deadzone to 0 in VR (torso follows immediately); on uses the configured
         // VSpineTorsoYawDeadzoneDeg cone in VR too. Desktop always uses the configured value.
+        // ⚠ Left OFF: turning this on in VR was speculative and never headset-verified. With a deadzone the
+        // torso stops following the head, so every degree inside it is charged to the neck -- reported as the
+        // neck reading worse. The de-orbit fix it was premised on is real, but this is a FEEL change and needs
+        // its own A/B.
         public static BasisSettingsBinding<bool> VSpineTorsoYawPlayInVR = new("vspinetorsoyawplayinvr", new BasisPlatformDefault<bool>(false));
+        public static BasisSettingsBinding<float> VSpineTorsoYawDeadzoneVRDeg = new("vspinetorsoyawdeadzonevrdeg", new BasisPlatformDefault<float>(30f));
 
 
         // ---------------- TRACKER PAIRING (virtual midpoint) ----------------
@@ -2105,6 +2380,7 @@ namespace Basis.BasisUI
             Antialiasing.LoadBindingValue();
             DevVariableRateShading.LoadBindingValue();
             DevVariableRateShadingDesktop.LoadBindingValue();
+            DevGiDebugView.LoadBindingValue();
             VrsFovealInnerRadius.LoadBindingValue();
             VrsFovealOuterRadius.LoadBindingValue();
             UseBloomOverride.LoadBindingValue();
@@ -2117,12 +2393,63 @@ namespace Basis.BasisUI
             MotionBlurClamp.LoadBindingValue();
             MotionBlurQuality.LoadBindingValue();
             MotionBlurMode.LoadBindingValue();
+            UseGlobalIllumination.LoadBindingValue();
+            GlobalIlluminationMode.LoadBindingValue();
+            GlobalIlluminationPreset.LoadBindingValue();
+            GlobalIlluminationSkinnedMeshes.LoadBindingValue();
+            GlobalIlluminationQuality.LoadBindingValue();
+            GlobalIlluminationResolution.LoadBindingValue();
+            GlobalIlluminationFallback.LoadBindingValue();
+            GlobalIlluminationIgnoreBakedEmission.LoadBindingValue();
+            GlobalIlluminationIntensity.LoadBindingValue();
+            GlobalIlluminationSaturation.LoadBindingValue();
+            GlobalIlluminationObscurance.LoadBindingValue();
+            GlobalIlluminationRayLength.LoadBindingValue();
+            GlobalIlluminationSmoothing.LoadBindingValue();
+            GlobalIlluminationTemporalResponse.LoadBindingValue();
+            GlobalIlluminationTemporalFilter.LoadBindingValue();
+            GlobalIlluminationWideBlur.LoadBindingValue();
+            GlobalIlluminationRayReuse.LoadBindingValue();
+            GlobalIlluminationEmitters.LoadBindingValue();
+            GlobalIlluminationEmitterIntensity.LoadBindingValue();
+            GlobalIlluminationReflectionProbes.LoadBindingValue();
+            GlobalIlluminationMirrors.LoadBindingValue();
+            GlobalIlluminationSpecular.LoadBindingValue();
+            GlobalIlluminationLayers.LoadBindingValue();
+            GlobalIlluminationObscuranceRadius.LoadBindingValue();
+            GlobalIlluminationFadeDistance.LoadBindingValue();
+            GlobalIlluminationNormalBias.LoadBindingValue();
+            GlobalIlluminationDistanceBias.LoadBindingValue();
+            GlobalIlluminationBounceThreshold.LoadBindingValue();
+            GlobalIlluminationFireflyClamp.LoadBindingValue();
+
+            UseRayTracedAmbientOcclusion.LoadBindingValue();
+            RayTracedAmbientOcclusionMode.LoadBindingValue();
+            RayTracedAmbientOcclusionQuality.LoadBindingValue();
+            RayTracedAmbientOcclusionIntensity.LoadBindingValue();
+            RayTracedAmbientOcclusionRadius.LoadBindingValue();
+            RayTracedAmbientOcclusionLayers.LoadBindingValue();
+            RayTracedAmbientOcclusionSkinnedMeshes.LoadBindingValue();
+            RayTracedAmbientOcclusionNormalBias.LoadBindingValue();
+            RayTracedAmbientOcclusionDistanceBias.LoadBindingValue();
+            RayTracedAmbientOcclusionFalloff.LoadBindingValue();
+            RayTracedAmbientOcclusionPower.LoadBindingValue();
+            RayTracedAmbientOcclusionFadeStart.LoadBindingValue();
+            RayTracedAmbientOcclusionFadeEnd.LoadBindingValue();
+            RayTracedAmbientOcclusionSpecularRelief.LoadBindingValue();
+            RayTracedAmbientOcclusionDirectStrength.LoadBindingValue();
+            RayTracedAmbientOcclusionDenoise.LoadBindingValue();
+            RayTracedAmbientOcclusionOtherCameras.LoadBindingValue();
+            RayTracedAmbientOcclusionApply.LoadBindingValue();
+            DevRtaoDebugView.LoadBindingValue();
+            DevRtaoDebugStage.LoadBindingValue();
             //UseRealtimeReflectionProbes.LoadBindingValue();
             //RealtimeReflectionProbeRate.LoadBindingValue();
             ShowGizmos.LoadBindingValue();
             GizmoSkeletonLines.LoadBindingValue();
             GizmoCalibrationSpheres.LoadBindingValue();
             GizmoJiggleVisuals.LoadBindingValue();
+            GizmoAvatarProxy.LoadBindingValue();
             TrackerGizmos.LoadBindingValue();
             LinkedTrackerLines.LoadBindingValue();
             GizmoEyeGaze.LoadBindingValue();
@@ -2147,6 +2474,7 @@ namespace Basis.BasisUI
             GizmoNetworkAdditionalInfo.LoadBindingValue();
             GizmoLabels.LoadBindingValue();
             GizmoDrawOnTop.LoadBindingValue();
+            GizmoRenderInAllCameras.LoadBindingValue();
             EnableStatistics.LoadBindingValue();
             ShowVoiceRange.LoadBindingValue();
             AvatarDataDebugEnabled.LoadBindingValue();
@@ -2157,6 +2485,12 @@ namespace Basis.BasisUI
             DevShowCalibrationDebug.LoadBindingValue();
             DevAlwaysShowCalibration.LoadBindingValue();
             DumpCalibrationCsv.LoadBindingValue();
+            SpawnAnchorHandles.LoadBindingValue();
+            SpawnAnchorSeatOnSurface.LoadBindingValue();
+            SpawnAnchorPositionSnap.LoadBindingValue();
+            SpawnAnchorPositionSnapSize.LoadBindingValue();
+            SpawnAnchorRotationSnap.LoadBindingValue();
+            SpawnAnchorRotationSnapDegrees.LoadBindingValue();
             DisableLogging.LoadBindingValue();
             BasisDebug.LoggingDisabled = DisableLogging.RawValue;
             DisableLogging.OnChanged += value => BasisDebug.LoggingDisabled = value;
@@ -2174,7 +2508,14 @@ namespace Basis.BasisUI
             ShaderBlocklistPatterns.OnChanged += BasisShaderFallback.SetBlocklist;
             EnableGraphicsStatePrewarm.LoadBindingValue();
             BasisGraphicsStatePrewarm.Enabled = EnableGraphicsStatePrewarm.RawValue;
-            EnableGraphicsStatePrewarm.OnChanged += value => BasisGraphicsStatePrewarm.Enabled = value;
+            BasisGraphicsStateWarmPump.Apply(EnableGraphicsStatePrewarm.RawValue);
+            EnableGraphicsStatePrewarm.OnChanged += value => { BasisGraphicsStatePrewarm.Enabled = value; BasisGraphicsStateWarmPump.Apply(value); };
+            EnableStagedAvatarReveal.LoadBindingValue();
+            Basis.Scripts.Rendering.BasisAvatarPsoReveal.Apply(EnableStagedAvatarReveal.RawValue);
+            EnableStagedAvatarReveal.OnChanged += Basis.Scripts.Rendering.BasisAvatarPsoReveal.Apply;
+            PsoCacheSizeMb.LoadBindingValue();
+            BasisGraphicsStatePrewarm.MaxCacheBytes = (long)(PsoCacheSizeMb.RawValue * 1024f * 1024f);
+            PsoCacheSizeMb.OnChanged += value => BasisGraphicsStatePrewarm.MaxCacheBytes = (long)(value * 1024f * 1024f);
             ContentPoliceLogging.LoadBindingValue();
             ContentPoliceControl.VerboseLogging = ContentPoliceLogging.RawValue;
             ContentPoliceLogging.OnChanged += value => ContentPoliceControl.VerboseLogging = value;
@@ -2206,6 +2547,7 @@ namespace Basis.BasisUI
             DynamicResolutionTargetFrameRate.LoadBindingValue();
             VSync.LoadBindingValue();
             VSyncCapFps.LoadBindingValue();
+            HeadsetRefreshRate.LoadBindingValue();
 
             // Mirror
             UseMirrorQualityOverride.LoadBindingValue();
@@ -2226,6 +2568,7 @@ namespace Basis.BasisUI
             UseAvatarSkinLod.LoadBindingValue();
             UseAvatarShadowLod.LoadBindingValue();
             UseAvatarVisibilityCull.LoadBindingValue();
+            ShowPerformanceBar.LoadBindingValue();
             UseGpuOcclusionCulling.LoadBindingValue();
             UseAvatarFarLod.LoadBindingValue();
             //AvatarFarLodDistance.LoadBindingValue();
@@ -2258,6 +2601,8 @@ namespace Basis.BasisUI
             JiggleColliderLodNearDistance.LoadBindingValue();
             JiggleColliderLodMidDistance.LoadBindingValue();
             JiggleColliderLodFarDistance.LoadBindingValue();
+            UseJiggleSimulationDistanceLod.LoadBindingValue();
+            JiggleSimulationLodDistance.LoadBindingValue();
             UsePerfLimitAnimators.LoadBindingValue();
             MaxPerfAnimators.LoadBindingValue();
             UsePerfLimitBones.LoadBindingValue();
@@ -2298,9 +2643,9 @@ namespace Basis.BasisUI
             // UI
             RememberMenuState.LoadBindingValue();
             ShowDeveloperTab.LoadBindingValue();
+            ShowFrameTimeMs.LoadBindingValue();
             AvatarPreview.LoadBindingValue();
             AvatarPreviewMirror.LoadBindingValue();
-            CameraHud.LoadBindingValue();
             LimitHandHeldCameraRate.LoadBindingValue();
             HandHeldCameraRenderHz.LoadBindingValue();
             LimitAvatarPreviewRate.LoadBindingValue();
@@ -2564,6 +2909,11 @@ namespace Basis.BasisUI
             FBIKUpperChestBendPitch.LoadBindingValue();
             FBIKUpperChestBendYaw.LoadBindingValue();
             FBIKUpperChestBendRoll.LoadBindingValue();
+            FBIKChestBendPitch.LoadBindingValue();
+            FBIKChestBendYaw.LoadBindingValue();
+            FBIKChestBendRoll.LoadBindingValue();
+            FBIKNeckYawShare.LoadBindingValue();
+            FBIKSpineStretchMax.LoadBindingValue();
             FBIKHipHingeStartDeg.LoadBindingValue();
             FBIKHipHingeMaxAddDeg.LoadBindingValue();
             FBIKChestSpringHz.LoadBindingValue();
@@ -2632,6 +2982,7 @@ namespace Basis.BasisUI
             VSpineTorsoYawDeadzoneDeg.LoadBindingValue();
             VSpineTorsoYawBlendSpeed.LoadBindingValue();
             VSpineTorsoYawPlayInVR.LoadBindingValue();
+            VSpineTorsoYawDeadzoneVRDeg.LoadBindingValue();
 
             // Tracker pairing
             TrackerLinkingAdvancedVisible.LoadBindingValue();

@@ -1,156 +1,184 @@
+using Basis.Scripts.Device_Management;
+using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
+
+/// <summary>Why the monitor is, or is not, showing a camera's feed.</summary>
+public enum BasisCameraDirectToScreenState
+{
+    /// <summary>The mode is switched off.</summary>
+    Off = 0,
+
+    /// <summary>The feed is being drawn over the game window in place of the headset mirror.</summary>
+    Presenting = 1,
+
+    /// <summary>
+    /// Switched on, but the operator is in desktop mode, where the window is already their own
+    /// view. Takes the window over again on the next switch into VR.
+    /// </summary>
+    WaitingForVR = 2,
+
+    /// <summary>Switched on, but the fitted body has no output socket: a film body only shows its own viewfinder.</summary>
+    NoOutputSocket = 3,
+
+    /// <summary>This platform has no desktop window to draw to.</summary>
+    Unsupported = 4,
+}
 
 /// <summary>
-/// Direct To Screen presentation. The camera ALWAYS renders into its own render texture — this
-/// just puts that texture on the main screen. Re-pointing the camera at the backbuffer instead
-/// (the old approach) gave the mode a second, different render path, which is why post-processing,
-/// MSAA and colour all behaved differently there. With one path they are identical by construction.
+/// Direct To Screen: the feed drawn over the game window in place of the headset mirror, so the
+/// monitor — and anything capturing it — shows the shot while the operator is in VR.
 ///
-/// While the mode is on, the feed is also sized to the screen, so it covers it. A fixed 16:9 feed
-/// can only be barred, cropped or squashed into a window of another shape; re-rendering at the
-/// window's shape is the only one of those that neither throws pixels away nor distorts them, and
-/// it costs the same render either way. What the wider frame shows is set by the capture camera's
-/// gate fit, which is horizontal: the width of the shot stays put, so a window wider than the
-/// capture aspect trims the top and bottom of the frame and a taller one shows more of them. The
-/// saved photo is unaffected — it re-renders at the capture resolution when the shutter fires.
-///
-/// A screen-space overlay canvas is used deliberately: it is composited after all camera rendering,
-/// so the capture camera can never see it and there is no feedback loop.
+/// <para>
+/// VR only, by construction rather than by rule: in desktop mode the window is the operator's own
+/// eyes and the main camera is already on it. The decision is re-made on every device switch and
+/// checked again every frame, so hot-swapping to desktop hands the window back and swapping into
+/// VR takes it over again, with the setting itself never moving. The drawing is done by
+/// <see cref="BasisCameraDirectToScreenFeature"/> through a screen camera this owns
+/// (<see cref="BasisCameraDirectToScreenOutput"/>); this half is the decision.
+/// </para>
 /// </summary>
 public partial class BasisHandHeldCamera
 {
-    private GameObject directToScreenGO;
-    private RawImage directToScreenImage;
-    private AspectRatioFitter directToScreenFitter;
+    /// <summary>
+    /// Whether the operator has asked for the feed on the monitor. The setting, which persists;
+    /// whether it is actually happening right now is <see cref="IsDirectToScreenPresenting"/>.
+    /// </summary>
+    public bool DirectToScreen { get; private set; }
 
-    /// <summary>Sorting order high enough to sit above the regular UI while mirroring.</summary>
-    private const int DirectToScreenSortingOrder = 30000;
+    /// <summary>True while the feed is being drawn over the game window.</summary>
+    public bool IsDirectToScreenPresenting => directToScreenOutput != null && directToScreenOutput.IsPresenting;
 
     /// <summary>
-    /// Ceiling on the screen-matched feed. The camera re-renders this every frame the mode is on,
-    /// so a 5K or 8K desktop would otherwise quietly multiply its cost; past this the image is
-    /// scaled up to the screen, which is what it did at every size before.
+    /// Whether this platform has a desktop window to draw to at all. A standalone headset has no
+    /// monitor — its window is the headset — and drawing a camera over it would blind the operator.
     /// </summary>
-    private const int DirectToScreenMaxDimension = 3840;
-
-    /// <summary>
-    /// Pixel size the feed should render at to cover the screen exactly. Prefers the overlay
-    /// canvas's own rect — that is literally the area being filled — and falls back to
-    /// <see cref="Screen"/> for the first frame, before the canvas has laid out.
-    /// </summary>
-    private bool TryGetDirectToScreenFeedSize(out int width, out int height)
+    public static bool IsDirectToScreenSupported
     {
-        width = 0;
-        height = 0;
-
-        float pixelWidth = Screen.width;
-        float pixelHeight = Screen.height;
-
-        if (directToScreenGO != null && directToScreenGO.transform is RectTransform canvasRect)
+        get
         {
-            Rect rect = canvasRect.rect;
-            if (rect.width >= 1f && rect.height >= 1f)
+            switch (Application.platform)
             {
-                pixelWidth = rect.width;
-                pixelHeight = rect.height;
-            }
-        }
-
-        if (pixelWidth < 1f || pixelHeight < 1f) return false;
-
-        float clamp = Mathf.Min(1f, DirectToScreenMaxDimension / Mathf.Max(pixelWidth, pixelHeight));
-        width = Mathf.Max(16, Mathf.RoundToInt(pixelWidth * clamp));
-        height = Mathf.Max(16, Mathf.RoundToInt(pixelHeight * clamp));
-        return true;
-    }
-
-    private void SetDirectToScreenOverlayActive(bool active)
-    {
-        if (!active)
-        {
-            DespawnDirectToScreenOverlay();
-            // Back to the authored preview size: nothing is filling the screen with it any more,
-            // and leaving it at the window's shape would keep charging for pixels no one sees.
-            ApplyPreviewResolution();
-            return;
-        }
-
-        if (directToScreenGO == null)
-        {
-            SpawnDirectToScreenOverlay();
-        }
-
-        UpdateDirectToScreenTexture();
-    }
-
-    private void SpawnDirectToScreenOverlay()
-    {
-        directToScreenGO = new GameObject("CameraDirectToScreen");
-
-        Canvas canvas = directToScreenGO.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = DirectToScreenSortingOrder;
-
-        GameObject feed = new GameObject("Feed", typeof(RectTransform));
-        feed.transform.SetParent(directToScreenGO.transform, false);
-
-        directToScreenImage = feed.AddComponent<RawImage>();
-        directToScreenImage.raycastTarget = false;
-
-        // Centre-anchored, because AspectRatioFitter drives the size and warns on stretched anchors.
-        RectTransform rect = directToScreenImage.rectTransform;
-        rect.anchorMin = new Vector2(0.5f, 0.5f);
-        rect.anchorMax = new Vector2(0.5f, 0.5f);
-        rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-
-        // The feed is sized to the screen, so this normally has nothing to do. It still matters for
-        // the frames where it cannot be: a still capture owns the RT at the capture aspect until its
-        // readback lands. Fitting bars those frames; stretching would visibly squash them.
-        directToScreenFitter = feed.AddComponent<AspectRatioFitter>();
-        directToScreenFitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
-        directToScreenFitter.aspectRatio = 16f / 9f;
-    }
-
-    /// <summary>
-    /// Keeps the feed matched to the screen and the overlay bound to it. Runs every frame the mode
-    /// is on, so resizing or moving the window between displays is picked up as it happens rather
-    /// than only when the mode is toggled.
-    /// </summary>
-    private void UpdateDirectToScreenTexture()
-    {
-        // Sized before it is bound: a resize replaces the RT, and the overlay must show the new one.
-        ApplyPreviewResolution();
-
-        if (directToScreenImage == null || renderTexture == null) return;
-
-        // The screen is a viewfinder, so it shows the focus-peaking overlay when there is one. The
-        // photo is re-rendered off the feed itself when the shutter fires and never sees it.
-        RenderTexture feed = ViewfinderTexture;
-        if (directToScreenImage.texture != feed)
-        {
-            directToScreenImage.texture = feed;
-        }
-
-        if (directToScreenFitter != null && renderTexture.height > 0)
-        {
-            float aspect = (float)renderTexture.width / renderTexture.height;
-            if (!Mathf.Approximately(directToScreenFitter.aspectRatio, aspect))
-            {
-                directToScreenFitter.aspectRatio = aspect;
+                case RuntimePlatform.WindowsEditor:
+                case RuntimePlatform.WindowsPlayer:
+                case RuntimePlatform.OSXEditor:
+                case RuntimePlatform.OSXPlayer:
+                case RuntimePlatform.LinuxEditor:
+                case RuntimePlatform.LinuxPlayer:
+                    return true;
+                default:
+                    return false;
             }
         }
     }
 
-    private void DespawnDirectToScreenOverlay()
+    private BasisCameraDirectToScreenOutput directToScreenOutput;
+
+    /// <summary>
+    /// Switches the mode on or off. The window is one surface, so switching it on for this camera
+    /// switches it off for every other — two cameras claiming the monitor would take turns each
+    /// frame — and the panel reads the setting back rather than trusting the click.
+    /// </summary>
+    public void SetDirectToScreen(bool enabled)
     {
-        if (directToScreenGO != null)
+        if (DirectToScreen == enabled) return;
+        DirectToScreen = enabled;
+
+        if (enabled)
         {
-            Destroy(directToScreenGO);
-            directToScreenGO = null;
+            IReadOnlyList<BasisHandHeldCamera> cameras = BasisHandHeldCameraRegistry.Cameras;
+            for (int Index = 0; Index < cameras.Count; Index++)
+            {
+                BasisHandHeldCamera other = cameras[Index];
+                if (other != null && !ReferenceEquals(other, this) && other.DirectToScreen) other.SetDirectToScreen(false);
+            }
         }
-        directToScreenImage = null;
-        directToScreenFitter = null;
+
+        RefreshDirectToScreen();
+    }
+
+    /// <summary>What the monitor is doing with this camera's feed, and if nothing, why.</summary>
+    public BasisCameraDirectToScreenState DirectToScreenState
+    {
+        get
+        {
+            if (!DirectToScreen) return BasisCameraDirectToScreenState.Off;
+            if (!IsDirectToScreenSupported) return BasisCameraDirectToScreenState.Unsupported;
+            if (!BodyAllowsLiveFeed) return BasisCameraDirectToScreenState.NoOutputSocket;
+            if (!IsInVRForDirectToScreen()) return BasisCameraDirectToScreenState.WaitingForVR;
+            return IsDirectToScreenPresenting
+                ? BasisCameraDirectToScreenState.Presenting
+                : BasisCameraDirectToScreenState.WaitingForVR;
+        }
+    }
+
+    /// <summary>
+    /// The whole decision, as a function of what it depends on, so it can be checked without a
+    /// headset: the setting, the device mode, whether the body has a socket, and the platform.
+    /// </summary>
+    public static bool ShouldPresentDirectToScreen(bool enabled, bool inVR, bool bodyAllowsLiveFeed, bool supported)
+        => enabled && inVR && bodyAllowsLiveFeed && supported;
+
+    private bool WantsDirectToScreenNow()
+        => ShouldPresentDirectToScreen(DirectToScreen, IsInVRForDirectToScreen(), BodyAllowsLiveFeed, IsDirectToScreenSupported)
+           && captureCamera != null
+           && isActiveAndEnabled;
+
+    /// <summary>
+    /// Re-runs the decision and makes the window match it. Called from every input that can change
+    /// it — the setting, a device switch, a body change — and safe to call at any other time, since
+    /// it only acts on the difference.
+    /// </summary>
+    public void RefreshDirectToScreen()
+    {
+        if (WantsDirectToScreenNow())
+        {
+            if (directToScreenOutput == null) directToScreenOutput = BasisCameraDirectToScreenOutput.Create(this);
+            directToScreenOutput.Present(renderTexture);
+        }
+        else if (directToScreenOutput != null)
+        {
+            directToScreenOutput.Stop();
+        }
+
+        UpdateRenderGate();
+    }
+
+    /// <summary>
+    /// Per-frame guard, from the render phase. A device switch announces itself before the main
+    /// camera has finished changing over, and a mode can end without any callback at all (a shutdown
+    /// tearing XR down), so the decision is checked again every frame — a handful of booleans, and
+    /// only acted on when it disagrees with what is on the window.
+    /// </summary>
+    private void TickDirectToScreen()
+    {
+        if (WantsDirectToScreenNow() != IsDirectToScreenPresenting) RefreshDirectToScreen();
+    }
+
+    /// <summary>
+    /// Hands the window back on the way out. The output object is a child of this camera and goes
+    /// with it; only the claim on the window has to be released first, so the next camera to ask
+    /// for it does not find it held by a corpse.
+    /// </summary>
+    private void ShutdownDirectToScreen()
+    {
+        if (directToScreenOutput == null) return;
+        directToScreenOutput.Stop();
+        directToScreenOutput = null;
+    }
+
+#if UNITY_INCLUDE_TESTS
+    /// <summary>
+    /// Test seam: stands in for the device manager's answer to "is the operator in VR", which
+    /// otherwise needs a booted device stack to say anything but no.
+    /// </summary>
+    public static bool? VRModeOverrideForTest;
+#endif
+
+    private static bool IsInVRForDirectToScreen()
+    {
+#if UNITY_INCLUDE_TESTS
+        if (VRModeOverrideForTest.HasValue) return VRModeOverrideForTest.Value;
+#endif
+        return BasisDeviceManagement.IsCurrentModeVR();
     }
 }

@@ -108,8 +108,8 @@ namespace Basis.Tests.Camera
         public void SwitchingItOnDoesNotByItselfPutTheViewfinderOnTheOverlay()
         {
             // The overlay only becomes the viewfinder's feed once a frame has been drawn into it.
-            // Claiming it earlier would show one frame of black on the prop, the preview screen and
-            // the desktop output at once.
+            // Claiming it earlier would show one frame of black on the prop and the desktop output at
+            // once.
             _camera.SetFocusPeakingEnabled(true);
 
             Assert.That(_camera.IsFocusPeaking, Is.False);
@@ -158,28 +158,6 @@ namespace Basis.Tests.Camera
                 Is.EqualTo(BasisHandHeldCamera.DefaultFocusPeakingSensitivity).Within(1e-4f));
             Assert.That(defaults.focusPeakingSensitivity, Is.GreaterThan(0f),
                 "A saved sensitivity of zero would come back as the least sensitive setting rather than a usable one.");
-        }
-
-        [Test]
-        public void AModeNoticesEachPartOfTheOverlayChanging()
-        {
-            CameraSettings stored = BasisCameraSettingsRig.DistinctiveSettings();
-
-            CameraSettings peakingOff = BasisCameraSettingsRig.DistinctiveSettings();
-            peakingOff.focusPeaking = !stored.focusPeaking;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, peakingOff), Is.False);
-
-            CameraSettings otherColour = BasisCameraSettingsRig.DistinctiveSettings();
-            otherColour.focusPeakingColour = stored.focusPeakingColour + 1;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, otherColour), Is.False);
-
-            CameraSettings otherSensitivity = BasisCameraSettingsRig.DistinctiveSettings();
-            otherSensitivity.focusPeakingSensitivity = stored.focusPeakingSensitivity + 0.2f;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, otherSensitivity), Is.False);
-
-            CameraSettings otherGrey = BasisCameraSettingsRig.DistinctiveSettings();
-            otherGrey.focusPeakingGreyPicture = !stored.focusPeakingGreyPicture;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, otherGrey), Is.False);
         }
     }
 }

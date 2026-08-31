@@ -119,17 +119,19 @@ namespace Basis.BasisUI
 
             BasisProgressReport report = new BasisProgressReport();
             report.OnProgressReport += ForwardProgress;
+            using CancellationTokenSource cts = new CancellationTokenSource();
             BasisRuntimeSpawnRegistry.PendingLoad pending = BasisRuntimeSpawnRegistry.BeginPendingLoad(
                 item.Url,
                 BasisRuntimeSpawnRegistry.SpawnMode.GameObject,
                 BasisRuntimeSpawnRegistry.SpawnMethod.Local,
                 BasisLocalPlayer.Instance.UUID,
                 false,
-                item.EmbeddedSettings.IsEmbedded);
+                item.EmbeddedSettings.IsEmbedded,
+                cts: cts);
             void ForwardPendingProgress(string uniqueId, float progress, string info) =>
                 BasisRuntimeSpawnRegistry.ReportPendingLoadProgress(pending.PendingId, progress, info);
             report.OnProgressReport += ForwardPendingProgress;
-            CancellationToken cancel = default;
+            CancellationToken cancel = cts.Token;
 
             var selector = item.Mode switch
             {
@@ -304,6 +306,11 @@ namespace Basis.BasisUI
                 }
 
                 BasisPropSpawnMetaData spawnMeta = PropSpawnPlacement.Resolve(item, cached.BasisBundleConnector);
+                BasisSpawnAnchors.SpawnAnchor anchor = null;
+                if (spawnMeta.Placement == BasisPropSpawnPlacement.AtAnchor && !BasisSpawnAnchors.TryGetSelected(out anchor))
+                {
+                    spawnMeta.Placement = BasisPropSpawnPlacement.Raycast;
+                }
 
                 Vector3 finalPos = Vector3.zero;
                 Quaternion finalRot = Quaternion.identity;
@@ -377,6 +384,16 @@ namespace Basis.BasisUI
                         BasisBounds groundBounds = await ResolvePlacementBounds(item, cached, desiredNetworkType, finalScale, admin, modifyScale);
                         BasisMainMenu.Close();
                         PropSpawnPlacement.ComputePose(spawnMeta, groundBounds, out finalPos, out finalRot, out finalScale);
+                        break;
+                    case BasisPropSpawnPlacement.AtAnchor:
+                        if (anchor.OverrideScale)
+                        {
+                            finalScale = Vector3.one * anchor.Scale;
+                            modifyScale = true;
+                        }
+                        BasisBounds anchorBounds = BasisSettingsDefaults.SpawnAnchorSeatOnSurface.RawValue ? await ResolvePlacementBounds(item, cached, desiredNetworkType, finalScale, admin, modifyScale) : default;
+                        BasisMainMenu.Close();
+                        PropSpawnPlacement.ComputePose(spawnMeta, anchorBounds, out finalPos, out finalRot, out finalScale);
                         break;
                     // AtPlayerOrigin belongs here rather than computing its own position: it used to
                     // set finalPos alone and leave finalRot at identity, so the prop spawned
@@ -568,17 +585,19 @@ namespace Basis.BasisUI
 
                             BasisProgressReport report = new BasisProgressReport();
                             report.OnProgressReport += ForwardProgress;
+                            using CancellationTokenSource cts = new CancellationTokenSource();
                             BasisRuntimeSpawnRegistry.PendingLoad pending = BasisRuntimeSpawnRegistry.BeginPendingLoad(
                                 item.Url,
                                 BasisRuntimeSpawnRegistry.SpawnMode.Scene,
                                 BasisRuntimeSpawnRegistry.SpawnMethod.Local,
                                 BasisLocalPlayer.Instance.UUID,
                                 admin,
-                                persistent);
+                                persistent,
+                                cts: cts);
                             void ForwardPendingProgress(string uniqueId, float progress, string info) =>
                                 BasisRuntimeSpawnRegistry.ReportPendingLoadProgress(pending.PendingId, progress, info);
                             report.OnProgressReport += ForwardPendingProgress;
-                            CancellationToken cancel = default;
+                            CancellationToken cancel = cts.Token;
 
                             try
                             {

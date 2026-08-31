@@ -203,6 +203,57 @@ namespace Basis.Tests.Camera
             Assert.That(_camera.CameraMode, Is.EqualTo(BasisCameraMode.Photo));
         }
 
+        // ---- What drifted, rather than that something did -------------------------------------
+
+        [Test]
+        public void TheComparison_NamesTheValueThatMovedAndNothingElse()
+        {
+            _camera.ApplyCameraMode(BasisCameraMode.FollowMe);
+            _camera.subjectSettings.anchorToBody = !_camera.subjectSettings.anchorToBody;
+
+            BasisCameraPresetDiff diff = _camera.CompareToMode(BasisCameraMode.FollowMe);
+
+            Assert.That(diff.Compared, Is.True);
+            Assert.That(diff.Differs(BasisCameraPresetField.AnchorToBody), Is.True);
+            Assert.That(diff.Differs(BasisCameraPresetField.PositionModifier), Is.False,
+                "Nothing else was touched, so nothing else may be reported as changed.");
+            Assert.That(diff.Matches, Is.False);
+        }
+
+        [Test]
+        public void ComparedMode_OutlivesTheDropToCustom()
+        {
+            // The whole point of holding it: once the label says Custom it can no longer say what
+            // the camera has left, and that is exactly when the question gets asked.
+            _camera.ApplyCameraMode(BasisCameraMode.FollowMe);
+            _camera.subjectSettings.anchorToBody = !_camera.subjectSettings.anchorToBody;
+            _camera.RefreshCameraMode();
+
+            Assert.That(_camera.CameraMode, Is.EqualTo(BasisCameraMode.Custom));
+            Assert.That(_camera.ComparedMode, Is.EqualTo(BasisCameraMode.FollowMe));
+        }
+
+        [Test]
+        public void ComparedMode_FollowsACameraBackOntoAPreset()
+        {
+            _camera.ApplyCameraMode(BasisCameraMode.FollowMe);
+            _camera.ApplyCameraMode(BasisCameraMode.Photo);
+            _camera.RefreshCameraMode();
+
+            Assert.That(_camera.ComparedMode, Is.EqualTo(BasisCameraMode.Photo));
+        }
+
+        [Test]
+        public void ComparingAgainstCustom_ReportsNeitherAMatchNorAChange()
+        {
+            BasisCameraPresetDiff diff = _camera.CompareToMode(BasisCameraMode.Custom);
+
+            Assert.That(diff.Compared, Is.False);
+            Assert.That(diff.Matches, Is.False, "There was no preset to match.");
+            Assert.That(diff.HasChanges, Is.False, "And so nothing that could have changed.");
+            Assert.That(diff.Differs(BasisCameraPresetField.Body), Is.False);
+        }
+
         // ---- Mode swapping ------------------------------------------------------------------
 
         [Test]
@@ -359,7 +410,7 @@ namespace Basis.Tests.Camera
         }
 
         [Test]
-        public void EveryModeDescribesEverySection()
+        public void EveryModeHasADescriptor()
         {
             foreach (BasisCameraMode mode in System.Enum.GetValues(typeof(BasisCameraMode)))
             {
@@ -367,142 +418,19 @@ namespace Basis.Tests.Camera
                 Assert.That(descriptor.Mode, Is.EqualTo(mode), $"Get({mode}) returned the wrong descriptor.");
                 Assert.That(descriptor.TitleKey, Is.Not.Null.And.Not.Empty);
                 Assert.That(descriptor.DescriptionKey, Is.Not.Null.And.Not.Empty);
-
-                foreach (BasisCameraPanelSection section in System.Enum.GetValues(typeof(BasisCameraPanelSection)))
-                {
-                    // Reading a role must never throw or fall off the end of the table — a section
-                    // added later has to arrive as Available rather than as an exception.
-                    Assert.That(System.Enum.IsDefined(typeof(BasisCameraSectionRole), descriptor.RoleOf(section)),
-                        Is.True, $"{mode}/{section} has no valid role.");
-                }
             }
         }
 
         [Test]
-        public void CustomClaimsNothing()
+        public void AModeThatFilmsSomebodyBringsASubjectWithIt()
         {
-            BasisCameraModeDescriptor custom = BasisCameraModes.Get(BasisCameraMode.Custom);
+            _camera.SetSubjectModifier(BasisCameraSubjectModifier.None);
 
-            foreach (BasisCameraPanelSection section in System.Enum.GetValues(typeof(BasisCameraPanelSection)))
-            {
-                Assert.That(custom.RoleOf(section), Is.EqualTo(BasisCameraSectionRole.Available),
-                    $"Custom drives nothing and disables nothing, but claims {section}.");
-            }
+            _camera.ApplyCameraMode(BasisCameraMode.FollowMe);
+
+            Assert.That(_camera.Modifiers.subject.modifier, Is.EqualTo(BasisCameraSubjectModifier.FollowPlayer),
+                "Follow Me with nobody selected would otherwise sanitize itself back to a free camera.");
+            Assert.That(_camera.Modifiers.DrivesPosition, Is.True);
         }
-
-        [Test]
-        public void EveryPresetDrivesAndDisablesSomething()
-        {
-            // A mode that colours nothing tells the user nothing, which defeats the point.
-            foreach (BasisCameraMode mode in Presets)
-            {
-                BasisCameraModeDescriptor descriptor = BasisCameraModes.Get(mode);
-                int driven = 0;
-                int inactive = 0;
-
-                foreach (BasisCameraPanelSection section in System.Enum.GetValues(typeof(BasisCameraPanelSection)))
-                {
-                    if (descriptor.RoleOf(section) == BasisCameraSectionRole.Driven) driven++;
-                    if (descriptor.RoleOf(section) == BasisCameraSectionRole.Inactive) inactive++;
-                }
-
-                Assert.That(driven, Is.GreaterThan(0), $"{mode} drives no section.");
-                Assert.That(inactive, Is.GreaterThan(0), $"{mode} switches nothing off.");
-            }
-        }
-
-        // ---- Tinting ------------------------------------------------------------------------
-
-        [Test]
-        public void TintsForTheThreeRolesAreVisiblyDifferent()
-        {
-            Color baseline = new Color(0.15f, 0.15f, 0.18f, 0.85f);
-            const BasisCameraMode mode = BasisCameraMode.Cinematic;
-
-            // Cinematic drives the shot rig, leaves colour alone, and switches follow off.
-            Color driven = BasisCameraModes.TintFor(mode, BasisCameraPanelSection.PositionModifier, baseline);
-            Color available = BasisCameraModes.TintFor(mode, BasisCameraPanelSection.Colour, baseline);
-            Color inactive = BasisCameraModes.TintFor(mode, BasisCameraPanelSection.Subject, baseline);
-
-            Assert.That(Distance(driven, available), Is.GreaterThan(0.05f), "Driven is not distinct from available.");
-            Assert.That(Distance(driven, inactive), Is.GreaterThan(0.05f), "Driven is not distinct from inactive.");
-            Assert.That(Distance(available, inactive), Is.GreaterThan(0.02f), "Available is not distinct from inactive.");
-        }
-
-        [Test]
-        public void TintingPreservesTheCardsOwnTranslucency()
-        {
-            // The alpha is the palette's, not the mode's: overwriting it would make a tinted panel
-            // sit differently against the menu behind it than an untinted one.
-            Color baseline = new Color(0.15f, 0.15f, 0.18f, 0.85f);
-
-            foreach (BasisCameraMode mode in System.Enum.GetValues(typeof(BasisCameraMode)))
-            {
-                foreach (BasisCameraPanelSection section in System.Enum.GetValues(typeof(BasisCameraPanelSection)))
-                {
-                    Color tinted = BasisCameraModes.TintFor(mode, section, baseline);
-                    bool inactive = BasisCameraModes.RoleOf(mode, section) == BasisCameraSectionRole.Inactive;
-
-                    // Inactive deliberately fades as well as darkens; everything else keeps alpha.
-                    if (inactive)
-                    {
-                        Assert.That(tinted.a, Is.LessThan(baseline.a), $"{mode}/{section} should fade.");
-                        Assert.That(tinted.a, Is.GreaterThan(0f), $"{mode}/{section} faded to nothing.");
-                    }
-                    else
-                    {
-                        Assert.That(tinted.a, Is.EqualTo(baseline.a).Within(0.0001f),
-                            $"{mode}/{section} changed the card's alpha.");
-                    }
-                }
-            }
-        }
-
-        [Test]
-        public void InactiveSectionsGoDarkerRatherThanMoreColourful()
-        {
-            Color baseline = new Color(0.30f, 0.30f, 0.34f, 0.85f);
-            Color inactive = BasisCameraModes.TintFor(
-                BasisCameraMode.FlyingPuck, BasisCameraPanelSection.Dolly, baseline);
-
-            Assert.That(Luminance(inactive), Is.LessThan(Luminance(baseline)),
-                "'Does nothing here' has to read as switched off, which more colour cannot say.");
-        }
-
-        [Test]
-        public void TintingIsStableUnderRepetition()
-        {
-            // The panel re-asserts tints every tick against the palette's colour, so the same
-            // input must always produce the same output — otherwise a section would creep.
-            Color baseline = new Color(0.15f, 0.15f, 0.18f, 0.85f);
-            Color first = BasisCameraModes.TintFor(BasisCameraMode.Photo, BasisCameraPanelSection.Lens, baseline);
-
-            for (int Index = 0; Index < 5; Index++)
-            {
-                Color again = BasisCameraModes.TintFor(BasisCameraMode.Photo, BasisCameraPanelSection.Lens, baseline);
-                Assert.That(Distance(again, first), Is.LessThan(0.0001f));
-            }
-        }
-
-        [Test]
-        public void EveryModeHasItsOwnColour()
-        {
-            BasisCameraMode[] all = BasisCameraModes.Ordered;
-            for (int a = 0; a < all.Length; a++)
-            {
-                for (int b = a + 1; b < all.Length; b++)
-                {
-                    Color first = BasisCameraModes.Get(all[a]).Tint;
-                    Color second = BasisCameraModes.Get(all[b]).Tint;
-                    Assert.That(Distance(first, second), Is.GreaterThan(0.1f),
-                        $"{all[a]} and {all[b]} are too close to tell apart.");
-                }
-            }
-        }
-
-        private static float Distance(Color a, Color b) =>
-            Mathf.Abs(a.r - b.r) + Mathf.Abs(a.g - b.g) + Mathf.Abs(a.b - b.b);
-
-        private static float Luminance(Color c) => (0.2126f * c.r) + (0.7152f * c.g) + (0.0722f * c.b);
     }
 }

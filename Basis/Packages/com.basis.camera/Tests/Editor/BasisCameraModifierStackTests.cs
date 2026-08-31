@@ -14,7 +14,7 @@ namespace Basis.Tests.Camera
             BasisCameraModifierStack stack = new BasisCameraModifierStack();
 
             Assert.That(stack.positionModifier, Is.EqualTo(BasisCameraPositionModifier.FreeFly));
-            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.FreeLook));
+            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.Hold));
             Assert.That(stack.DrivesAnything, Is.False,
                 "A camera that has never been configured must sit in your hand, not fly off.");
         }
@@ -64,7 +64,18 @@ namespace Basis.Tests.Camera
             stack.Sanitize();
 
             Assert.That(stack.positionModifier, Is.EqualTo(BasisCameraPositionModifier.FreeFly));
-            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.FreeLook));
+            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.Hold));
+        }
+
+        [Test]
+        public void SanitizeDropsAnUnknownAimPoint()
+        {
+            BasisCameraModifierStack stack = new BasisCameraModifierStack();
+            stack.subject.aimPoint = (BasisCameraAimPoint)99;
+
+            stack.Sanitize();
+
+            Assert.That(stack.subject.aimPoint, Is.EqualTo(BasisCameraAimPoint.Normal));
         }
 
         [Test]
@@ -148,13 +159,14 @@ namespace Basis.Tests.Camera
             Action<BasisCameraModifierStack>[] perturbations =
             {
                 s => s.subject.modifier = BasisCameraSubjectModifier.FixedPoint,
+                s => s.subject.aimPoint = BasisCameraAimPoint.FullBody,
                 s => s.subject.anchorToBody = !s.subject.anchorToBody,
                 s => s.subject.groupIncludesLocal = !s.subject.groupIncludesLocal,
                 s => s.subject.aimHeightOffset += 1f,
                 s => s.subject.framingRadius += 0.5f,
                 s => s.subject.fixedPoint += Vector3.one,
                 s => s.positionModifier = BasisCameraPositionModifier.LockedOff,
-                s => s.rotationModifier = BasisCameraRotationModifier.Hold,
+                s => s.rotationModifier = BasisCameraRotationModifier.LookAtSubject,
                 s => s.AddEffect(BasisCameraEffectModifier.AvoidOcclusion),
                 s => s.follow.positionOffset += Vector3.one,
                 s => s.follow.bindingMode = BasisCameraBindingMode.SubjectYaw,
@@ -196,6 +208,8 @@ namespace Basis.Tests.Camera
                 s => s.compose.composer.verticalDamping += 1f,
                 s => s.matchSubject.rotationOffset += Vector3.one,
                 s => s.matchSubject.damping += Vector3.one,
+                s => s.trackAim.rotationOffset += Vector3.one,
+                s => s.trackAim.damping += Vector3.one,
                 s => s.lookAhead.time += 1f,
                 s => s.lookAhead.limit += 1f,
                 s => s.occlusion.padding += 1f,
@@ -266,6 +280,8 @@ namespace Basis.Tests.Camera
                 Is.EqualTo(Enum.GetValues(typeof(BasisCameraEffectModifier)).Length));
             Assert.That(BasisCameraModifiers.SubjectModifiers.Length,
                 Is.EqualTo(Enum.GetValues(typeof(BasisCameraSubjectModifier)).Length));
+            Assert.That(BasisCameraModifiers.AimPoints.Length,
+                Is.EqualTo(Enum.GetValues(typeof(BasisCameraAimPoint)).Length));
         }
 
         [Test]
@@ -295,8 +311,9 @@ namespace Basis.Tests.Camera
             Assert.That(BasisCameraModifiers.NeedsSubject(BasisCameraPositionModifier.DollyTrack), Is.False,
                 "A track is authored in the world, so it rides whether or not anybody is being filmed.");
 
-            Assert.That(BasisCameraModifiers.NeedsSubject(BasisCameraRotationModifier.FreeLook), Is.False);
             Assert.That(BasisCameraModifiers.NeedsSubject(BasisCameraRotationModifier.Hold), Is.False);
+            Assert.That(BasisCameraModifiers.NeedsSubject(BasisCameraRotationModifier.AimAlongTrack), Is.False,
+                "It reads the path, not a person, so it has to survive an empty subject slot.");
         }
 
         [Test]
@@ -357,6 +374,65 @@ namespace Basis.Tests.Camera
         {
             Assert.That(BasisCameraLegacyFollow.TryRead(null, out _), Is.False);
             Assert.That(BasisCameraLegacyFollow.TryRead(string.Empty, out _), Is.False);
+        }
+
+        [Test]
+        public void NobodyToFilmUnfitsEverythingThatNeedsSomebody()
+        {
+            BasisCameraModifierStack stack = new BasisCameraModifierStack
+            {
+                positionModifier = BasisCameraPositionModifier.FollowSubject,
+                rotationModifier = BasisCameraRotationModifier.LookAtSubject,
+            };
+            stack.dolly.mode = BasisCameraDollyMode.FollowSubject;
+            stack.AddEffect(BasisCameraEffectModifier.LookAhead);
+            stack.AddEffect(BasisCameraEffectModifier.Shake);
+            stack.subject.modifier = BasisCameraSubjectModifier.None;
+
+            stack.Sanitize();
+
+            Assert.That(stack.positionModifier, Is.EqualTo(BasisCameraPositionModifier.FreeFly));
+            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.Hold));
+            Assert.That(stack.dolly.mode, Is.EqualTo(BasisCameraDollyMode.Manual));
+            Assert.That(stack.HasEffect(BasisCameraEffectModifier.LookAhead), Is.False,
+                "A stack cannot say it films somebody and then film nobody.");
+            Assert.That(stack.HasEffect(BasisCameraEffectModifier.Shake), Is.True,
+                "Only what needs a subject goes; the rest of the stack is left alone.");
+        }
+
+        [Test]
+        public void AFixedPointHasNoFacingToMatch()
+        {
+            BasisCameraModifierStack stack = new BasisCameraModifierStack
+            {
+                positionModifier = BasisCameraPositionModifier.Orbit,
+                rotationModifier = BasisCameraRotationModifier.MatchSubject,
+            };
+            stack.subject.modifier = BasisCameraSubjectModifier.FixedPoint;
+
+            stack.Sanitize();
+
+            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.Hold));
+            Assert.That(stack.positionModifier, Is.EqualTo(BasisCameraPositionModifier.Orbit),
+                "A place can still be orbited; it just cannot be faced.");
+        }
+
+        [Test]
+        public void AimingDownTheTrackSurvivesAnEmptySubjectSlot()
+        {
+            // The pair a travelling shot is built from: a track to ride and the track's own heading
+            // to aim by. Neither films anybody, so emptying the subject slot must leave both fitted.
+            BasisCameraModifierStack stack = new BasisCameraModifierStack
+            {
+                positionModifier = BasisCameraPositionModifier.DollyTrack,
+                rotationModifier = BasisCameraRotationModifier.AimAlongTrack,
+            };
+            stack.subject.modifier = BasisCameraSubjectModifier.None;
+
+            stack.Sanitize();
+
+            Assert.That(stack.positionModifier, Is.EqualTo(BasisCameraPositionModifier.DollyTrack));
+            Assert.That(stack.rotationModifier, Is.EqualTo(BasisCameraRotationModifier.AimAlongTrack));
         }
     }
 }

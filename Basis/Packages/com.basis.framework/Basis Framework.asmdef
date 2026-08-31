@@ -28,13 +28,17 @@
         "BasisDebug",
         "BasisBundleManagement",
         "BasisProfiler",
+        "Unity.Profiling.Core",
         "BasisSettings",
         "com.cqf.urpvolumetricfog.runtime",
+        "BasisGlobalIllumination",
         "OpusSharp",
         "Basis.OpenLipSync.Runtime",
         "Klak.Spout.Runtime",
         "Klak.Syphon.Runtime",
-        "Basis.Eerie.Movement"
+        "Basis.Eerie.Movement",
+        "Unity.UnifiedRayTracing.Runtime",
+        "Basis.RTAO"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -72,6 +76,16 @@
             "name": "jp.keijiro.klak.syphon",
             "expression": "",
             "define": "BASIS_HAS_SYPHON"
+        },
+        {
+            "name": "com.basis.globalillumination",
+            "expression": "",
+            "define": "BASIS_HAS_GI"
+        },
+        {
+            "name": "com.basis.rtao",
+            "expression": "",
+            "define": "BASIS_HAS_RTAO"
         }
     ],
     "noEngineReferences": false

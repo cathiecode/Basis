@@ -9,6 +9,8 @@ using Basis.Scripts.BasisSdk.Players;
 using Basis.Scripts.BasisSdk.Interactions;
 using Basis.Scripts.TransformBinders.BoneControl;
 using Basis.Cinematics;
+using Basis.Scripts.Networking.NetworkedAvatar;
+using Basis.Scripts.UI.NamePlate;
 
 /// <summary>
 /// Interactable handheld/fly camera controller:
@@ -44,6 +46,27 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     /// <summary>Position smoothing factor while flying.</summary>
     public float flyMovementSmoothing = 12f;
 
+    public const float MinFlySpeed = 0.25f, MaxFlySpeed = 20f, FlyPitchTriggerThreshold = 0.5f;
+
+    public void SetFlySpeed(float metresPerSecond) => flySpeed = Mathf.Clamp(metresPerSecond, MinFlySpeed, MaxFlySpeed);
+    public const float MinFlyClimbSpeed = 0.25f, MaxFlyClimbSpeed = 8f, MinFlyFastMultiplier = 1f, MaxFlyFastMultiplier = 10f;
+    public const float MinFlyTurnSpeed = 15f, MaxFlyTurnSpeed = 240f, MinFlyMouseSensitivity = 0.05f, MaxFlyMouseSensitivity = 3f;
+    public void SetFlyClimbSpeed(float metresPerSecond) => vrFlyElevationSpeed = Mathf.Clamp(metresPerSecond, MinFlyClimbSpeed, MaxFlyClimbSpeed);
+    public void SetFlyFastMultiplier(float multiplier) => flyFastMultiplier = Mathf.Clamp(multiplier, MinFlyFastMultiplier, MaxFlyFastMultiplier);
+    public void SetFlyTurnSpeed(float degreesPerSecond) => vrFlyTurnSpeed = Mathf.Clamp(degreesPerSecond, MinFlyTurnSpeed, MaxFlyTurnSpeed);
+    public void SetFlyMouseSensitivity(float sensitivity) => mouseSensitivity = Mathf.Clamp(sensitivity, MinFlyMouseSensitivity, MaxFlyMouseSensitivity);
+
+    public bool showFlyOnMainMenu;
+    public static event System.Action OnFlyStateChanged;
+    public static event System.Action OnFlyMenuVisibilityChanged;
+
+    public void SetShowFlyOnMainMenu(bool enabled)
+    {
+        if (showFlyOnMainMenu == enabled) return;
+        showFlyOnMainMenu = enabled;
+        OnFlyMenuVisibilityChanged?.Invoke();
+    }
+
     [Header("Camera Rotation")]
     /// <summary>Mouse sensitivity for fly rotation.</summary>
     public float mouseSensitivity = 0.5f;
@@ -59,6 +82,98 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     /// <summary>Metres per second the VR fly stick raises or lowers the camera at full deflection.</summary>
     [Range(0.25f, 8f)]
     public float vrFlyElevationSpeed = 2f;
+
+    /// <summary>
+    /// On, VR fly's forward/strafe follow wherever the lens is actually aimed, pitch included — point
+    /// the camera down and pushing forward dives it, matching how desktop's WASD has always flown
+    /// relative to the full look direction. Off restores the earlier level-glide behaviour: forward
+    /// always slides horizontally no matter how the lens is tipped, and only the separate elevation
+    /// axis climbs — the shot some dolly-style shots want. Strafe is unaffected either way: yaw and
+    /// pitch alone never tilt the right vector off horizontal, only roll does, and the operator never
+    /// rolls the camera on its own. See <see cref="FlyTranslationFrame"/>.
+    /// </summary>
+    public bool vrFlyMovementFollowsPitch = true;
+
+    public void SetVRFlyMovementFollowsPitch(bool enabled) => vrFlyMovementFollowsPitch = enabled;
+
+    [Header("VR Hand Tracked Fly")]
+    /// <summary>
+    /// While flying in VR, the left hand's own tracked position and rotation — offset from
+    /// wherever the hand was when tracking last engaged — steer the camera directly in place of
+    /// the left stick: move your hand away from that point and the camera flies that way through
+    /// the same accel/momentum the stick already uses; twist your hand and the camera turns.
+    /// Elevation rides the hand's own height rather than the right stick's, since a hand — unlike
+    /// a 2D stick — already has a vertical axis of its own to spend.
+    /// </summary>
+    public bool vrLeftHandFlyEnabled = false;
+
+    /// <summary>
+    /// While flying in VR, the right hand's own tracked rotation — offset from wherever it was
+    /// when tracking last engaged — turns the camera in place of the right stick's yaw/pitch.
+    /// Adds to whatever <see cref="vrLeftHandFlyEnabled"/> is already contributing rather than
+    /// replacing it, so both hands can steer the look at once; the right stick's elevation axis
+    /// is untouched.
+    /// </summary>
+    public bool vrRightHandFlyRotateEnabled = false;
+
+    /// <summary>Metres of hand offset below which hand-fly translation reports zero — filters hand tremor near neutral.</summary>
+    [Range(MinHandFlyMoveDeadzone, MaxHandFlyMoveDeadzone)]
+    public float vrHandFlyMoveDeadzone = 0.02f;
+
+    /// <summary>Metres a tracked hand must move from its neutral point for full-speed hand-fly translation.</summary>
+    [Range(MinHandFlyMoveReach, MaxHandFlyMoveReach)]
+    public float vrHandFlyMoveReach = 0.25f;
+
+    /// <summary>Overall gain on the hand-fly translation contribution, on top of the deadzone/reach curve.</summary>
+    [Range(MinHandFlySensitivity, MaxHandFlySensitivity)]
+    public float vrHandFlyMoveSensitivity = 1f;
+
+    /// <summary>Degrees of hand rotation below which hand-fly turning reports zero — filters wrist tremor near neutral.</summary>
+    [Range(MinHandFlyTurnDeadzone, MaxHandFlyTurnDeadzone)]
+    public float vrHandFlyTurnDeadzone = 4f;
+
+    /// <summary>Degrees a tracked hand must turn from its neutral orientation for full-rate hand-fly rotation.</summary>
+    [Range(MinHandFlyTurnReach, MaxHandFlyTurnReach)]
+    public float vrHandFlyTurnReach = 45f;
+
+    /// <summary>Overall gain on the hand-fly rotation contribution (both hands), on top of the deadzone/reach curve.</summary>
+    [Range(MinHandFlySensitivity, MaxHandFlySensitivity)]
+    public float vrHandFlyTurnSensitivity = 1f;
+
+    public const float MinHandFlyMoveDeadzone = 0f, MaxHandFlyMoveDeadzone = 0.15f;
+    public const float MinHandFlyMoveReach = 0.05f, MaxHandFlyMoveReach = 0.75f;
+    public const float MinHandFlyTurnDeadzone = 0f, MaxHandFlyTurnDeadzone = 20f;
+    public const float MinHandFlyTurnReach = 10f, MaxHandFlyTurnReach = 90f;
+    public const float MinHandFlySensitivity = 0.1f, MaxHandFlySensitivity = 2.5f;
+
+    public void SetVRLeftHandFlyEnabled(bool enabled)
+    {
+        if (vrLeftHandFlyEnabled == enabled) return;
+        vrLeftHandFlyEnabled = enabled;
+        leftHandFlyPrimed = false;
+    }
+
+    public void SetVRRightHandFlyRotateEnabled(bool enabled)
+    {
+        if (vrRightHandFlyRotateEnabled == enabled) return;
+        vrRightHandFlyRotateEnabled = enabled;
+        rightHandFlyRotatePrimed = false;
+    }
+
+    public void SetHandFlyMoveDeadzone(float metres) => vrHandFlyMoveDeadzone = Mathf.Clamp(metres, MinHandFlyMoveDeadzone, MaxHandFlyMoveDeadzone);
+    public void SetHandFlyMoveReach(float metres) => vrHandFlyMoveReach = Mathf.Clamp(metres, MinHandFlyMoveReach, MaxHandFlyMoveReach);
+    public void SetHandFlyMoveSensitivity(float multiplier) => vrHandFlyMoveSensitivity = Mathf.Clamp(multiplier, MinHandFlySensitivity, MaxHandFlySensitivity);
+    public void SetHandFlyTurnDeadzone(float degrees) => vrHandFlyTurnDeadzone = Mathf.Clamp(degrees, MinHandFlyTurnDeadzone, MaxHandFlyTurnDeadzone);
+    public void SetHandFlyTurnReach(float degrees) => vrHandFlyTurnReach = Mathf.Clamp(degrees, MinHandFlyTurnReach, MaxHandFlyTurnReach);
+    public void SetHandFlyTurnSensitivity(float multiplier) => vrHandFlyTurnSensitivity = Mathf.Clamp(multiplier, MinHandFlySensitivity, MaxHandFlySensitivity);
+
+    // Neutral pose each hand-fly toggle steers as a deflection from — see TryGetHandFlyPose.
+    private bool leftHandFlyPrimed;
+    private Vector3 leftHandFlyNeutralPos;
+    private Quaternion leftHandFlyNeutralRot = Quaternion.identity;
+    private bool rightHandFlyRotatePrimed;
+    private Vector3 rightHandFlyRotateNeutralPos;
+    private Quaternion rightHandFlyRotateNeutralRot = Quaternion.identity;
 
     [Header("Cinematic Controls")]
     /// <summary>Whether to use momentum/inertia for movement.</summary>
@@ -80,13 +195,125 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
 
     [Header("VR Handheld Stabilization")]
     public bool useVRHandheldSmoothing = false;
-    public bool onlySmoothWhenStreamingToDesktop = true;
 
-    [Range(1f, 30f)]
-    public float vrHandheldPositionSmoothing = 12f;
+    /// <summary>Seconds the capture camera takes to close the distance to the pose the prop holds.</summary>
+    [Range(MinStabilizationDamping, MaxStabilizationDamping)]
+    public float vrHandheldPositionDamping = 0.2f;
 
-    [Range(1f, 30f)]
-    public float vrHandheldRotationSmoothing = 14f;
+    /// <summary>Seconds it takes to follow the prop turning left or right.</summary>
+    [Range(MinStabilizationDamping, MaxStabilizationDamping)]
+    public float vrHandheldYawDamping = 0.9f;
+
+    /// <summary>Seconds it takes to follow the prop tilting up or down.</summary>
+    [Range(MinStabilizationDamping, MaxStabilizationDamping)]
+    public float vrHandheldPitchDamping = 0.9f;
+
+    /// <summary>Seconds it takes to follow the prop rolling. Raise it to hold a horizon through a turn.</summary>
+    [Range(MinStabilizationDamping, MaxStabilizationDamping)]
+    public float vrHandheldRollDamping = 0.9f;
+
+    /// <summary>
+    /// Stabilization tracks the lens. A long lens magnifies the same shake, so zooming in holds the
+    /// camera harder and zooming back out hands it to the operator again.
+    /// </summary>
+    public bool zoomStabilization = true;
+
+    /// <summary>Exponent on the focal-length ratio: 1 is the optical amount, higher exaggerates it.</summary>
+    [Range(MinZoomStabilizationResponse, MaxZoomStabilizationResponse)]
+    public float zoomStabilizationResponse = 1f;
+
+    /// <summary>Least the stabilization may be scaled to, at the wide end of the zoom.</summary>
+    [Range(MinZoomStabilizationScale, 1f)]
+    public float zoomStabilizationMinScale = 0.35f;
+
+    /// <summary>Most it may be scaled to, at the long end.</summary>
+    [Range(1f, MaxZoomStabilizationScale)]
+    public float zoomStabilizationMaxScale = 4f;
+
+    public const float MinStabilizationDamping = 0.02f;
+    public const float MaxStabilizationDamping = 2f;
+    public const float MinZoomStabilizationResponse = 0.25f;
+    public const float MaxZoomStabilizationResponse = 3f;
+    public const float MinZoomStabilizationScale = 0.1f;
+    public const float MaxZoomStabilizationScale = 8f;
+
+    /// <summary>The field of view the damping sliders read at, matching the camera's own default.</summary>
+    public const float StabilizationReferenceFov = 40f;
+
+    /// <summary>
+    /// Sets how long the lens takes to catch up with the prop, clamped back into the range the panel
+    /// promises — a settings file is text on disk and can name any number at all.
+    /// </summary>
+    public void SetVRStabilizationPositionDamping(float seconds)
+        => vrHandheldPositionDamping = Mathf.Clamp(seconds, MinStabilizationDamping, MaxStabilizationDamping);
+
+    /// <inheritdoc cref="SetVRStabilizationPositionDamping"/>
+    public void SetVRStabilizationYawDamping(float seconds)
+        => vrHandheldYawDamping = Mathf.Clamp(seconds, MinStabilizationDamping, MaxStabilizationDamping);
+
+    /// <inheritdoc cref="SetVRStabilizationPositionDamping"/>
+    public void SetVRStabilizationPitchDamping(float seconds)
+        => vrHandheldPitchDamping = Mathf.Clamp(seconds, MinStabilizationDamping, MaxStabilizationDamping);
+
+    /// <inheritdoc cref="SetVRStabilizationPositionDamping"/>
+    public void SetVRStabilizationRollDamping(float seconds)
+        => vrHandheldRollDamping = Mathf.Clamp(seconds, MinStabilizationDamping, MaxStabilizationDamping);
+
+    /// <inheritdoc cref="SetVRStabilizationPositionDamping"/>
+    public void SetZoomStabilizationResponse(float response)
+        => zoomStabilizationResponse = Mathf.Clamp(response, MinZoomStabilizationResponse, MaxZoomStabilizationResponse);
+
+    /// <inheritdoc cref="SetVRStabilizationPositionDamping"/>
+    public void SetZoomStabilizationMinScale(float scale)
+        => zoomStabilizationMinScale = Mathf.Clamp(scale, MinZoomStabilizationScale, 1f);
+
+    /// <inheritdoc cref="SetVRStabilizationPositionDamping"/>
+    public void SetZoomStabilizationMaxScale(float scale)
+        => zoomStabilizationMaxScale = Mathf.Clamp(scale, 1f, MaxZoomStabilizationScale);
+
+    /// <summary>
+    /// How far where the lens is stretches the damping times, 1 at <see cref="StabilizationReferenceFov"/>.
+    /// Both the stabilizer and the smooth drag are scaled by it, so the setting reads the same
+    /// whichever of the two is carrying the shot.
+    /// </summary>
+    public float ZoomStabilizationScale
+        => zoomStabilization && HHC != null && HHC.captureCamera != null
+            ? SolveZoomStabilizationScale(HHC.captureCamera.fieldOfView, zoomStabilizationResponse,
+                zoomStabilizationMinScale, zoomStabilizationMaxScale)
+            : 1f;
+
+    /// <summary>
+    /// Focal length is what magnifies a shake and it goes as the cotangent of the half angle, so a
+    /// 20° lens is shaken about twice as hard as the 40° the sliders were set at. Clamped either
+    /// side so neither end of the zoom can run the damping away from what was asked for.
+    /// </summary>
+    public static float SolveZoomStabilizationScale(float fieldOfView, float response, float minScale, float maxScale)
+    {
+        float half = Mathf.Tan(Mathf.Clamp(fieldOfView, 1f, 179f) * 0.5f * Mathf.Deg2Rad);
+        float reference = Mathf.Tan(StabilizationReferenceFov * 0.5f * Mathf.Deg2Rad);
+        float scale = Mathf.Pow(reference / Mathf.Max(1e-4f, half), Mathf.Max(0f, response));
+        return Mathf.Clamp(scale, Mathf.Min(minScale, maxScale), Mathf.Max(minScale, maxScale));
+    }
+
+    /// <summary>
+    /// One step of the rotational stabilizer. Each axis gets its own damp time in the camera's own
+    /// frame, so a shot can swing freely with a turn while the tilt and the horizon are still held.
+    ///
+    /// <para>Three equal times take the slerp instead. It is the same motion, and it avoids the
+    /// euler decomposition the per-axis path needs — which has nothing to split yaw from roll with
+    /// while the camera is pointed at the floor.</para>
+    /// </summary>
+    public static Quaternion SolveStabilizedRotation(Quaternion current, Quaternion target,
+        float pitchDamping, float yawDamping, float rollDamping, float deltaTime)
+    {
+        if (Mathf.Approximately(pitchDamping, yawDamping) && Mathf.Approximately(yawDamping, rollDamping))
+        {
+            return BasisCameraDamping.ApproachRotation(current, target, yawDamping, deltaTime);
+        }
+
+        return BasisCameraDamping.ApproachRotation(current, target,
+            new Vector3(pitchDamping, yawDamping, rollDamping), deltaTime);
+    }
 
     private Vector3 smoothedHandheldWorldPos;
     private Quaternion smoothedHandheldWorldRot = Quaternion.identity;
@@ -212,6 +439,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         public Quaternion Yaw;      // yaw-only facing of the subject
         public Vector3 LookPoint;   // head-height point to aim at and focus on
         public float Scale;         // avatar-to-default scale for offset sizing
+        public float Height;
     }
 
     /// <summary>True while the fly controls have the camera, so it is off in the world somewhere.</summary>
@@ -255,48 +483,34 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
 
         string className = nameof(BasisHandHeldCameraInteractable);
 
-        // Flight and a position modifier both drive the same world pin, and the stack wins inside
-        // MoveCameraFlying. Written straight onto the stack rather than through SetPositionModifier,
-        // which would call back into ExitFlyMode from underneath this one.
-        if (Modifiers.DrivesPosition)
-        {
-            Modifiers.positionModifier = BasisCameraPositionModifier.FreeFly;
-        }
-
         LookLock.Add(className);
         MovementLock.Add(className);
         CrouchingLock.Add(className);
 
+        bool fromHand = PinSpace == CameraPinSpace.HandHeld;
         DetachFromHand();
 
-        if (HHC != null && HHC.captureCamera != null)
+        if (fromHand && HHC != null && HHC.captureCamera != null)
         {
             HHC.captureCamera.transform.GetPositionAndRotation(out Vector3 heldPosition, out Quaternion heldRotation);
             SeedPose(heldPosition, heldRotation);
         }
 
+        pendingYaw = 0f;
+        pendingPitch = 0f;
+        leftHandFlyPrimed = false;
+        rightHandFlyRotatePrimed = false;
+
         if (BasisDeviceManagement.IsUserInDesktop())
         {
             pauseMove = true;
             flyCamera?.Enable();
+            OnFlyStateChanged?.Invoke();
             return;
         }
 
         isVRFlying = true;
-
-        // Seed the aim from where the camera already points, so arming it does not snap.
-        SeedOperatorAimFromCurrentRotation();
-    }
-
-    /// <summary>
-    /// Points the operator's pitch and yaw at wherever the camera is now, so whatever takes the
-    /// rotation channel next continues from the live shot rather than from a stale aim.
-    /// </summary>
-    private void SeedOperatorAimFromCurrentRotation()
-    {
-        Vector3 euler = smoothedRotation.eulerAngles;
-        currentPitch = targetPitch = NormalizeAngle(euler.x);
-        currentYaw = targetYaw = NormalizeAngle(euler.y);
+        OnFlyStateChanged?.Invoke();
     }
 
     /// <summary>
@@ -325,7 +539,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
 
             // Only flight's own detach is undone here. A camera the user put on an anchor stays on
             // it: they chose where it sits, and landing it back in their hand would undo that.
-            if (PinSpace == CameraPinSpace.WorldSpace)
+            if (PinSpace == CameraPinSpace.WorldSpace && !Modifiers.DrivesAnything)
             {
                 PinSpace = CameraPinSpace.HandHeld;
             }
@@ -336,7 +550,9 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         if (!CrouchingLock.Remove(className)) BasisDebug.LogWarning($"{className} couldn't remove CrouchingLock");
 
         velocityMomentum = Vector3.zero;
-        rotationMomentum = 0f;
+        pendingYaw = 0f;
+        pendingPitch = 0f;
+        OnFlyStateChanged?.Invoke();
     }
 
     /// <summary>
@@ -450,7 +666,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     {
         InitializeModifiers();
         modifiers.positionModifier = BasisCameraPositionModifier.FreeFly;
-        modifiers.rotationModifier = BasisCameraRotationModifier.FreeLook;
+        modifiers.rotationModifier = BasisCameraRotationModifier.Hold;
         ClearAnchorTarget();
         PinSpace = CameraPinSpace.WorldSpace;
         SeedPose(position, rotation);
@@ -506,14 +722,17 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         // foot-plant as shake, its rotation is slammed to identity on teleport, and it is
         // replaced on every avatar swap. The root is what locomotion actually moves.
         BasisLocalPlayer.Instance.transform.GetPositionAndRotation(out Vector3 rootPos, out Quaternion anchorRot);
-        Quaternion anchorYaw = FlattenToYaw(anchorRot);
+        Quaternion anchorYaw = ResolveLocalBodyYaw(anchorRot);
 
         float scale = BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale;
 
         // Height is measured from calibrated eye level, not the feet, so a zero offset films you
         // level with your eyeline on any avatar. GetTposeHeadHeight is already avatar-scaled, and
         // being calibration-derived it does not bob with crouching the way the live head does.
-        Vector3 anchorPos = rootPos + Vector3.up * GetTposeHeadHeight();
+        float headHeight = GetTposeHeadHeight();
+        float topHeight = GetTposeTopHeight(headHeight);
+        Vector3 anchorPos = rootPos + Vector3.up * headHeight;
+        float topY = rootPos.y + topHeight;
 
         float hipsHeight = GetTposeHipsHeight();
         if (subjectSettings.anchorToBody && hipsHeight > 0f && BasisLocalBoneDriver.HipsControl != null)
@@ -522,8 +741,21 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
             // eye-above-hips gap and a zero offset still sits on your eyeline. Vertical now
             // tracks crouching, which the playspace root cannot do.
             Vector3 hips = BasisLocalBoneDriver.HipsControl.OutgoingWorldData.position;
-            anchorPos = hips + Vector3.up * Mathf.Max(0f, GetTposeHeadHeight() - hipsHeight);
+            anchorPos = hips + Vector3.up * Mathf.Max(0f, headHeight - hipsHeight);
+            topY = hips.y + Mathf.Max(0f, topHeight - hipsHeight);
+
+            // Horizontally the head, though: you turn about your head and the solver hangs the hips
+            // off it at a lean, so a hips-centred ring sweeps that lean as an arc every time you
+            // turn on the spot. The remote path already reads its XZ off a root that cannot swing.
+            if (BasisLocalCameraDriver.HasInstance)
+            {
+                Vector3 turnAxis = BasisLocalCameraDriver.HeadPosition;
+                anchorPos.x = turnAxis.x;
+                anchorPos.z = turnAxis.z;
+            }
         }
+
+        Vector3 headPoint = BasisLocalCameraDriver.HasInstance ? BasisLocalCameraDriver.HeadPosition : anchorPos;
 
         return new FollowSubject
         {
@@ -531,8 +763,9 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
             AnchorPos = anchorPos,
             GroundPos = rootPos,
             Yaw = anchorYaw,
-            LookPoint = anchorPos + Vector3.up * (subjectSettings.aimHeightOffset * scale),
+            LookPoint = BasisCameraSubjectAim.LookPoint(subjectSettings.aimPoint, anchorPos, headPoint, rootPos, topY, subjectSettings.aimHeightOffset * scale),
             Scale = scale,
+            Height = topY - rootPos.y,
         };
     }
 
@@ -567,6 +800,21 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         }
 
         return Quaternion.LookRotation(flat.normalized, Vector3.up);
+    }
+
+    private static Quaternion ResolveLocalBodyYaw(Quaternion rootRotation)
+    {
+        BasisLocalBoneControl hips = BasisLocalBoneDriver.HipsControl;
+        if (hips == null) return FlattenToYaw(rootRotation);
+        return FlattenToYaw(hips.OutgoingWorldData.rotation * (Quaternion)BasisGenericBoneRotationUtils.GetCharacterBasis(BasisLocalAvatarDriver.Mapping));
+    }
+
+    private static Quaternion ResolveRemoteBodyYaw(BasisRemotePlayer remote, Quaternion rootRotation)
+    {
+        BasisRemoteAvatarDriver driver = remote.RemoteAvatarDriver;
+        if (driver == null) return FlattenToYaw(rootRotation);
+        Transform hips = driver.References?.Hips;
+        return hips != null ? FlattenToYaw(hips.rotation * driver.HipsToCharacterBasis) : FlattenToYaw(rootRotation * driver.DerivedRootToCharacterBasis);
     }
 
     /// <summary>Nominal root-to-head height used only while a remote has no avatar root to read.</summary>
@@ -612,18 +860,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         if (root != null)
         {
             root.GetPositionAndRotation(out rootPos, out Quaternion rootRot);
-
-            // The root's own rotation is NOT which way they are facing. The remote pipeline backs
-            // that pose out of the hips' PARENT, so it carries whatever the exporter baked between
-            // the animator and the skeleton, and the animator root is not the anatomical frame
-            // either — a model authored facing −Z is a legal humanoid rig. Neither shows in the
-            // avatar (hips are applied in world space and the mesh follows them), so the camera was
-            // the only thing that could see it: on those rigs the shot set up 180° out and filmed
-            // the subject from behind. The correction is a per-avatar constant measured at
-            // calibration, and identity on a rig with hips straight off a +Z-facing root.
-            yaw = FlattenToYaw(rootRot * (remote.RemoteAvatarDriver != null
-                ? remote.RemoteAvatarDriver.DerivedRootToCharacterBasis
-                : Quaternion.identity));
+            yaw = ResolveRemoteBodyYaw(remote, rootRot);
             lastRemoteBodyYaw = yaw;
             lastRemoteBodyYawSubject = netId;
         }
@@ -652,18 +889,29 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         float headHeight = lookPoint.y - rootPos.y;
         float scale = headHeight > 0.2f ? Mathf.Min(headHeight / RemoteFallbackHeadHeight, 20f) : 1f;
 
+        Vector3 normalPoint = new Vector3(rootPos.x, lookPoint.y, rootPos.z);
+        float topY = ResolveRemoteTop(remote, root, rootPos.y, lookPoint.y);
+
         subject = new FollowSubject
         {
             Valid = true,
             IsRemote = true,
-            AnchorPos = new Vector3(rootPos.x, lookPoint.y, rootPos.z),
+            AnchorPos = normalPoint,
             GroundPos = rootPos,
             Yaw = yaw,
-            // Head height (the synced head transform), matching the local path's default.
-            LookPoint = new Vector3(rootPos.x, lookPoint.y + subjectSettings.aimHeightOffset, rootPos.z),
+            LookPoint = BasisCameraSubjectAim.LookPoint(subjectSettings.aimPoint, normalPoint, lookPoint, rootPos, topY, subjectSettings.aimHeightOffset * scale),
             Scale = scale,
+            Height = topY - rootPos.y,
         };
         return true;
+    }
+
+    private static float ResolveRemoteTop(BasisRemotePlayer remote, Transform root, float groundY, float headY)
+    {
+        BasisRemoteAvatarDriver driver = remote.RemoteAvatarDriver;
+        Transform hips = root != null && driver != null && driver.NamePlateHeightAboveHipsModel > 0f ? driver.References?.Hips : null;
+        if (hips == null) return BasisCameraSubjectAim.FallbackTop(groundY, headY);
+        return hips.position.y + driver.NamePlateHeightAboveHipsModel * root.lossyScale.y;
     }
 
     /// <summary>Focus point (world head-height of the follow subject) for the DoF auto-focus, or null.</summary>
@@ -760,6 +1008,26 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
             }
         }
         return BasisHeightDriver.SelectedScaledAvatarHeight;
+    }
+
+    private static float GetTposeTopHeight(float headHeight)
+    {
+        float hipsHeight = GetTposeHipsHeight();
+        BasisLocalPlayer player = BasisLocalPlayer.Instance;
+        if (!BasisLocalAvatarDriver.HasTposeBoneSnapshot || hipsHeight <= 0f || player == null || player.BasisAvatar == null)
+        {
+            return BasisCameraSubjectAim.FallbackTop(0f, headHeight);
+        }
+
+        float eyeHeight = 0f;
+        var tposeWorld = BasisLocalAvatarDriver.Mapping?.TposeWorld;
+        if (tposeWorld != null && tposeWorld.TryGetValue(HumanBodyBones.Head, out BasisCalibratedCoords authoredHead) && authoredHead.position.y > 1e-4f)
+        {
+            eyeHeight = player.BasisAvatar.AvatarEyePosition.x * (headHeight / authoredHead.position.y);
+        }
+
+        float crown = BasisNamePlateAnchorMath.EstimateCrownAboveRoot(hipsHeight, headHeight, eyeHeight, 0f, false);
+        return hipsHeight + BasisNamePlateAnchorMath.HeightAboveHips(hipsHeight, crown);
     }
 
     private float appliedCameraScale = -1f;
@@ -875,6 +1143,19 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         ApplyCameraScale();
     }
 
+    public bool ResizeWithGesture => enableScaleWithGesture;
+
+    public void SetResizeWithGesture(bool enabled)
+    {
+        enableScaleWithGesture = enabled;
+        // The detached marker's grab handle takes the same preference — the same gesture, on
+        // something the same hands are holding — but keeps whatever size it was left at.
+        if (HHC != null) HHC.SetDetachedMarkerResizeWithGesture(enabled);
+        if (enabled) return;
+        userScaleMultiplier = 1f;
+        ApplyCameraScale();
+    }
+
     private bool isPlayerManuallyUnlocked = false;
     private bool desktopSetup = false;
     private CameraPinSpace previousPinState = CameraPinSpace.HandHeld;
@@ -883,34 +1164,17 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     private Vector3 currentVelocity = Vector3.zero;
     private Vector3 targetVelocity = Vector3.zero;
     private Vector3 velocityMomentum = Vector3.zero;
-    private float rotationMomentum = 0f;
-
-    // Rotation state
-    private float currentPitch = 0f;
-    private float currentYaw = 0f;
-    private float targetPitch = 0f;
-    private float targetYaw = 0f;
+    private float pendingYaw, pendingPitch;
 
     // Smoothed transform (for pin constraint offset)
     private Vector3 smoothedPosition = Vector3.zero;
     private Quaternion smoothedRotation = Quaternion.identity;
 
-    /// <summary>
-    /// The pose the operator's own controls hold, before any modifier has run.
-    ///
-    /// <para>Kept apart from <see cref="smoothedPosition"/> because the finished pose can carry an
-    /// effect on top of it. Integrating the next frame from a pose that already has shake in it
-    /// folds every frame's wander into the base, and the camera random-walks away from where the
-    /// stick left it.</para>
-    /// </summary>
-    private Vector3 operatorPosition = Vector3.zero;
-    private Quaternion operatorRotation = Quaternion.identity;
-
-    /// <summary>Puts the operator's pose and the published pose at the same place.</summary>
     private void SeedPose(Vector3 position, Quaternion rotation)
     {
-        operatorPosition = smoothedPosition = position;
-        operatorRotation = smoothedRotation = rotation;
+        smoothedPosition = position;
+        smoothedRotation = rotation;
+        modifierState.Seed(position, rotation, GetCaptureFov());
     }
 
     private bool pauseMove = false;
@@ -1530,22 +1794,13 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
 
     /// <summary>
     /// Moves every pose the camera holds between frames onto the anchor's new frame — the
-    /// operator's pose, the published one, the fly rig's own heading and momentum, and the solver's
-    /// memory. Anything left behind would pull the camera back off the anchor on the next step.
+    /// published pose, the fly rig's momentum, and the solver's memory. Anything left behind would
+    /// pull the camera back off the anchor on the next step.
     /// </summary>
     private void TransportRememberedPoses(Vector3 fromPosition, Quaternion fromRotation, Vector3 toPosition, Quaternion toRotation)
     {
-        operatorPosition = BasisCameraAnchorMath.TransportPoint(operatorPosition, fromPosition, fromRotation, toPosition, toRotation);
         smoothedPosition = BasisCameraAnchorMath.TransportPoint(smoothedPosition, fromPosition, fromRotation, toPosition, toRotation);
-        operatorRotation = BasisCameraAnchorMath.TransportRotation(operatorRotation, fromRotation, toRotation);
         smoothedRotation = BasisCameraAnchorMath.TransportRotation(smoothedRotation, fromRotation, toRotation);
-
-        // The desktop fly rig rebuilds its rotation from these two floats every frame, so a
-        // transported quaternion alone would be overwritten before it was ever published. Pitch is
-        // not carried: the rig stores pitch and yaw about world axes with roll pinned to zero, so
-        // an anchor that tips has no representation in it to be carried into.
-        currentYaw = BasisCameraAnchorMath.TransportHeading(currentYaw, fromRotation, toRotation);
-        targetYaw = BasisCameraAnchorMath.TransportHeading(targetYaw, fromRotation, toRotation);
 
         currentVelocity = BasisCameraAnchorMath.TransportDirection(currentVelocity, fromRotation, toRotation);
         targetVelocity = BasisCameraAnchorMath.TransportDirection(targetVelocity, fromRotation, toRotation);
@@ -1616,10 +1871,18 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     /// Reads one hand's live input state, re-resolved every frame rather than latched —
     /// <see cref="BasisInputWrapper"/> is a struct, so a copy keeps reporting the state it was
     /// taken with. <see cref="BasisInputSources.TryGetByRole"/> answers true for either hand
-    /// whether or not that slot has a device in it, so the null checks are the real test.
+    /// whether or not that slot has a device in it, so the null checks are the real test. Answers
+    /// nothing while either hand is pointing at UI, so the menu gets the sticks — the same gate the
+    /// play space mover uses.
     /// </summary>
     private bool TryGetFlyStick(BasisBoneTrackedRole role, out BasisInputState state)
     {
+        if (AnyHandPointingAtUI())
+        {
+            state = null;
+            return false;
+        }
+
         if (Inputs.TryGetByRole(role, out BasisInputWrapper wrapper) &&
             wrapper.Source != null && wrapper.BoneControl != null)
         {
@@ -1628,6 +1891,25 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         }
 
         state = null;
+        return false;
+    }
+
+    private static bool AnyHandPointingAtUI()
+    {
+        if (BasisDeviceManagement.Instance == null) return false;
+        var devices = BasisDeviceManagement.Instance.AllInputDevices;
+        if (devices == null) return false;
+
+        foreach (BasisInput device in devices)
+        {
+            if (device == null || device.HasControl == false) continue;
+            if (device.HasRaycaster == false || device.BasisUIRaycast == null) continue;
+            if (device.BasisUIRaycast.HadRaycastUITarget == false) continue;
+            if (device.TryGetRole(out BasisBoneTrackedRole role) == false) continue;
+            if (role != BasisBoneTrackedRole.LeftHand && role != BasisBoneTrackedRole.RightHand) continue;
+            return true;
+        }
+
         return false;
     }
 
@@ -1706,10 +1988,8 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     }
 
     /// <summary>
-    /// One step of camera motion. The operator's own controls run for whichever channels the
-    /// modifier stack has not claimed, and the stack then solves over the top of them — so a
-    /// hand-flown camera that keeps somebody framed is just a stack with the position slot empty,
-    /// rather than a mode of its own.
+    /// One step of camera motion. The stack solves the pose, and the operator's fly controls steer
+    /// over the top of whatever it produced.
     /// </summary>
     private void MoveCameraFlying()
     {
@@ -1720,62 +2000,51 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         if (HHC != null && HHC.TryGetFollowPipPose(out Vector3 pipPos, out Quaternion pipRot))
         {
             SeedPose(pipPos, pipRot);
-
-            // The stack keeps up with the puck rather than holding wherever it last solved, so
-            // letting go eases on from where the camera actually is instead of sweeping back.
-            ModifierState.Seed(pipPos, pipRot, GetCaptureFov());
             return;
         }
 
-        BasisCameraModifierStack stack = Modifiers;
-        bool drivesPosition = stack.DrivesPosition;
-        bool drivesRotation = stack.DrivesRotation;
+        ReadOperatorInput(deltaTime, out Vector3 move, out float yaw, out float pitch);
+        MoveCameraModifiers(deltaTime, move, yaw, pitch);
+    }
 
-        if (!drivesPosition || !drivesRotation)
+    private void ReadOperatorInput(float deltaTime, out Vector3 move, out float yaw, out float pitch)
+    {
+        if (HandleMovementInput(out Vector3 inputMovement, out float speedMultiplier))
         {
-            MoveCameraOperator(deltaTime, !drivesPosition, !drivesRotation);
+            UpdateMovement(inputMovement, speedMultiplier, deltaTime);
         }
-
-        if (stack.DrivesAnything)
+        else if (useMomentum)
         {
-            MoveCameraModifiers(deltaTime);
+            ApplyInertia(deltaTime);
         }
         else
         {
-            smoothedPosition = operatorPosition;
-            smoothedRotation = operatorRotation;
+            currentVelocity = Vector3.zero;
+            targetVelocity = Vector3.zero;
+            velocityMomentum = Vector3.zero;
         }
-    }
+        move = (currentVelocity + (useMomentum ? velocityMomentum : Vector3.zero)) * deltaTime;
 
-    /// <summary>
-    /// The operator's own fly controls: input, acceleration, momentum and auto-levelling, for the
-    /// channels the stack has left them.
-    /// </summary>
-    private void MoveCameraOperator(float deltaTime, bool applyPosition, bool applyRotation)
-    {
-        if (applyPosition)
+        if (HandleRotationInput(deltaTime, out Vector2 rotationDelta))
         {
-            if (HandleMovementInput(out Vector3 inputMovement, out float speedMultiplier))
-            {
-                UpdateMovement(inputMovement, speedMultiplier, deltaTime);
-            }
-            else if (useMomentum)
-            {
-                ApplyInertia(deltaTime);
-            }
-            else
-            {
-                currentVelocity = Vector3.zero;
-                targetVelocity = Vector3.zero;
-            }
+            pendingYaw += rotationDelta.x;
+            pendingPitch -= rotationDelta.y;
         }
-
-        if (applyRotation && HandleRotationInput(deltaTime, out Vector2 rotationDelta))
+        float fraction = Mathf.Clamp01(rotationSmoothing * deltaTime);
+        yaw = pendingYaw * fraction;
+        pitch = pendingPitch * fraction;
+        pendingYaw -= yaw;
+        pendingPitch -= pitch;
+        if (Mathf.Abs(pendingYaw) < 0.001f)
         {
-            UpdateRotation(rotationDelta, deltaTime);
+            yaw += pendingYaw;
+            pendingYaw = 0f;
         }
-
-        ApplySmoothedPosition(deltaTime, applyPosition, applyRotation);
+        if (Mathf.Abs(pendingPitch) < 0.001f)
+        {
+            pitch += pendingPitch;
+            pendingPitch = 0f;
+        }
     }
 
     /// <summary>
@@ -1789,6 +2058,11 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
 
         if (isVRFlying)
         {
+            if (vrLeftHandFlyEnabled)
+            {
+                return HandleHandFlyMovementInput(out movement, out speedMultiplier);
+            }
+
             bool hasMove = TryGetFlyMoveInput(out BasisInputState moveState);
             Vector2 stick = hasMove ? moveState.Primary2DAxisDeadZoned : Vector2.zero;
 
@@ -1796,7 +2070,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
             if (planar.magnitude > 1f)
                 planar.Normalize();
 
-            float climb = TryGetFlyTurnInput(out BasisInputState turnState)
+            float climb = TryGetFlyTurnInput(out BasisInputState turnState) && turnState.Trigger < FlyPitchTriggerThreshold
                 ? turnState.Primary2DAxisDeadZoned.y
                 : 0f;
 
@@ -1829,12 +2103,58 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         }
     }
 
+    /// <summary>
+    /// Left-hand-tracked substitute for the left stick: the hand's offset from its neutral point,
+    /// run through the same deadzone→reach smoothed response curve as <see cref="HandFlyRotationFraction"/>
+    /// (<see cref="vrHandFlyMoveDeadzone"/>/<see cref="vrHandFlyMoveReach"/>/<see cref="vrHandFlyMoveSensitivity"/>,
+    /// planar X/Z sharing one curve off their combined magnitude so diagonals aren't favoured, climb
+    /// independent), then fed through exactly the same <see cref="UpdateMovement"/>/<see cref="ApplyInertia"/>
+    /// pipeline the stick uses, so every speed/momentum slider tuned for the stick still applies.
+    /// Elevation rides the hand's own height rather than borrowing the right stick's Y axis, since a
+    /// hand — unlike a 2D stick — already has a real vertical axis to spend.
+    /// </summary>
+    private bool HandleHandFlyMovementInput(out Vector3 movement, out float speedMultiplier)
+    {
+        movement = Vector3.zero;
+        speedMultiplier = 1f;
+
+        if (!TryGetHandFlyPose(BasisBoneTrackedRole.LeftHand, ref leftHandFlyPrimed,
+                ref leftHandFlyNeutralPos, ref leftHandFlyNeutralRot, out Vector3 handPos, out _))
+        {
+            return false;
+        }
+
+        Vector3 raw = handPos - leftHandFlyNeutralPos;
+
+        Vector2 planarRaw = new Vector2(raw.x, raw.z);
+        float planarMagnitude = planarRaw.magnitude;
+        Vector2 planarDirection = planarMagnitude > 1e-5f ? planarRaw / planarMagnitude : Vector2.zero;
+        Vector2 planar = planarDirection * (HandFlyResponseCurve01(planarMagnitude, vrHandFlyMoveDeadzone, vrHandFlyMoveReach) * vrHandFlyMoveSensitivity);
+
+        float climb = HandFlyResponseFraction(raw.y, vrHandFlyMoveDeadzone, vrHandFlyMoveReach) * vrHandFlyMoveSensitivity;
+
+        // Pre-rotate into the fly frame so UpdateMovement's FlyTranslationFrame() multiply cancels
+        // back out to this exact world-space vector — a hand's offset has real spatial meaning,
+        // unlike a thumbstick's arbitrary X/Y, so it should not be re-aimed by wherever the flying
+        // camera itself happens to be looking. Whichever frame is active (pitch-following or level)
+        // applies identically here, same as it does to the stick.
+        Vector3 localXZ = Quaternion.Inverse(FlyTranslationFrame()) * new Vector3(planar.x, 0f, planar.y);
+        movement = new Vector3(localXZ.x, climb, localXZ.z);
+
+        if (movement.magnitude < 0.01f)
+            return false;
+
+        speedMultiplier = TryGetFlyMoveInput(out BasisInputState moveState) && moveState.GripButton
+            ? flyFastMultiplier : 1f;
+        return true;
+    }
+
     /// <summary>Converts input to world velocity and applies acceleration and momentum.</summary>
     private void UpdateMovement(Vector3 inputMovement, float speedMultiplier, float deltaTime)
     {
         if (isVRFlying)
         {
-            Vector3 planar = FlyYawFrame() * new Vector3(inputMovement.x, 0f, inputMovement.z);
+            Vector3 planar = FlyTranslationFrame() * new Vector3(inputMovement.x, 0f, inputMovement.z);
 
             targetVelocity = ((planar * flySpeed) + (Vector3.up * (inputMovement.y * vrFlyElevationSpeed)))
                 * speedMultiplier;
@@ -1854,10 +2174,31 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
     }
 
     /// <summary>
-    /// The level frame the VR fly stick pushes against: the camera's own yaw, off the pose this
-    /// component publishes rather than the capture transform, which the pin only writes later.
+    /// The frame the VR fly stick (and hand-tracked movement) pushes forward/strafe against, off the
+    /// pose this component publishes rather than the capture transform, which the pin only writes
+    /// later. See <see cref="vrFlyMovementFollowsPitch"/> for the choice this makes.
     /// </summary>
-    private Quaternion FlyYawFrame()
+    private Quaternion FlyTranslationFrame()
+    {
+        if (!vrFlyMovementFollowsPitch)
+        {
+            return FlyLevelYawFrame();
+        }
+
+        // Heading + pitch, no roll: the exact recipe BasisCameraModifierSolver.Steer() uses to split
+        // a rotation, reused here rather than re-derived so both places agree on what "no roll" means
+        // and on how the near-vertical case is handled. Yaw(heading) * Pitch(pitch) reaches the same
+        // forward vector as smoothedRotation (heading/pitch were read off that same forward), with
+        // roll always zero by construction — so strafe (X) stays level and forward (Z) dives with the
+        // aim. Deliberately not a LookRotation rebuilt from the forward vector directly: that
+        // construction is exactly least stable where this fix matters most, close to straight down.
+        float heading = BasisCameraAnchorMath.YawDegrees(smoothedRotation);
+        float pitch = BasisCameraModifierSolver.PitchDegrees(smoothedRotation);
+        return BasisCameraDamping.Yaw(heading) * BasisCameraDamping.Pitch(pitch);
+    }
+
+    /// <summary>The pre-fix level-only frame: <see cref="smoothedRotation"/>'s heading, flattened to the horizon.</summary>
+    private Quaternion FlyLevelYawFrame()
     {
         Vector3 forward = smoothedRotation * Vector3.forward;
         forward.y = 0f;
@@ -1891,23 +2232,56 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         }
     }
 
-    /// <summary>Reads fly rotation input and outputs the delta if significant.</summary>
+    /// <summary>
+    /// Reads fly rotation input and outputs the delta if significant. In VR the right hand supplies
+    /// either the stick or (with <see cref="vrRightHandFlyRotateEnabled"/>) its own tracked
+    /// rotation — the two never mix, since resting a thumb near the stick edge while also twisting
+    /// the wrist would double up. The left hand's rotation, when <see cref="vrLeftHandFlyEnabled"/>
+    /// is on, always ADDS on top of that — see the header comment there — so both hands can steer
+    /// the look at once.
+    /// </summary>
     private bool HandleRotationInput(float deltaTime, out Vector2 rotationDelta)
     {
         rotationDelta = Vector2.zero;
 
         if (isVRFlying)
         {
-            targetPitch = 0f;
+            Vector2 stickFraction = Vector2.zero;
+            bool any = false;
 
-            if (!TryGetFlyTurnInput(out BasisInputState turnState))
+            if (vrRightHandFlyRotateEnabled)
+            {
+                if (TryGetHandFlyPose(BasisBoneTrackedRole.RightHand, ref rightHandFlyRotatePrimed,
+                        ref rightHandFlyRotateNeutralPos, ref rightHandFlyRotateNeutralRot,
+                        out _, out Quaternion rightHandRot))
+                {
+                    stickFraction += HandFlyRotationFraction(rightHandFlyRotateNeutralRot, rightHandRot);
+                    any = true;
+                }
+            }
+            else if (TryGetFlyTurnInput(out BasisInputState turnState))
+            {
+                Vector2 stick = turnState.Primary2DAxisDeadZoned;
+                float pitchInput = turnState.Trigger >= FlyPitchTriggerThreshold ? stick.y : 0f;
+                if (Mathf.Abs(stick.x) >= 0.01f || Mathf.Abs(pitchInput) >= 0.01f)
+                {
+                    stickFraction += new Vector2(stick.x, pitchInput);
+                    any = true;
+                }
+            }
+
+            if (vrLeftHandFlyEnabled &&
+                TryGetHandFlyPose(BasisBoneTrackedRole.LeftHand, ref leftHandFlyPrimed,
+                    ref leftHandFlyNeutralPos, ref leftHandFlyNeutralRot, out _, out Quaternion leftHandRot))
+            {
+                stickFraction += HandFlyRotationFraction(leftHandFlyNeutralRot, leftHandRot);
+                any = true;
+            }
+
+            if (!any)
                 return false;
 
-            float yawInput = turnState.Primary2DAxisDeadZoned.x;
-            if (Mathf.Abs(yawInput) < 0.01f)
-                return false;
-
-            rotationDelta = new Vector2(yawInput * vrFlyTurnSpeed * deltaTime, 0f);
+            rotationDelta = stickFraction * (vrFlyTurnSpeed * deltaTime);
             return true;
         }
 
@@ -1921,17 +2295,102 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         return true;
     }
 
-    /// <summary>Updates target yaw/pitch from input and builds rotation momentum.</summary>
-    private void UpdateRotation(Vector2 rotationDelta, float deltaTime)
+    /// <summary>
+    /// A tracked hand's yaw/pitch swing since its neutral pose, as a stick-equivalent fraction —
+    /// each axis run through <see cref="HandFlyResponseFraction"/> against
+    /// <see cref="vrHandFlyTurnDeadzone"/>/<see cref="vrHandFlyTurnReach"/> and scaled by
+    /// <see cref="vrHandFlyTurnSensitivity"/>, so the result multiplies by
+    /// <see cref="vrFlyTurnSpeed"/> exactly like a real stick's fraction would. Shared by both
+    /// hands, so one pair of sliders shapes whichever of them is contributing.
+    /// </summary>
+    private Vector2 HandFlyRotationFraction(Quaternion neutral, Quaternion current)
     {
-        targetYaw += rotationDelta.x;
-        targetPitch -= rotationDelta.y;
+        Vector2 degrees = HandYawPitchOffsetDegrees(neutral, current);
+        return new Vector2(
+            HandFlyResponseFraction(degrees.x, vrHandFlyTurnDeadzone, vrHandFlyTurnReach) * vrHandFlyTurnSensitivity,
+            HandFlyResponseFraction(degrees.y, vrHandFlyTurnDeadzone, vrHandFlyTurnReach) * vrHandFlyTurnSensitivity);
+    }
 
-        targetPitch = Mathf.Clamp(targetPitch, -90f, 90f);
-        targetYaw = NormalizeAngle(targetYaw);
+    /// <summary>
+    /// Maps an unsigned magnitude through a deadzone→reach response: 0 at or below
+    /// <paramref name="deadzone"/>, 1 at or beyond <paramref name="reach"/>, eased with
+    /// <see cref="Mathf.SmoothStep"/> between the two rather than a hard linear ramp — the point of
+    /// exposing a deadzone at all is so crossing it doesn't snap the response straight on.
+    /// </summary>
+    private static float HandFlyResponseCurve01(float magnitude, float deadzone, float reach)
+    {
+        float span = Mathf.Max(reach - deadzone, 0.0001f);
+        float t = Mathf.Clamp01((magnitude - deadzone) / span);
+        return Mathf.SmoothStep(0f, 1f, t);
+    }
 
-        float rotationSpeed = rotationDelta.magnitude;
-        rotationMomentum = Mathf.Lerp(rotationMomentum, rotationSpeed * 0.1f, deltaTime * 5f);
+    /// <summary>Signed counterpart of <see cref="HandFlyResponseCurve01"/>: the curve applies to the magnitude, the sign of <paramref name="value"/> is preserved.</summary>
+    private static float HandFlyResponseFraction(float value, float deadzone, float reach)
+        => Mathf.Sign(value) * HandFlyResponseCurve01(Mathf.Abs(value), deadzone, reach);
+
+    /// <summary>
+    /// Signed yaw/pitch swing of <paramref name="current"/> relative to <paramref name="neutral"/>,
+    /// in degrees, matching the VR stick's own sign convention (x: right is positive, y: up is
+    /// positive). Built from forward-vector geometry rather than a Euler difference, which would
+    /// jump 180° the instant either pose tips past vertical — see <see cref="FlattenToYaw"/>.
+    /// </summary>
+    private static Vector2 HandYawPitchOffsetDegrees(Quaternion neutral, Quaternion current)
+    {
+        Vector3 neutralForward = neutral * Vector3.forward;
+        Vector3 currentForward = current * Vector3.forward;
+
+        Vector3 neutralFlat = new Vector3(neutralForward.x, 0f, neutralForward.z);
+        Vector3 currentFlat = new Vector3(currentForward.x, 0f, currentForward.z);
+
+        float yaw = neutralFlat.sqrMagnitude > 1e-6f && currentFlat.sqrMagnitude > 1e-6f
+            ? Vector3.SignedAngle(neutralFlat, currentFlat, Vector3.up)
+            : 0f;
+
+        float pitch = (Mathf.Asin(Mathf.Clamp(currentForward.y, -1f, 1f)) -
+                       Mathf.Asin(Mathf.Clamp(neutralForward.y, -1f, 1f))) * Mathf.Rad2Deg;
+
+        return new Vector2(yaw, pitch);
+    }
+
+    /// <summary>
+    /// A tracked hand's live world pose, priming <paramref name="neutralPos"/>/<paramref name="neutralRot"/>
+    /// from it the first time this is called while <paramref name="primed"/> is false — arming the
+    /// relevant toggle, or (re-)entering fly mode, clears it. Everything the hand-fly toggles do
+    /// reads as a deflection from that captured neutral, like a stick centred wherever the hand
+    /// happened to be, so there is no physical reach limit: bring the hand back through neutral and
+    /// go again, exactly like releasing and re-gripping a real stick. Answers false (leaving
+    /// <paramref name="primed"/> untouched) while the hand is pointing at UI or has no live tracker,
+    /// so the menu keeps the hand and a controller with stale/default data cannot prime a neutral
+    /// off it.
+    /// </summary>
+    private bool TryGetHandFlyPose(BasisBoneTrackedRole role, ref bool primed, ref Vector3 neutralPos,
+        ref Quaternion neutralRot, out Vector3 currentPos, out Quaternion currentRot)
+    {
+        currentPos = Vector3.zero;
+        currentRot = Quaternion.identity;
+
+        if (AnyHandPointingAtUI())
+            return false;
+
+        if (!Inputs.TryGetByRole(role, out BasisInputWrapper wrapper) ||
+            wrapper.Source == null || wrapper.BoneControl == null ||
+            wrapper.BoneControl.HasTracked != BasisHasTracked.HasTracker)
+        {
+            return false;
+        }
+
+        BasisCalibratedCoords pose = wrapper.BoneControl.OutgoingWorldData;
+        currentPos = pose.position;
+        currentRot = pose.rotation;
+
+        if (!primed)
+        {
+            neutralPos = currentPos;
+            neutralRot = currentRot;
+            primed = true;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1948,32 +2407,6 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         return Quaternion.Euler(NormalizeAngle(targetEuler.x), NormalizeAngle(targetEuler.y), roll);
     }
 
-    /// <summary>
-    /// Integrates velocity into <see cref="operatorPosition"/> and applies smoothed rotation
-    /// with momentum-influenced smoothing.
-    /// </summary>
-    private void ApplySmoothedPosition(float deltaTime, bool applyPosition = true, bool applyRotation = true)
-    {
-        if (applyPosition)
-        {
-            Vector3 finalVelocity = currentVelocity + (useMomentum ? velocityMomentum : Vector3.zero);
-            operatorPosition += finalVelocity * deltaTime;
-        }
-
-        if (!applyRotation)
-        {
-            return;
-        }
-
-        float enhancedRotationSmoothness = rotationSmoothing + rotationMomentum;
-
-        currentPitch = Mathf.LerpAngle(currentPitch, targetPitch, enhancedRotationSmoothness * deltaTime);
-        currentYaw = Mathf.LerpAngle(currentYaw, targetYaw, enhancedRotationSmoothness * deltaTime);
-
-        Quaternion targetRotationQuat = Quaternion.Euler(currentPitch, currentYaw, 0f);
-        operatorRotation = Quaternion.Slerp(operatorRotation, targetRotationQuat, rotationSmoothing * deltaTime);
-    }
-
     /// <summary>Normalizes an angle to the range [-180, 180].</summary>
     private float NormalizeAngle(float angle)
     {
@@ -1988,7 +2421,8 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         currentVelocity = Vector3.zero;
         targetVelocity = Vector3.zero;
         velocityMomentum = Vector3.zero;
-        rotationMomentum = 0f;
+        pendingYaw = 0f;
+        pendingPitch = 0f;
     }
     /// <summary>
     /// Whether the body is being dragged right now. Desktop holds are a permanent head constraint,
@@ -2039,9 +2473,10 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
             return;
         }
 
+        float zoom = ZoomStabilizationScale;
         SolveSmoothDrag(
             ref smoothDragPosition, ref smoothDragRotation, targetPosition, targetRotation,
-            smoothDragPositionDamping, smoothDragRotationDamping,
+            smoothDragPositionDamping * zoom, smoothDragRotationDamping * zoom,
             smoothDragMaxDistance * BasisHeightDriver.AvatarToDefaultRatioScaledWithAvatarScale,
             Time.deltaTime);
 
@@ -2076,8 +2511,7 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         bool shouldSmooth =
             !BasisDeviceManagement.IsUserInDesktop() &&
             PinSpace == CameraPinSpace.HandHeld &&
-            useVRHandheldSmoothing &&
-            (!onlySmoothWhenStreamingToDesktop || HHC.enableRecordingView);
+            useVRHandheldSmoothing;
 
         Transform cameraTransform = HHC.captureCamera.transform;
         Transform cameraParent = cameraTransform.parent;
@@ -2116,16 +2550,12 @@ public abstract partial class BasisHandHeldCameraInteractable : BasisPickupInter
         }
 
         float dt = Time.deltaTime;
-        smoothedHandheldWorldPos = Vector3.Lerp(
-            smoothedHandheldWorldPos,
-            targetWorldPos,
-            vrHandheldPositionSmoothing * dt
-        );
-        smoothedHandheldWorldRot = Quaternion.Slerp(
-            smoothedHandheldWorldRot,
-            targetWorldRot,
-            vrHandheldRotationSmoothing * dt
-        );
+        float zoom = ZoomStabilizationScale;
+        smoothedHandheldWorldPos = BasisCameraDamping.Approach(
+            smoothedHandheldWorldPos, targetWorldPos, vrHandheldPositionDamping * zoom, dt);
+        smoothedHandheldWorldRot = SolveStabilizedRotation(
+            smoothedHandheldWorldRot, targetWorldRot,
+            vrHandheldPitchDamping * zoom, vrHandheldYawDamping * zoom, vrHandheldRollDamping * zoom, dt);
 
         cameraTransform.SetPositionAndRotation(smoothedHandheldWorldPos, smoothedHandheldWorldRot);
     }

@@ -26,18 +26,24 @@ public static class BasisAssetBundlePipeline
     public static AfterBuildHandler OnAfterBuildScene;
     public static BuildErrorHandler OnBuildErrorScene;
 
-    public static async Task<(bool, (BasisBundleGenerated, AssetBundleBuilder.InformationHash))>
+    private static BasisBundleContentKind ResolveContentKind(bool isScene, GameObject asset)
+    {
+        if (isScene) return BasisBundleContentKind.Scene;
+        if (asset != null && asset.GetComponent<BasisAvatar>() != null) return BasisBundleContentKind.Avatar;
+        return BasisBundleContentKind.Prop;
+    }
+     public static async Task<(bool, BasisBundleBuild.BasisBundleBuildResult)>
     BuildAssetBundle(GameObject originalPrefab, BasisAssetBundleObject settings, string Password, BuildTarget Target, string buildId)
     {
         return await BuildAssetBundle(false, originalPrefab, new Scene(), settings, Password, Target, buildId);
     }
 
-    public static async Task<(bool, (BasisBundleGenerated, AssetBundleBuilder.InformationHash))>
+    public static async Task<(bool, BasisBundleBuild.BasisBundleBuildResult)>
     BuildAssetBundle(Scene scene, BasisAssetBundleObject settings, string Password, BuildTarget Target, string buildId)
     {
         return await BuildAssetBundle(true, null, scene, settings, Password, Target, buildId);
     }
-    public static async Task<(bool, (BasisBundleGenerated, AssetBundleBuilder.InformationHash))>
+    public static async Task<(bool, BasisBundleBuild.BasisBundleBuildResult)>
   BuildAssetBundle(
       bool isScene,
       GameObject asset,
@@ -65,6 +71,7 @@ public static class BasisAssetBundlePipeline
 
         try
         {
+            BasisBundleConnector.BasisMetaData meta;
             if (isScene)
             {
                 if (settings.RebakeOcclusionCulling)
@@ -80,6 +87,7 @@ public static class BasisAssetBundlePipeline
                 }
 
                 OnBeforeBuildScene?.Invoke(scene, settings);
+                meta = BasisBundleBuild.GenerateSceneMetaData(scene);
                 sceneBuildName = BasisSceneBuildName.Assign(scene);
                 if (sceneBuildName == null)
                 {
@@ -94,6 +102,7 @@ public static class BasisAssetBundlePipeline
                 DestroyEditorOnlyInAvatar(prefab);
                 OnBeforeBuildPrefab?.Invoke(prefab, settings);
                 PostProcessAvatar(prefab);
+                meta = BasisBundleBuild.GenerateMetaData(prefab);
 
                 assetPath = TemporaryStorageHandler.SavePrefabToTemporaryStorage(prefab, settings, ref wasModified, out uniqueID);
 
@@ -119,7 +128,8 @@ public static class BasisAssetBundlePipeline
                     uniqueID,
                     isScene ? "Scene" : "GameObject",
                     Password,
-                    Target);
+                    Target,
+                    ResolveContentKind(isScene, asset));
 
             TemporaryStorageHandler.ClearTemporaryStorage(settings.TemporaryStorage);
             AssetDatabase.Refresh();
@@ -136,7 +146,7 @@ public static class BasisAssetBundlePipeline
                 PlayerSettings.SetScriptingBackend(namedBuildTarget, ScriptingImplementation.Mono2x);
             }
 
-            return new(true, value);
+            return new(true, new BasisBundleBuild.BasisBundleBuildResult(value.Item1, value.Item2, meta));
         }
         catch (Exception ex)
         {
@@ -163,7 +173,7 @@ public static class BasisAssetBundlePipeline
                 PlayerSettings.SetScriptingBackend(namedBuildTarget, ScriptingImplementation.Mono2x);
             }
 
-            return new(false, (null, new AssetBundleBuilder.InformationHash()));
+            return new(false, new BasisBundleBuild.BasisBundleBuildResult(null, new AssetBundleBuilder.InformationHash(), default));
         }
         finally
         {

@@ -502,6 +502,7 @@ namespace Basis.Tests.IK
                 var job = new BasisEerieMovement
                 {
                     chainHeadToSpine = chain,
+                    chainChestIdx = 3,
                     handleHips = skeleton.Bind(bones[0]),
                     spineMaxIterations = 20,
                     spineTolerance = 0.001f,
@@ -523,6 +524,8 @@ namespace Basis.Tests.IK
                     chestIkTarget = false,
                     spineAnatomicalRom = false,
                 };
+                BasisEeriePlanner.Bind(ref job);
+                BasisEeriePlanner.Frame(ref job, default);
 
                 Vector3 restHead = new Vector3(0f, Heights[5], 0f);
 

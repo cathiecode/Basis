@@ -131,6 +131,7 @@ namespace Basis.Scripts.BasisCharacterController
         public bool IsCrouching => CrouchBlend <= LocalAnimatorDriver.CrouchThreshold;
         public bool IsProne = false;
         public bool IsRunning => CurrentSpeed > DefaultMovementSpeed;
+        public bool IsLocomoting => !MovementLock && MovementVector.sqrMagnitude > 0.001f;
         public bool UseMaxSpeed => BasisLocalInputActions.IsRunHeld;
         public bool CanPushRigidbodys = false;
         public bool IsEnabled
@@ -339,7 +340,7 @@ namespace Basis.Scripts.BasisCharacterController
             {
                 // Get the current rotation and position of the player
                 Vector3 pivot = BasisLocalBoneDriver.EyeControl.OutgoingWorldData.position;
-                Vector3 upAxis = Vector3.up;
+                Vector3 upAxis = Vector3.up * BasisLocalPlayspaceMover.FlipUpSign;
 
                 // Calculate direction from the pivot to the current position
                 Vector3 directionToPivot = CurrentPosition - pivot;
@@ -493,9 +494,10 @@ namespace Basis.Scripts.BasisCharacterController
 
         public void CrouchToggle()
         {
+            if (CrouchingLock) return;
             IsProne = false;
             // check what the animator driver considers to be crouching, and standup if crouch threshold is matched, otherwise, full crouch
-            CrouchBlend = CrouchingLock || CrouchBlend <= LocalAnimatorDriver.CrouchThreshold ? 1f : 0f;
+            CrouchBlend = CrouchBlend <= LocalAnimatorDriver.CrouchThreshold ? 1f : 0f;
             UpdateMovementSpeed(UseMaxSpeed);
         }
 
@@ -551,14 +553,20 @@ namespace Basis.Scripts.BasisCharacterController
         {
             // Project view forward onto horizontal plane (avoids gimbal lock near ±90° pitch)
             Quaternion viewRotation = BasisLocalBoneDriver.EyeControl.OutgoingWorldData.rotation;
+            Vector3 upReference = Vector3.up * BasisLocalPlayspaceMover.FlipUpSign;
             Vector3 flatForward = viewRotation * Vector3.forward;
             flatForward.y = 0f;
             if (flatForward.sqrMagnitude < 0.0001f)
             {
-                flatForward = -(viewRotation * Vector3.up);
-                flatForward.y = 0f;
+                Vector3 flatRight = viewRotation * Vector3.right;
+                flatRight.y = 0f;
+                flatForward = Vector3.Cross(flatRight, upReference);
             }
-            return Quaternion.LookRotation(flatForward.normalized, Vector3.up);
+            if (flatForward.sqrMagnitude < 0.0001f)
+            {
+                flatForward = Vector3.forward;
+            }
+            return Quaternion.LookRotation(flatForward.normalized, upReference);
         }
         public void HandleMovement(float DeltaTime)
         {

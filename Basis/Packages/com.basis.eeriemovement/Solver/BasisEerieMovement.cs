@@ -40,12 +40,9 @@ namespace Basis.IK
         public Quaternion offsetRotationRightFoot, offsetRotationLeftToe, offsetRotationRightToe;
         public Quaternion offsetRotationLeftShoulder, offsetRotationRightShoulder, offsetRotationLeftHand;
         public Quaternion offsetRotationRightHand;
-        public float enabledLeftHand, enabledRightHand, enabledLeftLowerLeg, enabledRightLowerLeg;
-        public float hintWeightLeftLowerLeg, hintWeightRightLowerLeg;
-        public bool hintWeightLeftHand, hintWeightRightHand, enabledSpineIK, enabledLeftShoulder, enabledRightShoulder;
-        public bool leftToeEnabled, rightToeEnabled, hasChestTracker, hasHipsTracker, proneBodyPose;
-        public bool hintIsTrackerLeftLowerLeg, hintIsTrackerRightLowerLeg, footIsTrackerLeftLeg, footIsTrackerRightLeg;
+        public BasisEeriePlan plan;
         public float tposeBakeScale;
+        public float tposeArmFitScale, tposeTorsoFitScale;
         public Vector3 tposeLengthNeckToHips, tposeHeadToNeckLocal, tposeLeftShoulderLocalDir;
         public Vector3 tposeRightShoulderLocalDir;
         public Quaternion tposeLeftShoulderRot, tposeRightShoulderRot, tposeChestRot;
@@ -63,7 +60,9 @@ namespace Basis.IK
         public float spineTwistKeep, spineNeckTwistKeep, chestSpringHz, chestSpringDamping, hipHingeStartDeg;
         public float hipHingeMaxAddDeg, moveBodyBackWhenCrouching, crouchDepth, standingHeadHeight, trunkCounterbalance;
         public float trunkCounterbalanceMaxSpineFrac, thoracicBendStiffen, spineTautBandFrac, bendTwistCoupling;
-        public float neckGazeFollowMaxDeg;
+        public float neckGazeFollowMaxDeg, chestBendPitch, chestBendYaw, chestBendRoll, neckYawShare, spineStretchMax;
+        public float restChordHeadHips, restChordHeadLumbar, restChordHeadUpper, restReachHeadLumbar;
+        public Quaternion chestTrackedRot, chestRestFromHead;
         public bool chestIkTarget;
         public float chestIkWeight, chestPosPullMaxDeg, chestPullMaxDist;
         public int chestIkIterations, chestIkHeadRestoreSweeps;
@@ -108,7 +107,7 @@ namespace Basis.IK
         {
             return ref UnsafeUtility.ArrayElementAsRef<T>(array.GetUnsafePtr(), index);
         }
-        BasisBoneHandle SlotHandle(int slot)
+        internal BasisBoneHandle SlotHandle(int slot)
         {
             switch (slot)
             {
@@ -241,6 +240,29 @@ namespace Basis.IK
             tposeLengthNeckToHips *= k;
 
             tposeBakeScale = newScale;
+        }
+        public void RescaleTposeFit(float armScale, float torsoScale)
+        {
+            if (!(armScale > 0f) || !(torsoScale > 0f) || float.IsInfinity(armScale) || float.IsInfinity(torsoScale))
+            {
+                return;
+            }
+            float ka = armScale / (tposeArmFitScale > 0f ? tposeArmFitScale : 1f), kt = torsoScale / (tposeTorsoFitScale > 0f ? tposeTorsoFitScale : 1f);
+            if (Mathf.Abs(ka - 1f) >= 1e-6f)
+            {
+                tposeShoulderToHandLeft = tposeClavicleLenLeft + (tposeShoulderToHandLeft - tposeClavicleLenLeft) * ka;
+                tposeShoulderToHandRight = tposeClavicleLenRight + (tposeShoulderToHandRight - tposeClavicleLenRight) * ka;
+                tposeShoulderToElbowLeft = tposeClavicleLenLeft + (tposeShoulderToElbowLeft - tposeClavicleLenLeft) * ka;
+                tposeShoulderToElbowRight = tposeClavicleLenRight + (tposeShoulderToElbowRight - tposeClavicleLenRight) * ka;
+            }
+            if (Mathf.Abs(kt - 1f) >= 1e-6f)
+            {
+                tposeHeadToNeckLocal *= kt;
+                tposeLengthNeckToHips *= kt;
+                minHeadSpineHeight *= kt;
+            }
+            tposeArmFitScale = armScale;
+            tposeTorsoFitScale = torsoScale;
         }
         public void Destroy()
         {

@@ -119,6 +119,14 @@
         "com.unity.ugui": "2.0.0"
       }
     },
+    "com.basis.globalillumination": {
+      "version": "file:com.basis.globalillumination",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.render-pipelines.universal": "17.0.0"
+      }
+    },
     "com.basis.imagepickup": {
       "version": "file:com.basis.imagepickup",
       "depth": 0,
@@ -237,6 +245,14 @@
       "dependencies": {
         "com.unity.addressables": "2.9.1",
         "com.unity.ugui": "2.0.0"
+      }
+    },
+    "com.basis.rtao": {
+      "version": "file:com.basis.rtao",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.render-pipelines.universal": "17.5.0"
       }
     },
     "com.basis.sdk": {
@@ -643,7 +659,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.timeline": {
-      "version": "1.8.12",
+      "version": "1.8.13",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -725,7 +741,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.management": {
-      "version": "4.5.4",
+      "version": "4.6.1",
       "depth": 0,
       "source": "registry",
       "dependencies": {

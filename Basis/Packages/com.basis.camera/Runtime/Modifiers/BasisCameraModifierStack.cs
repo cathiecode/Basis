@@ -39,6 +39,7 @@ namespace Basis.Cinematics
         public BasisCameraLookAtSettings lookAt;
         public BasisCameraComposeSettings compose;
         public BasisCameraMatchSubjectSettings matchSubject;
+        public BasisCameraTrackAimSettings trackAim;
 
         public BasisCameraLookAheadSettings lookAhead;
         public BasisCameraOcclusionSettings occlusion;
@@ -60,7 +61,7 @@ namespace Basis.Cinematics
             subject = BasisCameraSubjectSettings.Default;
 
             positionModifier = BasisCameraPositionModifier.FreeFly;
-            rotationModifier = BasisCameraRotationModifier.FreeLook;
+            rotationModifier = BasisCameraRotationModifier.Hold;
 
             follow = BasisCameraFollowSettings.Default;
             orbit = BasisCameraOrbitSettings.Default;
@@ -70,6 +71,7 @@ namespace Basis.Cinematics
             lookAt = BasisCameraLookAtSettings.Default;
             compose = BasisCameraComposeSettings.Default;
             matchSubject = BasisCameraMatchSubjectSettings.Default;
+            trackAim = BasisCameraTrackAimSettings.Default;
 
             lookAhead = BasisCameraLookAheadSettings.Default;
             occlusion = BasisCameraOcclusionSettings.Default;
@@ -177,6 +179,10 @@ namespace Basis.Cinematics
             {
                 subject.modifier = BasisCameraSubjectModifier.FollowPlayer;
             }
+            if (!Enum.IsDefined(typeof(BasisCameraAimPoint), subject.aimPoint))
+            {
+                subject.aimPoint = BasisCameraAimPoint.Normal;
+            }
             subject.framingRadius = Mathf.Max(0.05f, subject.framingRadius);
 
             if (!Enum.IsDefined(typeof(BasisCameraPositionModifier), positionModifier))
@@ -185,7 +191,7 @@ namespace Basis.Cinematics
             }
             if (!Enum.IsDefined(typeof(BasisCameraRotationModifier), rotationModifier))
             {
-                rotationModifier = BasisCameraRotationModifier.FreeLook;
+                rotationModifier = BasisCameraRotationModifier.Hold;
             }
 
             effects ??= new List<int>();
@@ -211,6 +217,21 @@ namespace Basis.Cinematics
             while (effects.Count > MaxEffects)
             {
                 effects.RemoveAt(effects.Count - 1);
+            }
+
+            if (!ResolvesSubject)
+            {
+                if (BasisCameraModifiers.NeedsSubject(positionModifier)) positionModifier = BasisCameraPositionModifier.FreeFly;
+                if (BasisCameraModifiers.NeedsSubject(rotationModifier)) rotationModifier = BasisCameraRotationModifier.Hold;
+                if (dolly.mode == BasisCameraDollyMode.FollowSubject) dolly.mode = BasisCameraDollyMode.Manual;
+                for (int Index = effects.Count - 1; Index >= 0; Index--)
+                {
+                    if (BasisCameraModifiers.NeedsSubject((BasisCameraEffectModifier)effects[Index])) effects.RemoveAt(Index);
+                }
+            }
+            else if (subject.modifier == BasisCameraSubjectModifier.FixedPoint && rotationModifier == BasisCameraRotationModifier.MatchSubject)
+            {
+                rotationModifier = BasisCameraRotationModifier.Hold;
             }
 
             follow.damping = ClampDamping(follow.damping);
@@ -245,6 +266,7 @@ namespace Basis.Cinematics
 
             lookAt.damping = ClampDamping(lookAt.damping);
             matchSubject.damping = ClampDamping(matchSubject.damping);
+            trackAim.damping = ClampDamping(trackAim.damping);
 
             lookAhead.time = Mathf.Max(0f, lookAhead.time);
             lookAhead.limit = Mathf.Max(0f, lookAhead.limit);
@@ -311,6 +333,7 @@ namespace Basis.Cinematics
             lookAt = source.lookAt;
             compose = source.compose;
             matchSubject = source.matchSubject;
+            trackAim = source.trackAim;
 
             lookAhead = source.lookAhead;
             occlusion = source.occlusion;
@@ -369,6 +392,7 @@ namespace Basis.Cinematics
                 && MatchesLookAt(a.lookAt, b.lookAt)
                 && MatchesCompose(a.compose, b.compose)
                 && MatchesMatchSubject(a.matchSubject, b.matchSubject)
+                && MatchesTrackAim(a.trackAim, b.trackAim)
                 && MatchesLookAhead(a.lookAhead, b.lookAhead)
                 && MatchesOcclusion(a.occlusion, b.occlusion)
                 && MatchesShake(a.shake, b.shake)
@@ -386,7 +410,7 @@ namespace Basis.Cinematics
         private static bool Near(Vector3 a, Vector3 b) => Near(a.x, b.x) && Near(a.y, b.y) && Near(a.z, b.z);
 
         private static bool MatchesSubject(in BasisCameraSubjectSettings a, in BasisCameraSubjectSettings b)
-            => a.modifier == b.modifier && a.anchorToBody == b.anchorToBody &&
+            => a.modifier == b.modifier && a.aimPoint == b.aimPoint && a.anchorToBody == b.anchorToBody &&
                a.groupIncludesLocal == b.groupIncludesLocal &&
                Near(a.aimHeightOffset, b.aimHeightOffset) && Near(a.framingRadius, b.framingRadius) &&
                Near(a.fixedPoint, b.fixedPoint);
@@ -431,6 +455,9 @@ namespace Basis.Cinematics
                Near(a.composer.verticalDamping, b.composer.verticalDamping);
 
         private static bool MatchesMatchSubject(in BasisCameraMatchSubjectSettings a, in BasisCameraMatchSubjectSettings b)
+            => Near(a.rotationOffset, b.rotationOffset) && Near(a.damping, b.damping);
+
+        private static bool MatchesTrackAim(in BasisCameraTrackAimSettings a, in BasisCameraTrackAimSettings b)
             => Near(a.rotationOffset, b.rotationOffset) && Near(a.damping, b.damping);
 
         private static bool MatchesLookAhead(in BasisCameraLookAheadSettings a, in BasisCameraLookAheadSettings b)

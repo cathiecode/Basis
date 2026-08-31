@@ -47,13 +47,41 @@ namespace Basis.Scripts.Drivers
         public float NamePlateHeightAboveHipsModel;
 
         public Quaternion DerivedRootToCharacterBasis = Quaternion.identity;
+        public Quaternion HipsToCharacterBasis = Quaternion.identity;
 
         public bool InBoneDriver = false;
 
         public JiggleRig[] JiggleRigs = Array.Empty<JiggleRig>();
         private static Vector3[] sJiggleRootsBeforeSnap = Array.Empty<Vector3>();
 
-        public Basis.IK.BasisBodyFitResult AppliedBodyFit = Basis.IK.BasisBodyFitResult.Identity;
+        /// <summary>Whether this remote's jiggle rigs are currently registered with the simulation. See BasisJiggleSimulationLOD.</summary>
+        public bool JiggleSimulating = true;
+
+        /// <summary>
+        /// Enables/disables every jiggle rig on this remote. Disabling runs each JiggleRig's own
+        /// OnDisable -&gt; JigglePhysics.RemoveJiggleTreeSegment; re-enabling re-adds and reseeds from
+        /// the current bone pose. A rig authored disabled (JiggleRigs entries include inactive ones,
+        /// same convention as the calibration loops below) is left alone either way.
+        /// </summary>
+        public void SetJiggleSimulating(bool simulating)
+        {
+            if (JiggleSimulating == simulating)
+            {
+                return;
+            }
+            JiggleSimulating = simulating;
+            int count = JiggleRigs.Length;
+            for (int i = 0; i < count; i++)
+            {
+                JiggleRig rig = JiggleRigs[i];
+                if (rig != null && rig.gameObject.activeInHierarchy)
+                {
+                    rig.enabled = simulating;
+                }
+            }
+        }
+
+        [NonSerialized] public Basis.IK.BasisBodyFitResult AppliedBodyFit = Basis.IK.BasisBodyFitResult.Identity;
 
         readonly Transform[] _fitBones = new Transform[Basis.IK.BasisBodyFitApply.BoneCount];
         readonly Vector3[] _fitRestLocal = new Vector3[Basis.IK.BasisBodyFitApply.BoneCount];
@@ -255,7 +283,7 @@ namespace Basis.Scripts.Drivers
             for (int Index = 0; Index < jiggleRigCount; Index++)
             {
                 JiggleRig snapRig = JiggleRigs[Index];
-                if (snapRig == null || !snapRig.gameObject.activeInHierarchy)
+                if (snapRig == null || !snapRig.gameObject.activeInHierarchy || !snapRig.enabled)
                 {
                     continue;
                 }
@@ -319,7 +347,9 @@ namespace Basis.Scripts.Drivers
                 for (int Index = 0; Index < jiggleRigCount; Index++)
                 {
                     JiggleRig Rig = JiggleRigs[Index];
-                    if (Rig == null || !Rig.gameObject.activeInHierarchy)
+                    // !Rig.enabled also catches BasisJiggleSimulationLOD holding this rig off for
+                    // distance — a recalibration snap must not force it back into the simulation.
+                    if (Rig == null || !Rig.gameObject.activeInHierarchy || !Rig.enabled)
                     {
                         continue;
                     }
@@ -393,6 +423,7 @@ namespace Basis.Scripts.Drivers
             // avatar's facing, and anything aiming at the player (the follow camera) has to divide
             // it back out.
             DerivedRootToCharacterBasis = BasisGenericBoneRotationUtils.GetDerivedRootToCharacterBasis(References);
+            HipsToCharacterBasis = math.conjugate(BasisGenericBoneRotationUtils.GetRestFrame(References, HumanBodyBones.Hips));
 
             // Initialize this player's interpolation slot before registering it with the bone
             // job system. The bone Schedule reads _filtered*[playerId] earlier in LateUpdate than

@@ -51,7 +51,7 @@ public partial class BasisHandHeldCamera
 
     /// <summary>
     /// Whether this body can send its picture anywhere but its own viewfinder. False on the film
-    /// bodies, which gates the preview screen, direct-to-screen and the video output — there is no
+    /// bodies, which gates direct-to-screen and the video output — there is no
     /// socket on the back of a disposable, so those are things it does not have rather than things
     /// somebody switched off.
     /// </summary>
@@ -70,17 +70,6 @@ public partial class BasisHandHeldCamera
     /// running, and never clears text it did not put there.</para>
     /// </summary>
     private bool frameCountShowing;
-
-    /// <summary>
-    /// Set when a body change moved whether this camera has an output socket, and cleared by the
-    /// render tick once it has re-asked the three gates that depend on it.
-    ///
-    /// <para>Deferred rather than done on the spot because a body is restored from the settings
-    /// file <em>while the camera is still being set up</em>, and the re-ask goes through
-    /// <c>OverrideDesktopOutput</c> — which points the capture camera at a render texture that does
-    /// not exist yet at that moment. The tick is the first place both are certainly true.</para>
-    /// </summary>
-    private bool bodyFeedDirty;
 
     /// <summary>
     /// Reused across captures. A stamp is a few dozen rectangles and this is reached from a GPU
@@ -236,8 +225,6 @@ public partial class BasisHandHeldCamera
         {
             ClearFrameCount();
         }
-
-        TickBodyLiveFeed();
     }
 
     /// <summary>Puts the frames left on the prop's display, if the self-timer is not using it.</summary>
@@ -373,8 +360,8 @@ public partial class BasisHandHeldCamera
     }
 
     /// <summary>
-    /// Re-runs the three gates a body's lack of an output socket closes: direct-to-screen, the
-    /// preview screen it spawns, and the video stream.
+    /// Re-runs the gates a body's lack of an output socket closes: direct-to-screen and the video
+    /// stream.
     ///
     /// <para>Run in both directions, because coming back off a film body has to give them back —
     /// the toggles were never cleared, only overruled, so the settings return with the camera that
@@ -393,20 +380,9 @@ public partial class BasisHandHeldCamera
         // — it is a no-op on a camera that was not streaming.
         if (!traits.LivePreview) StopVideoOutput();
 
-        bodyFeedDirty = true;
-    }
-
-    /// <summary>
-    /// Re-asks direct-to-screen and the preview screen now that the body has changed what the
-    /// camera is allowed to present. Both derive the answer themselves, so this only has to make
-    /// them look again.
-    /// </summary>
-    private void TickBodyLiveFeed()
-    {
-        if (!bodyFeedDirty || captureCamera == null || renderTexture == null) return;
-
-        bodyFeedDirty = false;
-        OverrideDesktopOutput();
+        // The window gate runs in both directions: a film body takes the monitor back, and the
+        // digital body fitted after it returns the feed without the setting having moved.
+        RefreshDirectToScreen();
     }
 
     // ---------- The stamp ----------

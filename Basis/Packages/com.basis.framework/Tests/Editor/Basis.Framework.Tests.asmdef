@@ -6,6 +6,10 @@
         "BasisSDK",
         "BasisCommon",
         "BasisGizmos",
+        "BasisSettings",
+        "BasisGlobalIllumination",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime",
         "Unity.TextMeshPro",
         "Unity.Collections",
         "Unity.Mathematics",
@@ -25,6 +29,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.basis.globalillumination",
+            "expression": "",
+            "define": "BASIS_HAS_GI"
+        }
+    ],
     "noEngineReferences": false
 }

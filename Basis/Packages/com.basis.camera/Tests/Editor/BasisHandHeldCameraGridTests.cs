@@ -114,8 +114,8 @@ namespace Basis.Tests.Camera
         public void SwitchingItOnDoesNotByItselfPutTheViewfinderOnTheOverlay()
         {
             // The overlay only becomes the viewfinder's feed once a frame has been drawn into it.
-            // Claiming it earlier would show one frame of black on the prop, the preview screen and
-            // the desktop output at once.
+            // Claiming it earlier would show one frame of black on the prop and the desktop output at
+            // once.
             _camera.SetViewfinderGridEnabled(true);
 
             Assert.That(_camera.IsViewfinderGridLive, Is.False);
@@ -159,24 +159,6 @@ namespace Basis.Tests.Camera
                 Is.EqualTo(BasisHandHeldCamera.DefaultGridOpacity).Within(1e-4f));
             Assert.That(defaults.viewfinderGridOpacity, Is.GreaterThan(0f),
                 "A saved opacity of zero would come back as an invisible grid rather than a usable one.");
-        }
-
-        [Test]
-        public void AModeNoticesEachPartOfTheGridChanging()
-        {
-            CameraSettings stored = BasisCameraSettingsRig.DistinctiveSettings();
-
-            CameraSettings gridOff = BasisCameraSettingsRig.DistinctiveSettings();
-            gridOff.viewfinderGrid = !stored.viewfinderGrid;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, gridOff), Is.False);
-
-            CameraSettings otherPattern = BasisCameraSettingsRig.DistinctiveSettings();
-            otherPattern.viewfinderGridPattern = stored.viewfinderGridPattern + 1;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, otherPattern), Is.False);
-
-            CameraSettings otherOpacity = BasisCameraSettingsRig.DistinctiveSettings();
-            otherOpacity.viewfinderGridOpacity = stored.viewfinderGridOpacity - 0.2f;
-            Assert.That(BasisCameraUserMode.SettingsMatch(stored, otherOpacity), Is.False);
         }
     }
 }

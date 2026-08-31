@@ -108,22 +108,38 @@ public partial class BasisHandHeldCamera
         RenderTexture cubeLeft = NewCubeRT(faceSize);
         RenderTexture cubeRight = stereo ? NewCubeRT(faceSize) : null;
 
+        // Suspension is a global flag on a camera that outlives this method, so the resume has to be
+        // unconditional. Left as a plain pair, one throw out of RenderToCubemap or ConvertToEquirect and
+        // that camera renders no global illumination for the rest of the session - and nothing about the
+        // symptom would point back at a 360 capture that failed once, minutes earlier.
+#if BASIS_HAS_GI && !UNITY_ANDROID
+        SMModuleGlobalIlluminationURP.SuspendCamera(captureCamera, true);
+#endif
         bool rendered;
-        if (stereo)
+        try
         {
-            rendered = captureCamera.RenderToCubemap(cubeLeft, 63, Camera.MonoOrStereoscopicEye.Left)
-                && captureCamera.RenderToCubemap(cubeRight, 63, Camera.MonoOrStereoscopicEye.Right);
-            if (rendered)
+            if (stereo)
             {
-                cubeLeft.ConvertToEquirect(equirect, Camera.MonoOrStereoscopicEye.Left);
-                cubeRight.ConvertToEquirect(equirect, Camera.MonoOrStereoscopicEye.Right);
+                rendered = captureCamera.RenderToCubemap(cubeLeft, 63, Camera.MonoOrStereoscopicEye.Left)
+                    && captureCamera.RenderToCubemap(cubeRight, 63, Camera.MonoOrStereoscopicEye.Right);
+                if (rendered)
+                {
+                    cubeLeft.ConvertToEquirect(equirect, Camera.MonoOrStereoscopicEye.Left);
+                    cubeRight.ConvertToEquirect(equirect, Camera.MonoOrStereoscopicEye.Right);
+                }
+            }
+            else
+            {
+                rendered = captureCamera.RenderToCubemap(cubeLeft, 63, Camera.MonoOrStereoscopicEye.Mono);
+                if (rendered)
+                    cubeLeft.ConvertToEquirect(equirect, Camera.MonoOrStereoscopicEye.Mono);
             }
         }
-        else
+        finally
         {
-            rendered = captureCamera.RenderToCubemap(cubeLeft, 63, Camera.MonoOrStereoscopicEye.Mono);
-            if (rendered)
-                cubeLeft.ConvertToEquirect(equirect, Camera.MonoOrStereoscopicEye.Mono);
+#if BASIS_HAS_GI && !UNITY_ANDROID
+            SMModuleGlobalIlluminationURP.SuspendCamera(captureCamera, false);
+#endif
         }
 
         captureCamera.usePhysicalProperties = savedPhysical;
@@ -184,6 +200,7 @@ public partial class BasisHandHeldCamera
     private async void Process360AndSave(byte[] raw, int width, int height, bool exr, BasisHandHeldCameraPhotoMetadata.PhotoMetadata photoMetadata, int perEyeWidth, int fullHeight, bool stereo, float headingDegrees, float exposure, float contrast, float saturation)
     {
         byte[] imageData;
+        Texture2D printSource = null;
 
         if (exr)
         {
@@ -200,7 +217,9 @@ public partial class BasisHandHeldCamera
             tex.LoadRawTextureData(rgba);
             tex.Apply(false);
             imageData = tex.EncodeToPNG();
-            Destroy(tex);
+            // Held past the encode rather than freed with it: an equirect is wider than anything
+            // the pickup service imports, so the print copy has to come off these pixels.
+            printSource = tex;
         }
 
         if (photoMetadata != null)
@@ -221,6 +240,9 @@ public partial class BasisHandHeldCamera
         string filename = $"Screenshot360_{layout}_{timestamp}_{width}x{height}.{extension}";
         string path = GetSavePath(filename);
 
+        BasisCameraPrintResize.PrintCopy printCopy = BuildPrintCopy(printSource, imageData.LongLength);
+        if (printSource != null) Destroy(printSource);
+
         // Same reasoning as the flat save path: this is async void, so a write that fails has to
         // be captured here or it never reaches the user.
         try
@@ -234,7 +256,7 @@ public partial class BasisHandHeldCamera
         }
 
         RecordPhotoSaved(path);
-        PrintPhotoIfEnabled(path);
+        PrintPhotoIfEnabled(path, printCopy);
     }
 
     private static byte[] TonemapEquirectToRgba32(byte[] linearFloatRgba, int width, int height, float exposure, float contrast, float saturation)
