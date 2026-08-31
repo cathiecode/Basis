@@ -12,7 +12,7 @@ namespace Basis.IK
                 return;
             }
 
-            if (hasHipsTracker)
+            if (plan.hipsTracked)
             {
                 // Do not restore a pose cached before a period of real hip tracking.
                 virtualSpineState[0] = default;
@@ -65,7 +65,7 @@ namespace Basis.IK
             // SolveSpine applies the calibrated target-to-bone offset. The core emits the final animated hips
             // bone rotation, so cancel that multiply before passing the target into the regular spine solve.
             targetRotationHips = result.HipsRotation * Quaternion.Inverse(offsetRotationHips);
-            if (!hasChestTracker && result.ChestValid)
+            if (!plan.chestTracked && result.ChestValid)
             {
                 // The procedural Virtual Spine target is authored in its own upright body model. Replace it
                 // with the animation's chest expressed through the same head-anchored heading transform as

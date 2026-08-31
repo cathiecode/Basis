@@ -5,7 +5,7 @@ using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 namespace Basis.IK
 {
-    [Unity.Burst.BurstCompile]
+    // [Unity.Burst.BurstCompile]
     public partial struct BasisEerieMovement : Unity.Jobs.IJob
     {
         public const float epsilon = 1e-5f, minMag = 1e-6f, sqrEpsilon = 1e-8f;
