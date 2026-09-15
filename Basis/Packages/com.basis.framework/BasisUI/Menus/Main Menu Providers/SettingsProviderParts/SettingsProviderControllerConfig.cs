@@ -25,11 +25,9 @@ public static class SettingsProviderControllerConfig
             PanelDropdown dropdownDominantHand = PanelDropdown.CreateNewEntry(group);
             dropdownDominantHand.Descriptor.SetTitle(BasisLocalization.Get("settings.controls.dominantHand"));
             dropdownDominantHand.Descriptor.SetTooltip(BasisLocalization.Get("settings.controls.dominantHand.tooltip"));
-            dropdownDominantHand.AssignEntries(new List<string> { BasisDominantHand.Right, BasisDominantHand.Left }, null, new List<string>
-            {
-                BasisLocalization.Get("settings.controls.dominantHand.right.tooltip"),
-                BasisLocalization.Get("settings.controls.dominantHand.left.tooltip")
-            });
+            dropdownDominantHand.AssignLocalizedEntries(
+                new List<string> { BasisDominantHand.Right, BasisDominantHand.Left },
+                new List<string> { "settings.controls.dominantHand.right", "settings.controls.dominantHand.left" });
             dropdownDominantHand.AssignBinding(BasisSettingsDefaults.DominantHand);
 
             if (BasisDeviceManagement.IsCurrentModeVR())
@@ -51,6 +49,11 @@ public static class SettingsProviderControllerConfig
                         "settings.controls.desktopInputInVR.off",
                     });
                 dropdownDesktopInputInVR.AssignBinding(BasisSettingsDefaults.DesktopInputInVR);
+
+                PanelToggle toggleQuestControllerFix = PanelToggle.CreateNewEntry(group);
+                toggleQuestControllerFix.Descriptor.SetTitle(BasisLocalization.Get("settings.controls.questControllerFix"));
+                toggleQuestControllerFix.Descriptor.SetTooltip(BasisLocalization.Get("settings.controls.questControllerFix.tooltip"));
+                toggleQuestControllerFix.AssignBinding(BasisSettingsDefaults.QuestControllerFix);
             }
 
             if (BasisDeviceManagement.IsUserInDesktop())
@@ -453,6 +456,7 @@ public static class SettingsProviderControllerConfig
         BasisSettingsDefaults.RotationSnapDegrees.ResetToDefault();
         BasisSettingsDefaults.DominantHand.ResetToDefault();
         BasisSettingsDefaults.DesktopInputInVR.ResetToDefault();
+        BasisSettingsDefaults.QuestControllerFix.ResetToDefault();
         BasisSettingsDefaults.InvertMouse.ResetToDefault();
         BasisSettingsDefaults.mousesensitivty.ResetToDefault();
         BasisSettingsDefaults.usesnapturn.ResetToDefault();

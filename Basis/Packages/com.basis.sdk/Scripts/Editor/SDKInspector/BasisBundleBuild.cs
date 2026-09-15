@@ -34,23 +34,6 @@ public static class BasisBundleBuild
         Bounds unitybounds = CalculateLocalRenderBounds(BasisContentBase.gameObject);
         BasisBounds BasisBounds = new BasisBounds(unitybounds.center, unitybounds.size);
 
-        // Far avatar generation runs once here (before the per-platform loop) on the live build
-        // clone, while its real materials are still intact. Failure is never fatal to the build.
-        string farLodBase64 = null;
-        if (BasisContentBase is BasisAvatar farLodSourceAvatar)
-        {
-            try
-            {
-                farLodBase64 = BasisFarLodGenerator.GenerateBase64(farLodSourceAvatar);
-            }
-            catch (Exception ex)
-            {
-                BasisFarLodGenerator.LastFailureReason = $"generation threw {ex.GetType().Name}: {ex.Message}";
-                Debug.LogException(ex);
-                Debug.LogWarning("Far avatar generation failed — building the bundle without a far avatar.");
-            }
-        }
-
         string FolderPath = MakeSafeFolderName(BasisContentBase.BasisBundleDescription.AssetBundleName);
         return await BuildBundle(FolderPath,
             basisContentBase: BasisContentBase,
@@ -59,9 +42,29 @@ public static class BasisBundleBuild
             targets: Targets,
             useProvidedPassword: useProvidedPassword,
             OverriddenPassword: OverriddenPassword,
-            buildFunction: (content, obj, hex, target, buildId) =>
-                BasisAssetBundlePipeline.BuildAssetBundle(content.gameObject, obj, hex, target, FolderPath),
-            FarLodBase64: farLodBase64);
+            buildFunction: (content, obj, hex, target, buildId, bakeFarLod) =>
+                BasisAssetBundlePipeline.BuildAssetBundle(content.gameObject, obj, hex, target, FolderPath, bakeFarLod));
+    }
+    // Far avatar generation runs on the first target's build clone after the build hooks, so it
+    // matches the avatar that ships. Failure is never fatal to the build.
+    public static string GenerateFarLod(GameObject root)
+    {
+        if (!root.TryGetComponent(out BasisAvatar avatar))
+        {
+            BasisFarLodGenerator.LastFailureReason = "build clone lost its BasisAvatar component";
+            return null;
+        }
+        try
+        {
+            return BasisFarLodGenerator.GenerateBase64(avatar);
+        }
+        catch (Exception ex)
+        {
+            BasisFarLodGenerator.LastFailureReason = $"generation threw {ex.GetType().Name}: {ex.Message}";
+            Debug.LogException(ex);
+            Debug.LogWarning("Far avatar generation failed — building the bundle without a far avatar.");
+            return null;
+        }
     }
     /// <summary>
     /// Calculates bounds of all child renderers in PARENT LOCAL SPACE (pivot-relative).
@@ -203,7 +206,7 @@ public static class BasisBundleBuild
             targets: Targets,
             useProvidedPassword: useProvidedPassword,
             OverriddenPassword: OverriddenPassword,
-            buildFunction: (content, obj, hex, target, buildId) => BasisAssetBundlePipeline.BuildAssetBundle(scene, obj, hex, target, FolderName));
+            buildFunction: (content, obj, hex, target, buildId, _) => BasisAssetBundlePipeline.BuildAssetBundle(scene, obj, hex, target, FolderName));
     }
     // Windows reserved device names (case-insensitive)
     private static readonly string[] ReservedNames =
@@ -489,12 +492,12 @@ public static class BasisBundleBuild
       List<BuildTarget> targets,
       bool useProvidedPassword,
       string OverriddenPassword,
-      Func<BasisContentBase, BasisAssetBundleObject, string, BuildTarget, string,
-           Task<(bool, BasisBundleBuildResult)>> buildFunction,
-      string FarLodBase64 = null)
+      Func<BasisContentBase, BasisAssetBundleObject, string, BuildTarget, string, bool,
+           Task<(bool, BasisBundleBuildResult)>> buildFunction)
     {
         string generatedID = null;
         string stagingRoot = null;
+        string farLodBase64 = null;
 
         try
         {
@@ -553,7 +556,7 @@ public static class BasisBundleBuild
                 BuildTarget target = targets[Index];
 
                 // CHANGED: pass buildId (generatedID) into buildFunction
-                var (success, result) = await buildFunction(basisContentBase, assetBundleObject, Password, target, generatedID);
+                var (success, result) = await buildFunction(basisContentBase, assetBundleObject, Password, target, generatedID, Index == 0);
                 if (!success)
                 {
                     return (false, $"Failure While Building for {target}");
@@ -562,6 +565,7 @@ public static class BasisBundleBuild
                 if (!metaDataSet)
                 {
                     MetaData = result.BasisMetaData;
+                    farLodBase64 = result.FarLodBase64;
                     metaDataSet = true;
                 }
 
@@ -598,6 +602,11 @@ public static class BasisBundleBuild
 
             EditorUtility.DisplayProgressBar(BasisEditorLocalization.Get("sdk.bundleBuild.progress.start"), BasisEditorLocalization.Get("sdk.bundleBuild.progress.start"), 10);
 
+            // Stamped from the component the SDK was asked to build, not from the census walked off
+            // the build clone: build hooks are free to add components to that clone, and one adding
+            // a BasisAvatar to a prop used to be indistinguishable from an avatar afterwards.
+            MetaData.ContentKind = ResolveContentKind(basisContentBase);
+
             BasisBundleConnector basisBundleConnector = new BasisBundleConnector(
                 generatedID,
                 basisContentBase.BasisBundleDescription,
@@ -605,7 +614,7 @@ public static class BasisBundleBuild
                 Images,
                 BasisBounds,
                 MetaData,
-                FarLodBase64
+                farLodBase64
             );
 
             byte[] BasisbundleconnectorUnEncrypted =
@@ -629,7 +638,7 @@ public static class BasisBundleBuild
 
             // A missing far avatar is diagnosable from the build output alone: the reason lands
             // next to the bee instead of only in a console that scrolls away.
-            if (basisContentBase is BasisAvatar && string.IsNullOrEmpty(FarLodBase64))
+            if (basisContentBase is BasisAvatar && string.IsNullOrEmpty(farLodBase64))
             {
                 string skipReason = string.IsNullOrEmpty(BasisFarLodGenerator.LastFailureReason) ? "unknown (no reason recorded)" : BasisFarLodGenerator.LastFailureReason;
                 await AssetBundleBuilder.SaveFileAsync(buildOutDir, "faravatar_skip", "txt", $"{DateTime.UtcNow:o}\nFar avatar was not included in this bundle.\nReason: {skipReason}\n");
@@ -692,6 +701,18 @@ public static class BasisBundleBuild
             return (false, $"BuildBundle Exception: {ex.Message}");
         }
     }
+    /// <summary>
+    /// The kind the connector declares, read off the content component the build was started from.
+    /// Null for anything else, which leaves the reader on the component census.
+    /// </summary>
+    public static string ResolveContentKind(BasisContentBase basisContentBase)
+    {
+        if (basisContentBase is BasisAvatar) return BasisBundleConnector.AvatarContentKind;
+        if (basisContentBase is BasisProp) return BasisBundleConnector.PropContentKind;
+        if (basisContentBase is BasisScene) return BasisBundleConnector.SceneContentKind;
+        return null;
+    }
+
     private static string EnsureBuildOutputDirectory(string rootOutDir, string folderName, bool deleteIfExists)
     {
         if (string.IsNullOrEmpty(rootOutDir))
@@ -940,15 +961,17 @@ public static class BasisBundleBuild
 
     public class BasisBundleBuildResult
     {
-        public BasisBundleBuildResult(BasisBundleGenerated basisBundleGenerated, AssetBundleBuilder.InformationHash informationHash, BasisBundleConnector.BasisMetaData basisMetaData)
+        public BasisBundleBuildResult(BasisBundleGenerated basisBundleGenerated, AssetBundleBuilder.InformationHash informationHash, BasisBundleConnector.BasisMetaData basisMetaData, string farLodBase64 = null)
         {
             BasisBundleGenerated = basisBundleGenerated;
             InformationHash = informationHash;
             BasisMetaData = basisMetaData;
+            FarLodBase64 = farLodBase64;
         }
 
         public BasisBundleGenerated BasisBundleGenerated { get; }
         public AssetBundleBuilder.InformationHash InformationHash { get; }
         public BasisBundleConnector.BasisMetaData BasisMetaData { get; }
+        public string FarLodBase64 { get; }
     }
 }

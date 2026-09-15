@@ -119,8 +119,6 @@ namespace Basis.Rendering.RTAO
         }
 
         public static bool IsSupported => BasisRTAOContext.HardwareSupported;
-        public static bool IsRayTracingSupported => BasisRTAOContext.HardwareSupported;
-
         public BasisRTAOQuality EffectiveQuality => HasQualityOverride ? QualityOverride : quality;
 
         public BasisRTAOSettings ResolveSettings()
@@ -193,7 +191,17 @@ namespace Basis.Rendering.RTAO
                 return;
             BasisRTAOBackend resolved = ResolvedBackend;
             if (resolved == BasisRTAOBackend.None)
+            {
+                // After the screen space degrade in Resolve, None means a device with no compute
+                // shaders at all - but whatever it means, it must never be silent: this gate sits
+                // before Setup, so ReportBackendOnce never gets the chance to say anything.
+                if (!loggedFailure)
+                {
+                    loggedFailure = true;
+                    Debug.LogWarning("[BasisRTAO] disabled: no usable backend on this device (no compute shader support).");
+                }
                 return;
+            }
 
             pass.Setup(resources, ResolveSettings(), ResolveSceneSettings(), TracingMode, ApplyMode, DebugViewActive);
             if (!pass.EnsureReady())

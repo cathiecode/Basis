@@ -257,6 +257,23 @@ namespace Basis.Scripts.BasisSdk.Players
             OnTalkModeChanged?.Invoke();
         }
 
+        public bool AdminShoutHeld;
+
+        public bool IsShouting => TalkMode == BasisTalkMode.Shout || AdminShoutHeld;
+
+        public void SetAdminShoutHeld(bool held)
+        {
+            AdminShoutHeld = held;
+            if (held)
+            {
+                if (TalkMode != BasisTalkMode.Announce) SetTalkMode(BasisTalkMode.Shout);
+            }
+            else if (TalkMode == BasisTalkMode.Shout)
+            {
+                SetTalkMode(BasisTalkMode.Normal);
+            }
+        }
+
         /// <summary>
         /// Whether this player has muted their own microphone. Driven from the network
         /// by <see cref="BasisTalkModeManager"/> and shown on the nameplate.
@@ -332,10 +349,11 @@ namespace Basis.Scripts.BasisSdk.Players
         public const float AvatarRangeDebounceSeconds = 0.5f;
 
         /// <summary>
-        /// Current mesh LOD level (0 = closest, 3 = furthest). Set by BasisTransmissionResults.
+        /// Current pose LOD level (0 = closest, 3 = furthest). Set by BasisTransmissionResults.
         /// Used to control pose update frequency — distant players update less often.
         /// </summary>
         public short CurrentLodLevel;
+        public short CurrentMeshLodLevel;
 
         /// <summary>
         /// Frame counter for LOD-based pose skip. When > 0, SetHumanPose and muscle
@@ -638,6 +656,10 @@ namespace Basis.Scripts.BasisSdk.Players
         /// </remarks>
         public async void ReloadAvatar()
         {
+            if (IsDestroyed)
+            {
+                return;
+            }
             if (AlwaysRequestedAvatar != null)
             {
                 await CreateAvatar(AlwaysRequestedMode, AlwaysRequestedAvatar);
@@ -684,6 +706,15 @@ namespace Basis.Scripts.BasisSdk.Players
             IsLoadingAnAvatar = true;
             BasisPlayerSettingsData BasisPlayerSettingsData = default;
             bool farInstallPending = false;
+            // Queued reruns drain in a loop, NOT via `await CreateAvatar(...)` — the recursive
+            // tail linked every rerun queued during a load into one await tower, and when a
+            // churn window ended (range flap / avatar-change messages landing during slow
+            // loads, worst on DX12 where PSO creation stretches the load) the tower unwound as
+            // a single inline continuation cascade: ~1100 levels overflowed the main-thread
+            // stack (the 2026-08-31 player crash dumps).
+            while (true)
+            {
+            farInstallPending = false;
             try
             {
                 // Fetch per-player visibility settings. The cached probe is synchronous and is the
@@ -840,9 +871,15 @@ namespace Basis.Scripts.BasisSdk.Players
 
             if (_reloadQueuedDuringLoad)
             {
+                // Latest-wins: the queuing caller already ran the empty-bundle fixup and
+                // recorded its request into AlwaysRequested* before hitting the guard above.
                 _reloadQueuedDuringLoad = false;
-                await CreateAvatar(AlwaysRequestedMode, AlwaysRequestedAvatar);
-                return;
+                Mode = AlwaysRequestedMode;
+                BasisLoadableBundle = AlwaysRequestedAvatar;
+                IsLoadingAnAvatar = true;
+                continue;
+            }
+            break;
             }
 
             // Any terminal "pin to fallback" state must skip the range-based re-evaluation
@@ -850,7 +887,11 @@ namespace Basis.Scripts.BasisSdk.Players
             // correct state for these, but the check reads it as drift) and ReloadAvatar
             // recurses forever, hanging Unity. Applies to: block, global load failure,
             // performance block, and the user hiding the avatar via the per-player menu.
-            if (IsEffectivelyBlocked || HasFailedAvatarLoadGlobally || IsBlockedByPerformance || !BasisPlayerSettingsData.AvatarVisible)
+            // Destroyed is terminal too: a disconnect mid-download cancels the load
+            // (swallowed as an OCE, so no failure latch) and every later LoadAvatarRemote
+            // early-outs synchronously — the mismatch tail then mutually recursed with
+            // ReloadAvatar with no yield until the stack overflowed (2026-09-02 dump).
+            if (IsDestroyed || IsEffectivelyBlocked || HasFailedAvatarLoadGlobally || IsBlockedByPerformance || !BasisPlayerSettingsData.AvatarVisible)
             {
                 return;
             }
@@ -942,6 +983,13 @@ namespace Basis.Scripts.BasisSdk.Players
         /// </param>
         public void ChangeMeshLOD(short grid)
         {
+            CurrentMeshLodLevel = grid;
+            ForceMeshLod(grid);
+            BasisAvatarSkinLOD.Apply(this, grid);
+            BasisAvatarShadowLOD.Apply(this, grid);
+        }
+        public void ForceMeshLod(short grid)
+        {
             if (BasisAvatar != null && BasisAvatar.Renders != null)
             {
                 int length = BasisAvatar.Renders.Length;
@@ -954,9 +1002,6 @@ namespace Basis.Scripts.BasisSdk.Players
                     }
                 }
             }
-
-            BasisAvatarSkinLOD.Apply(this, grid);
-            BasisAvatarShadowLOD.Apply(this, grid);
         }
 
         #endregion

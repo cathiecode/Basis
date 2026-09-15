@@ -18,7 +18,7 @@ namespace Basis.ImagePickup
         private const BasisDebug.LogTag LogTag = BasisDebug.LogTag.Pickups;
         private const float TransferLabelDropMeters = 0.06f;
 
-        public Guid ImageId;
+        [NonSerialized] public Guid ImageId;
         public ushort OwnerId;
         public string OwnerName;
         public bool IsOwner;
@@ -401,11 +401,15 @@ namespace Basis.ImagePickup
                 && pickup != null;
         }
 
-        internal void SetAnimatedDisplayTexture(Texture texture, bool hasAnyAlpha, bool hasPartialAlpha)
+        internal static readonly Vector4 IdentityScaleOffset = new Vector4(1f, 1f, 0f, 0f);
+
+        internal void SetAnimatedDisplayTexture(Texture texture, Vector4 scaleOffset, bool hasAnyAlpha, bool hasPartialAlpha, bool configure)
         {
             if (_material == null || texture == null)
                 return;
-            SetDisplayTexture(texture);
+            SetDisplayTexture(texture, scaleOffset);
+            if (!configure)
+                return;
 
             if (hasPartialAlpha)
                 ConfigurePremultipliedTransparent(_material);
@@ -428,10 +432,25 @@ namespace Basis.ImagePickup
 
         private void SetDisplayTexture(Texture texture)
         {
+            SetDisplayTexture(texture, IdentityScaleOffset);
+        }
+
+        private void SetDisplayTexture(Texture texture, Vector4 scaleOffset)
+        {
+            var scale = new Vector2(scaleOffset.x, scaleOffset.y);
+            var offset = new Vector2(scaleOffset.z, scaleOffset.w);
             if (_material.HasProperty(BaseMapId))
+            {
                 _material.SetTexture(BaseMapId, texture);
+                _material.SetTextureScale(BaseMapId, scale);
+                _material.SetTextureOffset(BaseMapId, offset);
+            }
             else
+            {
                 _material.mainTexture = texture;
+                _material.mainTextureScale = scale;
+                _material.mainTextureOffset = offset;
+            }
         }
 
         public void OnSavePressed()

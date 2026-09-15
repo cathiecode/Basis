@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.Jobs;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.UnifiedRayTracing;
 
@@ -88,6 +92,31 @@ public struct BasisGlobalIlluminationRayInstance
         normal1 = normalMatrix.GetRow(1);
         normal2 = normalMatrix.GetRow(2);
     }
+
+    /// <summary>
+    /// The same three rows for a matrix whose columns are orthogonal — every proxy capsule, built as an
+    /// orthonormal basis with per-axis scales — where the inverse-transpose is analytically each column
+    /// over its own squared length. Only the 3x3 is kept either way, so this matches
+    /// <see cref="SetNormalMatrix"/> exactly for that shape at a fraction of a general 4x4 inverse.
+    /// </summary>
+    public void SetNormalMatrixOrthogonal(in Matrix4x4 localToWorld)
+    {
+        Vector4 c0 = localToWorld.GetColumn(0);
+        Vector4 c1 = localToWorld.GetColumn(1);
+        Vector4 c2 = localToWorld.GetColumn(2);
+        float s0 = c0.x * c0.x + c0.y * c0.y + c0.z * c0.z;
+        float s1 = c1.x * c1.x + c1.y * c1.y + c1.z * c1.z;
+        float s2 = c2.x * c2.x + c2.y * c2.y + c2.z * c2.z;
+        if (s0 < 1e-12f || s1 < 1e-12f || s2 < 1e-12f)
+        {
+            SetNormalMatrix(localToWorld);
+            return;
+        }
+        float i0 = 1f / s0, i1 = 1f / s1, i2 = 1f / s2;
+        normal0 = new Vector4(c0.x * i0, c1.x * i1, c2.x * i2, 0f);
+        normal1 = new Vector4(c0.y * i0, c1.y * i1, c2.y * i2, 0f);
+        normal2 = new Vector4(c0.z * i0, c1.z * i1, c2.z * i2, 0f);
+    }
 }
 
 /// <summary>
@@ -163,7 +192,6 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
 
     private readonly Dictionary<EntityId, ProxyEntry> proxies = new Dictionary<EntityId, ProxyEntry>();
     private readonly List<EntityId> proxyRemoval = new List<EntityId>();
-    public int ProxyCount => proxies.Count;
     private readonly List<EntityId> pendingRemoval = new List<EntityId>();
     private readonly List<int> freeInstanceIds = new List<int>();
     private readonly List<Vector3> normalScratch = new List<Vector3>();
@@ -172,6 +200,72 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
     // One shared block: the surface read runs over every instance in the scene, and a fresh
     // MaterialPropertyBlock per surface would be garbage on a path that now runs every frame.
     private static readonly MaterialPropertyBlock blockScratch = new MaterialPropertyBlock();
+    /// <summary>
+    /// The whole-renderer block, read once per renderer. It needs a block of its own rather than sharing
+    /// blockScratch because the per sub-mesh probe below overwrites that one and the renderer-wide answer
+    /// has to survive across every sub-mesh of the entry.
+    /// </summary>
+    private static readonly MaterialPropertyBlock rendererBlockScratch = new MaterialPropertyBlock();
+
+    /// <summary>
+    /// One renderer's property block state, answered at most once however many sub-meshes ask.
+    ///
+    /// Both questions - does this renderer carry a block at all, and what is its whole-renderer block -
+    /// are per RENDERER facts that the surface read was re-asking per sub-mesh: a four sub-mesh renderer
+    /// made five HasPropertyBlock calls and up to eight GetPropertyBlock calls every frame for a block
+    /// that could not have changed between one sub-mesh and the next.
+    ///
+    /// Lazy rather than eager because a single sub-mesh caller must not come out worse. The avatar proxy
+    /// path (ApplyProxyMaterials) reads slot 0 alone for every avatar in the room every frame, and an
+    /// AudioLink accessory drives that slot with its OWN block - so reading the whole-renderer block up
+    /// front would spend a GetPropertyBlock per avatar per frame on an answer the slot block makes
+    /// irrelevant. This way a walk pays 1 + N + 1 at worst and the single-slot reader pays exactly the
+    /// two calls it always did.
+    /// </summary>
+    private struct RendererBlocks
+    {
+        private Renderer renderer;
+        private bool probed, hasBlock, wideResolved;
+        private MaterialPropertyBlock wide;
+
+        public static RendererBlocks For(Renderer renderer) { return new RendererBlocks { renderer = renderer }; }
+
+        /// <summary>
+        /// The block that applies to this sub-mesh, or null when none does. A block set for one slot and a
+        /// block set for the whole renderer are both reachable here, and the per slot one wins where both
+        /// exist - the order the renderer itself applies them.
+        /// </summary>
+        public MaterialPropertyBlock Resolve(int materialIndex)
+        {
+            if (renderer == null) { return null; }
+            if (!probed) { probed = true; hasBlock = renderer.HasPropertyBlock(); }
+            if (!hasBlock) { return null; }
+
+            if (materialIndex >= 0)
+            {
+                blockScratch.Clear();
+                renderer.GetPropertyBlock(blockScratch, materialIndex);
+                if (!blockScratch.isEmpty) { return blockScratch; }
+            }
+
+            if (!wideResolved)
+            {
+                wideResolved = true;
+                rendererBlockScratch.Clear();
+                renderer.GetPropertyBlock(rendererBlockScratch);
+                wide = rendererBlockScratch.isEmpty ? null : rendererBlockScratch;
+            }
+            return wide;
+        }
+    }
+    /// <summary>
+    /// _EMISSION resolved per shader rather than per material read. FindKeyword is a name lookup into the
+    /// shader's keyword space, and the surface read below ran one for every sub-mesh of every instance,
+    /// every time the scene re-read its materials. A shader's keyword space is fixed for the shader's
+    /// lifetime, so the answer only has to be found once; the cache is dropped on every rescan so a
+    /// shader that has been unloaded cannot be held alive by it.
+    /// </summary>
+    private static readonly Dictionary<Shader, LocalKeyword> emissionKeywords = new Dictionary<Shader, LocalKeyword>();
 
     private BasisGlobalIlluminationRayInstance[] instances = new BasisGlobalIlluminationRayInstance[256];
     private GraphicsBuffer instanceBuffer;
@@ -180,6 +274,36 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
     private int instanceDirtyStart = int.MaxValue, instanceDirtyEnd = -1;
     private bool instanceBufferResized = true;
     private float nextScanTime;
+
+    /// <summary>
+    /// How many candidates the geometry pass walks per frame.
+    ///
+    /// The walk itself, not the FindObjectsByType in front of it, is what made the rescan a hitch: a
+    /// component probe, a mesh resolve and a material read for every renderer in the world, all in the
+    /// one frame the timer happened to fire on. A large world is a few hundred thousand interop calls
+    /// that frame and nothing at all for the next hundred. This is the same walk over the same snapshot,
+    /// spread across the interval instead - at 60fps and the default two seconds it covers about fifteen
+    /// thousand renderers before the next pass is even due, and a world bigger than that simply runs its
+    /// passes back to back, which is still a flat cost rather than a spike.
+    /// </summary>
+    private const int ScanBudget = 256;
+    /// <summary>
+    /// The snapshot the pass in flight is walking. Held rather than re-taken per frame so that objects
+    /// created mid-pass are picked up by the NEXT pass rather than shifting the ground under the cursor -
+    /// which is what the whole-scene walk gave for free by finishing inside one frame. It is the shared
+    /// array from BasisSceneScan; that class replaces its array rather than refilling it, so a scan
+    /// another consumer triggers mid-pass cannot disturb this one.
+    /// </summary>
+    private Renderer[] scanBatch;
+    private int scanCursor;
+    private bool scanning;
+    private int scanTextureVersion;
+    /// <summary>
+    /// The avatar pass runs on its own timer, half an interval away from the geometry pass. They are the
+    /// two biggest walks here and there is no reason for them to be the same frame's work.
+    /// </summary>
+    private float nextProxyScanTime;
+    private bool proxyScanPhased;
     private int textureVersion = -1;
     private bool structureDirty = true;
     private bool everBuilt;
@@ -197,11 +321,88 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
     {
         this.context = context;
         accelStruct = context.CreateAccelerationStructure();
+        Application.onBeforeRender += ScheduleTransformGather;
+    }
+
+    // The per-frame world-entry matrix sweep, as a transform job instead of one
+    // main-thread localToWorldMatrix read per dynamic entry inside render-graph
+    // recording. Scheduling has to happen at onBeforeRender — see the ZBinning
+    // note on BasisAvatarProxyJobs for why a job must never be SCHEDULED from
+    // inside the render pipeline. UpdateTransforms only joins and compares.
+    [BurstCompile]
+    private struct GatherWorldMatricesJob : IJobParallelForTransform
+    {
+        public NativeArray<Matrix4x4> Matrices;
+
+        public void Execute(int index, TransformAccess transform)
+        {
+            Matrices[index] = transform.localToWorldMatrix;
+        }
+    }
+
+    private readonly List<Entry> dynamicEntries = new List<Entry>();
+    private TransformAccessArray dynamicAccess;
+    private NativeArray<Matrix4x4> dynamicMatrices;
+    private JobHandle dynamicHandle;
+    private bool dynamicScheduled;
+    private bool dynamicListDirty = true;
+
+    [BeforeRenderOrder(int.MaxValue)]
+    private void ScheduleTransformGather()
+    {
+        // A gather the pass never reaped (the frame skipped Refresh — GI off, no
+        // camera) is retired here so it cannot pin the transforms indefinitely.
+        CompleteTransformGather();
+        if (dynamicListDirty || !dynamicAccess.isCreated || dynamicEntries.Count == 0) { return; }
+        dynamicHandle = new GatherWorldMatricesJob { Matrices = dynamicMatrices }.Schedule(dynamicAccess);
+        dynamicScheduled = true;
+        JobHandle.ScheduleBatchedJobs();
+    }
+
+    private void CompleteTransformGather()
+    {
+        if (!dynamicScheduled) { return; }
+        dynamicHandle.Complete();
+        dynamicScheduled = false;
+    }
+
+    // Rebuilt only when the dynamic set changed (an add, a remove, a dispose), never
+    // per frame. A frame whose set changed falls back to the managed dictionary walk,
+    // so stale gathered data is never applied to a removed entry's freed instances.
+    private void RebuildDynamicList()
+    {
+        CompleteTransformGather();
+        dynamicEntries.Clear();
+        foreach (KeyValuePair<EntityId, Entry> pair in entries)
+        {
+            Entry entry = pair.Value;
+            if (entry.isStatic || entry.transform == null) { continue; }
+            dynamicEntries.Add(entry);
+        }
+        if (dynamicAccess.isCreated) { dynamicAccess.Dispose(); }
+        if (dynamicMatrices.IsCreated) { dynamicMatrices.Dispose(); }
+        dynamicListDirty = false;
+        int count = dynamicEntries.Count;
+        if (count == 0) { return; }
+        Transform[] transforms = new Transform[count];
+        for (int index = 0; index < count; index++) { transforms[index] = dynamicEntries[index].transform; }
+        dynamicAccess = new TransformAccessArray(transforms);
+        dynamicMatrices = new NativeArray<Matrix4x4>(count, Allocator.Persistent);
     }
 
     public void MarkDirty()
     {
         nextScanTime = 0f;
+        nextProxyScanTime = 0f;
+        // A pass in flight is abandoned rather than finished: it is walking a snapshot from before
+        // whatever changed. Nothing is left half-applied by that - the next pass re-marks every entry
+        // unseen and walks the whole set again, and the sweep only ever runs at the end of a pass that
+        // completed. Invalidate so that next pass takes a genuinely fresh walk instead of the cached one
+        // this call is saying is out of date.
+        scanning = false;
+        scanBatch = null;
+        scanCursor = 0;
+        BasisSceneScan.Invalidate();
         structureDirty = true;
     }
 
@@ -210,7 +411,10 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy) { return false; }
         if ((settings.layerMask.value & (1 << renderer.gameObject.layer)) == 0) { return false; }
         if (settings.shadowCastersOnly && renderer.shadowCastingMode == ShadowCastingMode.Off) { return false; }
-        return renderer.GetComponent<BasisGlobalIlluminationRayExclude>() == null;
+        // TryGetComponent rather than GetComponent plus a fake-null compare, which is the miss path this
+        // takes for nearly every renderer in the world and the one Unity documents TryGetComponent as
+        // avoiding an editor allocation on. The RTAO twin of this method already reads it this way.
+        return !renderer.TryGetComponent(out BasisGlobalIlluminationRayExclude _);
     }
 
     /// <summary>
@@ -227,8 +431,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
     {
         if (renderer == null) { return null; }
         if (renderer is SkinnedMeshRenderer skinned) { return skinned.sharedMesh; }
-        MeshFilter filter = renderer.GetComponent<MeshFilter>();
-        return filter != null ? filter.sharedMesh : null;
+        return renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null;
     }
 
     public static bool IsUsableMesh(Mesh mesh)
@@ -240,12 +443,20 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
     {
         if (accelStruct == null) { return; }
 
-        if (time >= nextScanTime)
+        float interval = Mathf.Max(0.1f, settings.rescanInterval);
+
+        if (!scanning && time >= nextScanTime)
         {
-            nextScanTime = time + Mathf.Max(0.1f, settings.rescanInterval);
-            Rescan(settings);
+            nextScanTime = time + interval;
+            BeginScan(settings, interval);
         }
-        else if (textureVersion != textures.Version)
+        if (scanning) { StepScan(settings, ScanBudget); }
+
+        // Suppressed while a pass is in flight, because the pass is already re-reading the materials of
+        // every entry it walks and running the whole-scene re-read alongside it would put back exactly the
+        // per frame full walk this is here to remove. The version is taken when the pass FINISHES, so an
+        // average that lands during one is caught by the frame after it ends rather than lost.
+        if (!scanning && textureVersion != textures.Version)
         {
             RefreshMaterials(settings);
         }
@@ -254,6 +465,20 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
             RefreshBlockMaterials(settings);
             if (settings.skinnedMode == BasisGlobalIlluminationRaySkinnedMode.Proxy) { RefreshProxyBlockMaterials(settings); }
         }
+
+        if (settings.skinnedMode == BasisGlobalIlluminationRaySkinnedMode.Proxy)
+        {
+            if (time >= nextProxyScanTime)
+            {
+                // The first reschedule is a half interval longer than the rest, which parks the animator
+                // walk permanently between two geometry walks instead of on the same frame as one. Both
+                // still run immediately at startup, so an avatar occludes from the moment it arrives.
+                nextProxyScanTime = time + (proxyScanPhased ? interval : interval * 1.5f);
+                proxyScanPhased = true;
+                RescanProxies(settings, interval);
+            }
+        }
+        else if (proxies.Count > 0) { ClearProxies(); }
 
         UpdateTransforms();
 
@@ -265,15 +490,48 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         Upload();
     }
 
+    /// <summary>
+    /// The whole geometry pass at once, avatars included. Refresh does not use this - it drives the sliced
+    /// form below - but a caller that has just changed the world and wants the structure to agree with it
+    /// before the next frame does.
+    /// </summary>
     public void Rescan(in BasisGlobalIlluminationRaySceneSettings settings)
     {
-        textureVersion = textures.Version;
+        float interval = Mathf.Max(0.1f, settings.rescanInterval);
+        BeginScan(settings, interval);
+        StepScan(settings, int.MaxValue);
+        if (settings.skinnedMode == BasisGlobalIlluminationRaySkinnedMode.Proxy) { RescanProxies(settings, interval); }
+        else if (proxies.Count > 0) { ClearProxies(); }
+    }
+
+    private void BeginScan(in BasisGlobalIlluminationRaySceneSettings settings, float interval)
+    {
+        // Dropped once per pass so an unloaded shader is not kept alive by the memo. Everything the memo
+        // saves is spent inside a single pass anyway.
+        emissionKeywords.Clear();
         foreach (KeyValuePair<EntityId, Entry> pair in entries) { pair.Value.seen = false; }
 
-        Renderer[] renderers = UnityEngine.Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
-        for (int index = 0; index < renderers.Length; index++)
+        // Shared with ray traced ambient occlusion, which wants the same set on the same cadence: whichever
+        // of the two asks first in the window pays for the walk and the other reads its array.
+        scanBatch = BasisSceneScan.Take<Renderer>(interval);
+        scanCursor = 0;
+        scanning = true;
+        // The version as it stood when the walk STARTED, claimed as covered only when the walk ends. An
+        // average that lands mid-pass has already been missed by every entry the cursor went past, so
+        // claiming the version current at that point would bury it until the next pass; carrying the old
+        // one instead leaves the mismatch standing and the frame after the pass does one catch-up read.
+        scanTextureVersion = textures.Version;
+    }
+
+    private void StepScan(in BasisGlobalIlluminationRaySceneSettings settings, int budget)
+    {
+        if (!scanning) { return; }
+        if (scanBatch == null) { FinishScan(); return; }
+
+        int end = budget >= scanBatch.Length - scanCursor ? scanBatch.Length : scanCursor + budget;
+        for (; scanCursor < end; scanCursor++)
         {
-            Renderer renderer = renderers[index];
+            Renderer renderer = scanBatch[scanCursor];
             if (!IsSupportedRendererType(renderer, settings.skinnedMode)) { continue; }
             if (!ShouldInclude(renderer, settings)) { continue; }
 
@@ -296,9 +554,16 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
             AddEntry(renderer, mesh, settings);
         }
 
-        if (settings.skinnedMode == BasisGlobalIlluminationRaySkinnedMode.Proxy) { RescanProxies(settings); }
-        else if (proxies.Count > 0) { ClearProxies(); }
+        if (scanCursor >= scanBatch.Length) { FinishScan(); }
+    }
 
+    /// <summary>
+    /// Drops whatever the pass did not find. Only ever at the END of a pass: an entry the cursor has not
+    /// reached yet is not missing, it is unvisited, and sweeping mid-pass would delete the whole structure
+    /// and rebuild it a slice at a time.
+    /// </summary>
+    private void FinishScan()
+    {
         pendingRemoval.Clear();
         foreach (KeyValuePair<EntityId, Entry> pair in entries)
         {
@@ -309,6 +574,11 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
             if (entries.TryGetValue(pendingRemoval[index], out Entry dead)) { RemoveEntry(pendingRemoval[index], dead); }
         }
         pendingRemoval.Clear();
+
+        textureVersion = scanTextureVersion;
+        scanBatch = null;
+        scanCursor = 0;
+        scanning = false;
     }
 
     private void RefreshMaterials(in BasisGlobalIlluminationRaySceneSettings settings)
@@ -378,6 +648,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         entries[renderer.GetEntityId()] = entry;
         WriteMaterials(entry, settings);
         structureDirty = true;
+        if (!entry.isStatic) { dynamicListDirty = true; }
     }
 
     private bool AddInstances(Entry entry, Mesh mesh, in Matrix4x4 matrix)
@@ -587,6 +858,9 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         materialScratch.Clear();
         entry.renderer.GetSharedMaterials(materialScratch);
         bool avatarEntry = (BasisGlobalIlluminationSettings.AvatarLayers() & (1 << entry.renderer.gameObject.layer)) != 0;
+        // Shared across every sub-mesh of this entry, so the renderer's block state is answered once for
+        // the whole walk rather than once per sub-mesh. See RendererBlocks.
+        RendererBlocks blocks = RendererBlocks.For(entry.renderer);
         for (int index = 0; index < entry.instanceIds.Length; index++)
         {
             int instanceId = entry.instanceIds[index];
@@ -594,7 +868,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
 
             Material material = index < materialScratch.Count ? materialScratch[index] : null;
             int blockIndex = index < materialScratch.Count ? index : -1;
-            ReadSurface(material, entry.renderer, blockIndex, settings, textures, out Color albedo, out Color emission);
+            ReadSurface(material, entry.renderer, blockIndex, ref blocks, settings, textures, out Color albedo, out Color emission);
             Vector4 packedAlbedo = new Vector4(albedo.r, albedo.g, albedo.b, 1f);
             float emissionScale = avatarEntry ? settings.avatarEmissionScale : settings.emissionScale;
             Vector4 packedEmission = new Vector4(emission.r * emissionScale, emission.g * emissionScale, emission.b * emissionScale, 0f);
@@ -643,11 +917,24 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         in BasisGlobalIlluminationRaySceneSettings settings, BasisGlobalIlluminationRayTextureAverage textures,
         out Color albedo, out Color emission)
     {
+        RendererBlocks blocks = RendererBlocks.For(renderer);
+        ReadSurface(material, renderer, materialIndex, ref blocks, settings, textures, out albedo, out emission);
+    }
+
+    /// <summary>
+    /// The same read against a renderer's block state that a caller walking several sub-meshes can carry
+    /// between them. A renderer's blocks do not change from one of its sub-meshes to the next.
+    /// </summary>
+    private static void ReadSurface(Material material, Renderer renderer, int materialIndex,
+        ref RendererBlocks blocks,
+        in BasisGlobalIlluminationRaySceneSettings settings, BasisGlobalIlluminationRayTextureAverage textures,
+        out Color albedo, out Color emission)
+    {
         albedo = Color.white;
         emission = Color.black;
         if (material == null) { return; }
 
-        MaterialPropertyBlock block = ResolveBlock(renderer, materialIndex);
+        MaterialPropertyBlock block = blocks.Resolve(materialIndex);
 
         if (material.HasColor(BaseColorId)) { albedo = material.GetColor(BaseColorId); }
         else if (material.HasColor(ColorId)) { albedo = material.GetColor(ColorId); }
@@ -696,7 +983,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         // would light the room from a surface that is black on screen. Shaders that emit without declaring
         // _EMISSION (Poiyomi among them) have no such switch to read, and there the colour is the only
         // honest answer.
-        LocalKeyword emissionKeyword = material.shader.keywordSpace.FindKeyword(EmissionKeyword);
+        LocalKeyword emissionKeyword = ResolveEmissionKeyword(material.shader);
         if (emissionKeyword.isValid && !material.IsKeywordEnabled(emissionKeyword)) { return; }
 
         // Absent on the material means no switch to fail, not a switch that is off - the original read only
@@ -714,25 +1001,13 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         emission = new Color(Mathf.Max(0f, emission.r), Mathf.Max(0f, emission.g), Mathf.Max(0f, emission.b), 0f);
     }
 
-    /// <summary>
-    /// The renderer's property block for this material slot, or null when it carries none. A block set for
-    /// one slot and a block set for the whole renderer are both reachable here, and the per slot one wins
-    /// where both exist - the order the renderer itself applies them.
-    /// </summary>
-    private static MaterialPropertyBlock ResolveBlock(Renderer renderer, int materialIndex)
+    private static LocalKeyword ResolveEmissionKeyword(Shader shader)
     {
-        if (renderer == null || !renderer.HasPropertyBlock()) { return null; }
-
-        if (materialIndex >= 0)
-        {
-            blockScratch.Clear();
-            renderer.GetPropertyBlock(blockScratch, materialIndex);
-            if (!blockScratch.isEmpty) { return blockScratch; }
-        }
-
-        blockScratch.Clear();
-        renderer.GetPropertyBlock(blockScratch);
-        return blockScratch.isEmpty ? null : blockScratch;
+        if (shader == null) { return default; }
+        if (emissionKeywords.TryGetValue(shader, out LocalKeyword cached)) { return cached; }
+        LocalKeyword keyword = shader.keywordSpace.FindKeyword(EmissionKeyword);
+        emissionKeywords[shader] = keyword;
+        return keyword;
     }
 
     /// <summary>
@@ -759,6 +1034,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
         ReleaseGeometry(entry);
         entries.Remove(id);
         structureDirty = true;
+        if (!entry.isStatic) { dynamicListDirty = true; }
     }
 
     private void ReleaseGeometry(Entry entry)
@@ -792,24 +1068,47 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
 
     private void UpdateTransforms()
     {
+        if (dynamicListDirty)
+        {
+            RebuildDynamicList();
+        }
+        else if (dynamicScheduled)
+        {
+            dynamicHandle.Complete();
+            dynamicScheduled = false;
+            int count = dynamicEntries.Count;
+            for (int index = 0; index < count; index++)
+            {
+                Entry entry = dynamicEntries[index];
+                if (entry.transform == null) { continue; }
+                ApplyEntryMatrix(entry, dynamicMatrices[index]);
+            }
+            return;
+        }
+
+        // The set changed this frame, or no gather was in flight yet — read on the
+        // main thread exactly as before.
         foreach (KeyValuePair<EntityId, Entry> pair in entries)
         {
             Entry entry = pair.Value;
             if (entry.isStatic || entry.transform == null) { continue; }
-
-            Matrix4x4 matrix = entry.transform.localToWorldMatrix;
-            if (matrix == entry.matrix) { continue; }
-
-            entry.matrix = matrix;
-            for (int index = 0; index < entry.handles.Length; index++)
-            {
-                if (entry.handles[index] < 0) { continue; }
-                accelStruct.UpdateInstanceTransform(entry.handles[index], matrix);
-                instances[entry.instanceIds[index]].SetNormalMatrix(matrix);
-                MarkInstanceDirty(entry.instanceIds[index]);
-            }
-            structureDirty = true;
+            ApplyEntryMatrix(entry, entry.transform.localToWorldMatrix);
         }
+    }
+
+    private void ApplyEntryMatrix(Entry entry, in Matrix4x4 matrix)
+    {
+        if (matrix == entry.matrix) { return; }
+
+        entry.matrix = matrix;
+        for (int index = 0; index < entry.handles.Length; index++)
+        {
+            if (entry.handles[index] < 0) { continue; }
+            accelStruct.UpdateInstanceTransform(entry.handles[index], matrix);
+            instances[entry.instanceIds[index]].SetNormalMatrix(matrix);
+            MarkInstanceDirty(entry.instanceIds[index]);
+        }
+        structureDirty = true;
     }
 
     /// <summary>
@@ -819,11 +1118,12 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
     /// and it runs on the same rescan cadence as everything else. A non-humanoid avatar resolves to nothing
     /// and is simply absent - a body-shaped guess at a rig this cannot read would be worse than no bounce.
     /// </summary>
-    private void RescanProxies(in BasisGlobalIlluminationRaySceneSettings settings)
+    private void RescanProxies(in BasisGlobalIlluminationRaySceneSettings settings, float interval)
     {
         foreach (KeyValuePair<EntityId, ProxyEntry> pair in proxies) { pair.Value.seen = false; }
 
-        Animator[] animators = UnityEngine.Object.FindObjectsByType<Animator>(FindObjectsInactive.Exclude);
+        // Shared with ray traced ambient occlusion, which discovers the same humanoids the same way.
+        Animator[] animators = BasisSceneScan.Take<Animator>(interval);
         for (int index = 0; index < animators.Length; index++)
         {
             Animator animator = animators[index];
@@ -913,7 +1213,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
             instances[instanceId].vertexOffset = (uint)entry.geometry.normals.Offset;
             instances[instanceId].flags = BasisGlobalIlluminationRayInstance.FlagProxy
                 | (entry.geometry.hasNormals && indices.IsValid ? BasisGlobalIlluminationRayInstance.FlagHasNormals : 0u);
-            instances[instanceId].SetNormalMatrix(matrix);
+            instances[instanceId].SetNormalMatrixOrthogonal(matrix);
             MarkInstanceDirty(instanceId);
         }
 
@@ -1007,7 +1307,7 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
                 int instanceId = entry.instanceIds[index];
                 if (instanceId >= 0)
                 {
-                    instances[instanceId].SetNormalMatrix(matrix);
+                    instances[instanceId].SetNormalMatrixOrthogonal(matrix);
                     MarkInstanceDirty(instanceId);
                 }
             }
@@ -1095,6 +1395,13 @@ public sealed class BasisGlobalIlluminationRayScene : IDisposable
 
     public void Dispose()
     {
+        Application.onBeforeRender -= ScheduleTransformGather;
+        CompleteTransformGather();
+        if (dynamicAccess.isCreated) { dynamicAccess.Dispose(); }
+        if (dynamicMatrices.IsCreated) { dynamicMatrices.Dispose(); }
+        dynamicEntries.Clear();
+        dynamicListDirty = true;
+
         // No mesh is owned here any more: entries share the renderer's own mesh through the cache and the
         // proxies share one capsule, so there is nothing of this scene's to destroy on the way out.
         entries.Clear();

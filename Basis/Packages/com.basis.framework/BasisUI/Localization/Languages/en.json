@@ -771,6 +771,170 @@
       "value": "Stop Recording"
     },
     {
+      "key": "camera.photogrammetry",
+      "value": "Photogrammetry"
+    },
+    {
+      "key": "camera.photogrammetry.record",
+      "value": "Start Session"
+    },
+    {
+      "key": "camera.photogrammetry.stopUnlimited",
+      "value": "Stop Session"
+    },
+    {
+      "key": "camera.photogrammetry.saving",
+      "value": "Saving..."
+    },
+    {
+      "key": "camera.photogrammetry.status",
+      "value": "Status"
+    },
+    {
+      "key": "camera.photogrammetry.status.idle",
+      "value": "Not recording. Tip: turn off Depth of Field and Motion Blur first for cleaner reconstructions."
+    },
+    {
+      "key": "camera.photogrammetry.status.recording",
+      "value": "Session active: {0} photos captured so far."
+    },
+    {
+      "key": "camera.photogrammetry.status.saving",
+      "value": "Saving... {0} of {1} photos written."
+    },
+    {
+      "key": "camera.photogrammetry.status.saved",
+      "value": "Last photo saved: {0}"
+    },
+    {
+      "key": "camera.photogrammetry.status.failed",
+      "value": "Last session failed: {0}"
+    },
+    {
+      "key": "camera.photogrammetry.status.blocked",
+      "value": "Camera capture is locked by an admin."
+    },
+    {
+      "key": "camera.photogrammetry.distance",
+      "value": "Distance Trigger"
+    },
+    {
+      "key": "camera.photogrammetry.distance.description",
+      "value": "Takes a photo whenever the camera has moved at least this far since the last one."
+    },
+    {
+      "key": "camera.photogrammetry.angle",
+      "value": "Angle Trigger"
+    },
+    {
+      "key": "camera.photogrammetry.angle.description",
+      "value": "Takes a photo whenever the camera has turned at least this far since the last one."
+    },
+    {
+      "key": "camera.photogrammetry.resolution",
+      "value": "Resolution"
+    },
+    {
+      "key": "camera.photogrammetry.resolution.description",
+      "value": "Size of each captured photo. Lower keeps the session fast and the dataset small."
+    },
+    {
+      "key": "camera.photogrammetry.captureNow",
+      "value": "Capture Now"
+    },
+    {
+      "key": "camera.photogrammetry.captureNow.description",
+      "value": "Takes one photo immediately, ignoring the movement thresholds."
+    },
+    {
+      "key": "camera.photogrammetry.status.pathBusy",
+      "value": "A path render is in progress."
+    },
+    {
+      "key": "camera.photogrammetryPath",
+      "value": "Photogrammetry Path"
+    },
+    {
+      "key": "camera.photogrammetryPath.record",
+      "value": "Record Path"
+    },
+    {
+      "key": "camera.photogrammetryPath.stop",
+      "value": "Stop Recording"
+    },
+    {
+      "key": "camera.photogrammetryPath.status",
+      "value": "Path"
+    },
+    {
+      "key": "camera.photogrammetryPath.status.empty",
+      "value": "No points recorded yet."
+    },
+    {
+      "key": "camera.photogrammetryPath.status.recording",
+      "value": "Recording... {0} points so far."
+    },
+    {
+      "key": "camera.photogrammetryPath.status.ready",
+      "value": "{0} points recorded (about {1} to render)."
+    },
+    {
+      "key": "camera.photogrammetryPath.clear",
+      "value": "Clear Path"
+    },
+    {
+      "key": "camera.photogrammetryPath.settle",
+      "value": "Settle Time"
+    },
+    {
+      "key": "camera.photogrammetryPath.settle.description",
+      "value": "How many seconds to hold still at each point before it's captured. Higher gives lighting and effects more time to settle."
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.record",
+      "value": "Render Path"
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.stopUnlimited",
+      "value": "Cancel"
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.saving",
+      "value": "Saving..."
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status",
+      "value": "Render Status"
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.idle",
+      "value": "Not running."
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.recording",
+      "value": "Rendering... {0} points captured so far."
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.saving",
+      "value": "Saving... {0} of {1} photos written."
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.saved",
+      "value": "Last photo saved: {0}"
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.failed",
+      "value": "Last render failed: {0}"
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.blocked",
+      "value": "Camera capture is locked by an admin."
+    },
+    {
+      "key": "camera.photogrammetryPath.replay.status.liveBusy",
+      "value": "A live photogrammetry session is in progress."
+    },
+    {
       "key": "camera.lens",
       "value": "Lens"
     },
@@ -1399,6 +1563,62 @@
       "value": "There is no desktop window on this platform to show the feed on."
     },
     {
+      "key": "camera.directToScreen.fit",
+      "value": "Screen Fit"
+    },
+    {
+      "key": "camera.directToScreen.fit.description",
+      "value": "How the shot is placed on the monitor: kept whole with bars, cropped to fill the window, stretched to fill it, or shot at the window's own shape so nothing is cut, barred or stretched."
+    },
+    {
+      "key": "camera.directToScreen.fit.fit",
+      "value": "Fit"
+    },
+    {
+      "key": "camera.directToScreen.fit.fit.tooltip",
+      "value": "The whole shot at its own shape, with bars where the window is a different shape. What you see is exactly the frame being shot."
+    },
+    {
+      "key": "camera.directToScreen.fit.fill",
+      "value": "Fill"
+    },
+    {
+      "key": "camera.directToScreen.fit.fill.tooltip",
+      "value": "Fills the window by cropping the shot's long side. No bars, but the edges of the shot are off the monitor."
+    },
+    {
+      "key": "camera.directToScreen.fit.stretch",
+      "value": "Stretch"
+    },
+    {
+      "key": "camera.directToScreen.fit.stretch.tooltip",
+      "value": "Fills the window by stretching the shot to its shape. No bars and nothing cut, but the picture is distorted."
+    },
+    {
+      "key": "camera.directToScreen.fit.matchWindow",
+      "value": "Match Window"
+    },
+    {
+      "key": "camera.directToScreen.fit.matchWindow.tooltip",
+      "value": "Shoots the feed at the window's own shape while it is on the monitor, so nothing is cut, barred or stretched. A wider window sees more at the sides; the viewfinder shows the middle of it."
+    },
+    {
+      "key": "camera.directToScreen.horizontal",
+      "value": "Horizontal Position"
+    },
+    {
+      "key": "camera.directToScreen.horizontal.description",
+      "value": "Where the picture sits across the window when there are bars at the sides, or which part of the shot is kept when it is cropped to fill. 50% is centred."
+    },
+    {
+      "key": "camera.directToScreen.vertical",
+      "value": "Vertical Position"
+    },
+    {
+      "key": "camera.directToScreen.vertical.description",
+      "value": "Where the picture sits down the window when there are bars above and below, or which part of the shot is kept when it is cropped to fill. 50% is centred, 100% is the top."
+    },
+    {
       "key": "camera.streamResolution",
       "value": "Stream Resolution"
     },
@@ -1801,6 +2021,14 @@
     {
       "key": "camera.autoLevel.description",
       "value": "Keep the horizon level while flying the camera."
+    },
+    {
+      "key": "camera.rollControl",
+      "value": "Camera Roll"
+    },
+    {
+      "key": "camera.rollControl.description",
+      "value": "On, the camera rolls with the puck while you hold it, so you can tilt the shot or turn the camera on its side for a portrait frame. Off, the picture stays level however you twist the puck."
     },
     {
       "key": "camera.vrStabilization",
@@ -2235,8 +2463,20 @@
       "value": "Type a message here to send it to everyone in the world."
     },
     {
+      "key": "settings.chat.message.mutedByModerator",
+      "value": "A moderator muted your text chat."
+    },
+    {
+      "key": "settings.chat.message.lockedByServer",
+      "value": "Text chat is locked on this server."
+    },
+    {
       "key": "settings.chat.textSize.tooltip",
       "value": "How large chat text appears above players."
+    },
+    {
+      "key": "settings.chat.duration.tooltip",
+      "value": "How long a chat message stays visible above a player's head, in seconds, before it disappears."
     },
     {
       "key": "settings.chat.camera.photoMetadata.tooltip",
@@ -2635,12 +2875,148 @@
       "value": "How much your shoulders roll forward when you reach ahead."
     },
     {
+      "key": "settings.bodyTracking.shoulderTrackerBlend.title",
+      "value": "Shoulder Tracker Blend"
+    },
+    {
+      "key": "settings.bodyTracking.shoulderTrackerBlend.title.tooltip",
+      "value": "Seconds to cross-fade between a shoulder tracker and the automatic shoulder when the tracker appears, changes confidence or drops out."
+    },
+    {
       "key": "settings.bodyTracking.lowerArmTwist.title.tooltip",
       "value": "How much forearm twist is shared down toward the wrist."
     },
     {
       "key": "settings.bodyTracking.upperArmTwist.title.tooltip",
       "value": "How much upper arm twist is shared toward the shoulder."
+    },
+    {
+      "key": "settings.bodyTracking.section.armSolver.title",
+      "value": "Arm Solver"
+    },
+    {
+      "key": "settings.bodyTracking.section.armSolver.description",
+      "value": "How the elbow is placed and how far the arm joints may bend and twist."
+    },
+    {
+      "key": "settings.bodyTracking.armJointLimits.title",
+      "value": "Arm Joint Limits"
+    },
+    {
+      "key": "settings.bodyTracking.armJointLimits.title.tooltip",
+      "value": "Keep the shoulder, forearm and wrist inside human range of motion when choosing where the elbow goes."
+    },
+    {
+      "key": "settings.bodyTracking.armReachSoftness.title",
+      "value": "Reach Softness"
+    },
+    {
+      "key": "settings.bodyTracking.armReachSoftness.title.tooltip",
+      "value": "How much of the arm length is eased near full extension so the elbow never snaps straight."
+    },
+    {
+      "key": "settings.bodyTracking.armSwivelSmoothTime.title",
+      "value": "Elbow Smoothing"
+    },
+    {
+      "key": "settings.bodyTracking.armSwivelSmoothTime.title.tooltip",
+      "value": "Seconds the elbow takes to settle on its new direction. The hand always stays on the controller."
+    },
+    {
+      "key": "settings.bodyTracking.armSwivelMaxRate.title",
+      "value": "Elbow Max Speed"
+    },
+    {
+      "key": "settings.bodyTracking.armSwivelMaxRate.title.tooltip",
+      "value": "Fastest the elbow may swing around the arm, in degrees per second."
+    },
+    {
+      "key": "settings.bodyTracking.armSwivelSwitchDwell.title",
+      "value": "Elbow Switch Delay"
+    },
+    {
+      "key": "settings.bodyTracking.armSwivelSwitchDwell.title.tooltip",
+      "value": "Seconds a clearly better elbow direction on the other side of the arm must persist before the elbow moves there."
+    },
+    {
+      "key": "settings.bodyTracking.armPriorWeight.title",
+      "value": "Natural Pose Weight"
+    },
+    {
+      "key": "settings.bodyTracking.armPriorWeight.title.tooltip",
+      "value": "How strongly the elbow follows the natural human pose for the current hand position."
+    },
+    {
+      "key": "settings.bodyTracking.armPreviousWeight.title",
+      "value": "Elbow Stickiness"
+    },
+    {
+      "key": "settings.bodyTracking.armPreviousWeight.title.tooltip",
+      "value": "How much the elbow prefers to stay where it was last frame."
+    },
+    {
+      "key": "settings.bodyTracking.forearmPronationMax.title",
+      "value": "Forearm Pronation Limit"
+    },
+    {
+      "key": "settings.bodyTracking.forearmPronationMax.title.tooltip",
+      "value": "Maximum palm-down twist of the forearm from neutral, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.forearmSupinationMax.title",
+      "value": "Forearm Supination Limit"
+    },
+    {
+      "key": "settings.bodyTracking.forearmSupinationMax.title.tooltip",
+      "value": "Maximum palm-up twist of the forearm from neutral, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.humeralInternalMax.title",
+      "value": "Shoulder Internal Rotation Limit"
+    },
+    {
+      "key": "settings.bodyTracking.humeralInternalMax.title.tooltip",
+      "value": "Maximum inward twist of the upper arm, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.humeralExternalMax.title",
+      "value": "Shoulder External Rotation Limit"
+    },
+    {
+      "key": "settings.bodyTracking.humeralExternalMax.title.tooltip",
+      "value": "Maximum outward twist of the upper arm, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.wristFlexionMax.title",
+      "value": "Wrist Flexion Limit"
+    },
+    {
+      "key": "settings.bodyTracking.wristFlexionMax.title.tooltip",
+      "value": "Maximum bend of the wrist toward the palm, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.wristExtensionMax.title",
+      "value": "Wrist Extension Limit"
+    },
+    {
+      "key": "settings.bodyTracking.wristExtensionMax.title.tooltip",
+      "value": "Maximum bend of the wrist away from the palm, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.wristRadialMax.title",
+      "value": "Wrist Radial Deviation Limit"
+    },
+    {
+      "key": "settings.bodyTracking.wristRadialMax.title.tooltip",
+      "value": "Maximum sideways bend of the wrist toward the thumb, in degrees."
+    },
+    {
+      "key": "settings.bodyTracking.wristUlnarMax.title",
+      "value": "Wrist Ulnar Deviation Limit"
+    },
+    {
+      "key": "settings.bodyTracking.wristUlnarMax.title.tooltip",
+      "value": "Maximum sideways bend of the wrist toward the little finger, in degrees."
     },
     {
       "key": "settings.bodyTracking.maxBendDeg.title.tooltip",
@@ -3543,12 +3919,12 @@
       "value": "Open the folder where all crash reports are stored on your computer."
     },
     {
-      "key": "settings.admin.title.showShoutOnMenuBar.tooltip",
-      "value": "Show the Shout option on your menu bar's microphone mode button."
+      "key": "settings.admin.title.showAnnounceOnMenuBar.tooltip",
+      "value": "Show the Announce option on your menu bar's microphone mode button."
     },
     {
-      "key": "settings.admin.title.showShoutOnMenuBar.description",
-      "value": "Adds the Shout option to the mic-mode button on your main menu bar. Off by default, so the button stays hidden until you enable it here."
+      "key": "settings.admin.title.showAnnounceOnMenuBar.description",
+      "value": "Adds the Announce option to the mic-mode button on your main menu bar. Off by default, so the button stays hidden until you enable it here."
     },
     {
       "key": "settings.admin.title.lockAvatars.tooltip",
@@ -3847,11 +4223,11 @@
       "value": "Broadcast the reason text as a message to every player."
     },
     {
-      "key": "menu.individualPlayer.shout.enable.tooltip",
+      "key": "menu.individualPlayer.announce.enable.tooltip",
       "value": "Let this player's voice broadcast to everyone without distance falloff."
     },
     {
-      "key": "menu.individualPlayer.shout.disable.tooltip",
+      "key": "menu.individualPlayer.announce.disable.tooltip",
       "value": "Return this player's voice to normal distance-based spatial audio."
     },
     {
@@ -4063,6 +4439,18 @@
       "value": "Library"
     },
     {
+      "key": "menu.provider.mirror",
+      "value": "Mirror Settings"
+    },
+    {
+      "key": "menu.provider.cameraSettings",
+      "value": "Camera Settings"
+    },
+    {
+      "key": "menu.provider.mediaPlayers",
+      "value": "Media Players"
+    },
+    {
       "key": "menu.provider.shoutModeOff",
       "value": "Shout Mode Off"
     },
@@ -4085,6 +4473,10 @@
     {
       "key": "menu.provider.micmode.shout",
       "value": "Shout"
+    },
+    {
+      "key": "menu.provider.micmode.announce",
+      "value": "Announce"
     },
     {
       "key": "menu.provider.micmode.noone",
@@ -4333,6 +4725,90 @@
     {
       "key": "trackerLinking.status.pairDriving",
       "value": "Fused — driving {0}"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets",
+      "value": "Tracker & Controller Offsets"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.tooltip",
+      "value": "Adjust where a tracker or controller sits compared to the real device, with sliders or by grabbing it in VR."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.device",
+      "value": "Device"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.device.tooltip",
+      "value": "The tracker or controller to adjust. Offsets are saved per device model and body part, and come back whenever that kind of device drives the same part again."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.none",
+      "value": "No trackers or controllers connected"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.positionX",
+      "value": "Position X"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.positionY",
+      "value": "Position Y"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.positionZ",
+      "value": "Position Z"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.position.tooltip",
+      "value": "Slides the device along its own axes, in real-world meters."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.rotationX",
+      "value": "Rotation X"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.rotationY",
+      "value": "Rotation Y"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.rotationZ",
+      "value": "Rotation Z"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.rotation.tooltip",
+      "value": "Turns the device around its own axes: X tilts it up and down, Y turns it left and right, Z rolls it."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.grabPosition",
+      "value": "Grab Position"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.grabPosition.description",
+      "value": "Pick the axes a grab can slide the device along, then squeeze grip with a free hand near its handle. The blue ball marks where the device really is. The offset saves when you let go."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.grabRotation",
+      "value": "Grab Rotation"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.grabRotation.description",
+      "value": "Pick the axes a grab can turn the device around. Holding a handle with both hands gives finer control."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.grabAxis.tooltip",
+      "value": "Lets a grab change this axis. Turn on more than one axis to edit them together, and turn them all off to stop editing."
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.grab.unavailable",
+      "value": "Needs a tracked hand to grab with"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.reset",
+      "value": "Reset Offset"
+    },
+    {
+      "key": "trackerLinking.deviceOffsets.reset.tooltip",
+      "value": "Clears the offset for the selected device."
     },
     {
       "key": "menu.exit.dialog.title",
@@ -5435,8 +5911,8 @@
       "value": "Teleport this player to your location."
     },
     {
-      "key": "menu.individualPlayer.shout.enable",
-      "value": "Enable Shout Mode"
+      "key": "menu.individualPlayer.announce.enable",
+      "value": "Enable Announce Mode"
     },
     {
       "key": "menu.individualPlayer.fullquality.enable",
@@ -5447,12 +5923,64 @@
       "value": "Disable Full-Quality Broadcast"
     },
     {
+      "key": "menu.individualPlayer.announce.disable",
+      "value": "Disable Announce Mode"
+    },
+    {
+      "key": "menu.individualPlayer.announce.description",
+      "value": "Toggle non-spatialized broadcast voice for this player."
+    },
+    {
+      "key": "menu.individualPlayer.shout.description",
+      "value": "Toggle shout mode for this player - double range and louder, still spatial."
+    },
+    {
+      "key": "menu.individualPlayer.shout.enable",
+      "value": "Enable Shout Mode"
+    },
+    {
+      "key": "menu.individualPlayer.shout.enable.tooltip",
+      "value": "Let this player's voice carry twice as far and louder, while staying spatial."
+    },
+    {
       "key": "menu.individualPlayer.shout.disable",
       "value": "Disable Shout Mode"
     },
     {
-      "key": "menu.individualPlayer.shout.description",
-      "value": "Toggle non-spatialized broadcast voice for this player."
+      "key": "menu.individualPlayer.shout.disable.tooltip",
+      "value": "Return this player's voice to its normal range and level."
+    },
+    {
+      "key": "menu.individualPlayer.muteVoice",
+      "value": "Server Voice Mute"
+    },
+    {
+      "key": "menu.individualPlayer.muteVoice.tooltip",
+      "value": "Mute this player's voice for everyone. Enforced by the server and kept across rejoins until a moderator unmutes them."
+    },
+    {
+      "key": "menu.individualPlayer.muteText",
+      "value": "Server Text Mute"
+    },
+    {
+      "key": "menu.individualPlayer.muteText.tooltip",
+      "value": "Mute this player's text chat and typing for everyone. Enforced by the server and kept across rejoins until a moderator unmutes them."
+    },
+    {
+      "key": "menu.individualPlayer.rename",
+      "value": "Rename"
+    },
+    {
+      "key": "menu.individualPlayer.rename.description",
+      "value": "The new display name for this player. It lasts until they reconnect."
+    },
+    {
+      "key": "menu.individualPlayer.applyRename",
+      "value": "Apply Name"
+    },
+    {
+      "key": "menu.individualPlayer.applyRename.description",
+      "value": "Changes this player's name for everyone on the server."
     },
     {
       "key": "menu.individualPlayer.message",
@@ -6199,6 +6727,10 @@
       "value": "Shared Image"
     },
     {
+      "key": "library.shareable.dollyTrack",
+      "value": "Shared Dolly Track"
+    },
+    {
       "key": "library.shareable.other",
       "value": "Shared Item"
     },
@@ -6309,6 +6841,22 @@
     {
       "key": "library.dialog.add.error.unknown",
       "value": "Unknown validation error."
+    },
+    {
+      "key": "library.dialog.add.error.unreachable.title",
+      "value": "BEE File Unreachable"
+    },
+    {
+      "key": "library.dialog.add.error.unreachable",
+      "value": "Could not download the BEE file from {0}: {1}"
+    },
+    {
+      "key": "library.dialog.add.error.tlsHandshake",
+      "value": "Could not open a secure connection to {0}. The host must support TLS 1.2; hosts that only allow TLS 1.3 cannot be reached."
+    },
+    {
+      "key": "library.dialog.add.error.blockedAddress",
+      "value": "{0} resolves to a non-public address ({1}) on this network. Basis only downloads from public addresses; a local DNS entry for a self-hosted server can cause this."
     },
     {
       "key": "library.drop.notice.noPassword",
@@ -6441,6 +6989,22 @@
     {
       "key": "settings.general.rememberMenuState.tooltip",
       "value": "Restore each menu's scroll position, open sections, and last tab when you reopen it, and reopen the menu after loading a world."
+    },
+    {
+      "key": "settings.general.menuTeleport",
+      "value": "Menu Teleports to You"
+    },
+    {
+      "key": "settings.general.menuTeleport.tooltip",
+      "value": "In VR the menu stays where you opened it and jumps back in front of you once you move far enough away from it. Turn off to leave it in place until you reopen it."
+    },
+    {
+      "key": "settings.general.menuTeleportDistance",
+      "value": "Menu Teleport Distance"
+    },
+    {
+      "key": "settings.general.menuTeleportDistance.tooltip",
+      "value": "How far your head can be from the menu before it jumps back in front of you. Scales with your avatar; the menu itself sits about 0.6 m away."
     },
     {
       "key": "settings.general.developer.title",
@@ -6653,6 +7217,130 @@
     {
       "key": "settings.general.avatarPreviewMirror.description",
       "value": "Flip the avatar preview horizontally so it reads like a mirror."
+    },
+    {
+      "key": "settings.general.avatarPreviewFraming",
+      "value": "Avatar Preview Framing"
+    },
+    {
+      "key": "settings.general.avatarPreviewFraming.tooltip",
+      "value": "Choose how much of your avatar the preview shows."
+    },
+    {
+      "key": "settings.general.avatarPreviewFraming.fullBody",
+      "value": "Full Body"
+    },
+    {
+      "key": "settings.general.avatarPreviewFraming.upperBody",
+      "value": "Upper Body"
+    },
+    {
+      "key": "settings.general.avatarPreviewFraming.face",
+      "value": "Face"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition",
+      "value": "Avatar Preview Position"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.tooltip",
+      "value": "Where the avatar preview sits on screen."
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.bottomRight",
+      "value": "Bottom Right"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.bottomLeft",
+      "value": "Bottom Left"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.middleRight",
+      "value": "Middle Right"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.middleLeft",
+      "value": "Middle Left"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.topRight",
+      "value": "Top Right"
+    },
+    {
+      "key": "settings.general.avatarPreviewPosition.topLeft",
+      "value": "Top Left"
+    },
+    {
+      "key": "settings.general.avatarPreviewRotation",
+      "value": "Avatar Preview Rotation"
+    },
+    {
+      "key": "settings.general.avatarPreviewRotation.tooltip",
+      "value": "Which of your head movements the preview shows. Locked directions keep your face square to the preview camera."
+    },
+    {
+      "key": "settings.general.avatarPreviewRotation.lockFace",
+      "value": "Always Look At Face"
+    },
+    {
+      "key": "settings.general.avatarPreviewRotation.allowYaw",
+      "value": "Allow Left/Right Rotation"
+    },
+    {
+      "key": "settings.general.avatarPreviewRotation.allowPitch",
+      "value": "Allow Up/Down Rotation"
+    },
+    {
+      "key": "settings.general.avatarPreviewRotation.allowAll",
+      "value": "Allow All Rotation"
+    },
+    {
+      "key": "settings.general.avatarPreviewSize",
+      "value": "Avatar Preview Size"
+    },
+    {
+      "key": "settings.general.avatarPreviewSize.tooltip",
+      "value": "Scale the avatar preview panel up or down."
+    },
+    {
+      "key": "settings.general.avatarPreviewZoom",
+      "value": "Avatar Preview Zoom"
+    },
+    {
+      "key": "settings.general.avatarPreviewZoom.tooltip",
+      "value": "Zoom the preview camera in or out on your avatar."
+    },
+    {
+      "key": "settings.general.avatarPreviewOffsetX",
+      "value": "Avatar Preview Horizontal Offset"
+    },
+    {
+      "key": "settings.general.avatarPreviewOffsetX.tooltip",
+      "value": "Nudge the avatar preview left or right."
+    },
+    {
+      "key": "settings.general.avatarPreviewOffsetY",
+      "value": "Avatar Preview Vertical Offset"
+    },
+    {
+      "key": "settings.general.avatarPreviewOffsetY.tooltip",
+      "value": "Nudge the avatar preview up or down."
+    },
+    {
+      "key": "settings.general.avatarPreviewMaxYaw",
+      "value": "Avatar Preview Max Left/Right"
+    },
+    {
+      "key": "settings.general.avatarPreviewMaxYaw.tooltip",
+      "value": "How far the preview camera may swing left or right of your body when it follows your head."
+    },
+    {
+      "key": "settings.general.avatarPreviewMaxPitch",
+      "value": "Avatar Preview Max Up/Down"
+    },
+    {
+      "key": "settings.general.avatarPreviewMaxPitch.tooltip",
+      "value": "How far the preview camera may tilt above or below level when it follows your head."
     },
     {
       "key": "settings.general.camera.title",
@@ -7107,6 +7795,14 @@
       "value": "Adds a \"No One\" step to the mic mode button next to mute. Your microphone stays on so your avatar’s mouth keeps moving, but nobody hears you."
     },
     {
+      "key": "settings.admin.title.showShoutOnMenuBar",
+      "value": "Show Shout On Menu Bar"
+    },
+    {
+      "key": "settings.admin.title.showShoutOnMenuBar.tooltip",
+      "value": "Adds Shout to the mic-mode button. Shout carries your voice twice as far and louder, and stays fully spatial, so people still hear where you are."
+    },
+    {
       "key": "settings.microphone.muteBehavior.title",
       "value": "Mute Behavior"
     },
@@ -7519,6 +8215,54 @@
       "value": "Mirror Resolution"
     },
     {
+      "key": "settings.graphics.mirrorCap",
+      "value": "Mirror Resolution Cap"
+    },
+    {
+      "key": "settings.graphics.mirrorCap.tooltip",
+      "value": "Ceiling applied to whatever resolution a world's mirror asks for. Auto uses the world's own value. Mobile hardware defaults to 768 because a 2048 mirror renders per eye, per mirror, every frame."
+    },
+    {
+      "key": "settings.graphics.mirrorLodBias",
+      "value": "Mirror Detail Bias"
+    },
+    {
+      "key": "settings.graphics.mirrorLodBias.tooltip",
+      "value": "Scales model detail while the reflection is drawn. Below 1 swaps to lower-detail models sooner inside mirrors only, which your own view never sees. Mobile hardware defaults to 0.75."
+    },
+    {
+      "key": "settings.graphics.mirrorDepth",
+      "value": "Mirror Depth Buffer"
+    },
+    {
+      "key": "settings.graphics.mirrorDepth.tooltip",
+      "value": "Bits of depth precision for the reflection. Auto uses the world's own value. 16 halves the memory bandwidth a mirror costs and is the mobile default; raise it if a mirror shows z-fighting."
+    },
+    {
+      "key": "settings.graphics.mirrorMsaa",
+      "value": "Mirror Antialiasing Floor"
+    },
+    {
+      "key": "settings.graphics.mirrorMsaa.tooltip",
+      "value": "Minimum multisampling for the reflection. Auto uses the world's own value. Mobile hardware defaults to 4x, which resolves in tile memory and keeps mirror edges clean at the reduced resolution."
+    },
+    {
+      "key": "settings.graphics.mirrorRateTiers",
+      "value": "Mirror Distance Rate Tiers"
+    },
+    {
+      "key": "settings.graphics.mirrorRateTiers.tooltip",
+      "value": "Update distant mirrors every 2nd or 4th frame instead of every frame, using the distances the world author set. On by default on mobile hardware. Turn off to update every mirror every frame."
+    },
+    {
+      "key": "settings.graphics.mirrorDepthGuard",
+      "value": "Mirror Depth Precision Guard"
+    },
+    {
+      "key": "settings.graphics.mirrorDepthGuard.tooltip",
+      "value": "Raises a mirror's surface clip offset to 0.05 when a world authored it below 0.02, which flickers at grazing angles on low depth precision. On by default on mobile hardware."
+    },
+    {
       "key": "settings.graphics.bloom.title",
       "value": "Bloom"
     },
@@ -7557,6 +8301,106 @@
     {
       "key": "settings.graphics.fog.bakedapv.tooltip",
       "value": "Light the fog from a fast static bake of the scene's adaptive probe volumes instead of sampling them live every frame. Baked on demand and used immediately."
+    },
+    {
+      "key": "settings.graphics.fog.resolution",
+      "value": "Fog Resolution"
+    },
+    {
+      "key": "settings.graphics.fog.resolution.tooltip",
+      "value": "Screen resolution the fog is raymarched at. Full is the sharpest and the most expensive, Half is the usual balance and Quarter is the cheapest but softest."
+    },
+    {
+      "key": "settings.graphics.fog.resolution.full",
+      "value": "Full"
+    },
+    {
+      "key": "settings.graphics.fog.resolution.half",
+      "value": "Half"
+    },
+    {
+      "key": "settings.graphics.fog.resolution.quarter",
+      "value": "Quarter"
+    },
+    {
+      "key": "settings.graphics.fog.maxSteps",
+      "value": "Fog Steps"
+    },
+    {
+      "key": "settings.graphics.fog.maxSteps.tooltip",
+      "value": "Maximum raymarching steps per pixel. More steps give smoother fog and cleaner light shafts at a higher GPU cost."
+    },
+    {
+      "key": "settings.graphics.fog.blur",
+      "value": "Fog Blur"
+    },
+    {
+      "key": "settings.graphics.fog.blur.tooltip",
+      "value": "How many times the fog is blurred before compositing. Softens noise and light shafts; 0 skips the blur, which is fine when the sun does not light the fog."
+    },
+    {
+      "key": "settings.graphics.fog.temporal",
+      "value": "Temporal Reprojection"
+    },
+    {
+      "key": "settings.graphics.fog.temporal.tooltip",
+      "value": "Blends each frame's fog with the previous frame reprojected through the camera motion. Smooths noise so fewer steps look clean; can ghost briefly on fast turns."
+    },
+    {
+      "key": "settings.graphics.fog.froxels",
+      "value": "Froxel Volume"
+    },
+    {
+      "key": "settings.graphics.fog.froxels.tooltip",
+      "value": "Computes the fog once per cell of a coarse camera-aligned 3D grid instead of marching every pixel. Much cheaper at high resolutions; the resolution, steps and blur settings no longer apply while it is on."
+    },
+    {
+      "key": "settings.graphics.fog.analyticDepth",
+      "value": "Analytic Optical Depth"
+    },
+    {
+      "key": "settings.graphics.fog.analyticDepth.tooltip",
+      "value": "Integrates the height falloff exactly between samples and stops the march where the fog becomes opaque. Fewer steps for the same look; slightly changes the look of dense fog."
+    },
+    {
+      "key": "settings.graphics.fog.scaleSteps",
+      "value": "Scale Steps With Resolution"
+    },
+    {
+      "key": "settings.graphics.fog.scaleSteps.tooltip",
+      "value": "Halves the step budget at Full resolution and doubles it at Quarter so the cost stays roughly flat across the Fog Resolution setting."
+    },
+    {
+      "key": "settings.graphics.fog.sunTrims",
+      "value": "Sun Path Trims"
+    },
+    {
+      "key": "settings.graphics.fog.sunTrims.tooltip",
+      "value": "Reuses the shadow cascade between steps and samples the sun shadow every other step. Cheaper sun shafts with slightly softer shadows in the fog."
+    },
+    {
+      "key": "settings.graphics.fog.froxelGrid",
+      "value": "Froxel Grid"
+    },
+    {
+      "key": "settings.graphics.fog.froxelGrid.tooltip",
+      "value": "Resolution of the fog volume: how many screen pixels share one froxel column and how many depth slices it has. Auto picks Fine on desktop, Balanced in VR and Coarse on mobile GPUs."
+    },
+    {
+      "key": "settings.graphics.fog.froxelGrid.auto",
+      "value": "Auto"
+    },
+    {
+      "key": "settings.graphics.fog.froxelGrid.fine",
+      "value": "Fine (1/8, 64 slices)"
+    },
+    {
+      "key": "settings.graphics.fog.froxelGrid.balanced",
+      "value": "Balanced (1/12, 48 slices)"
+    },
+    {
+      "key": "settings.graphics.fog.froxelGrid.coarse",
+      "value": "Coarse (1/16, 32 slices)"
     },
     {
       "key": "settings.graphics.motionBlur.title",
@@ -8103,6 +8947,14 @@
       "value": "Ray traced only. A baked-emissive surface's light normally sits out of the bounce because it is already in the lightmap - counting it again would light the room twice from one lamp. Turn this on to count it anyway for a stronger bounce, at the cost of that correctness. Off by default."
     },
     {
+      "key": "settings.graphics.gi.lightmappedReceive",
+      "value": "Baked Surface Receive"
+    },
+    {
+      "key": "settings.graphics.gi.lightmappedReceive.tooltip",
+      "value": "How much of the effect a lightmapped surface still receives. Its own bounce and its own ambient occlusion are already baked into the lightmap, so re-applying them makes a baked world read blown out and crushed at once. Avatars, props and anything dynamic always receive in full; 1 restores the old behaviour, and worlds without lightmaps are never affected."
+    },
+    {
       "key": "settings.graphics.gi.rayReuse",
       "value": "Reuse Off-Screen Rays"
     },
@@ -8136,11 +8988,43 @@
     },
     {
       "key": "settings.graphics.gi.specular",
-      "value": "Ray Traced Reflections"
+      "value": "Reflections"
     },
     {
       "key": "settings.graphics.gi.specular.tooltip",
-      "value": "Reflect the room in smooth surfaces with a traced mirror ray, in place of the static reflection probe. Needs the ray traced backend."
+      "value": "Reflect the room in smooth surfaces with a traced mirror ray, in place of the static reflection probe. Ray Traced mode reflects things that are off screen; Screen Space mode walks the depth buffer and runs on any GPU."
+    },
+    {
+      "key": "settings.graphics.gi.specularIntensity",
+      "value": "Reflection Intensity"
+    },
+    {
+      "key": "settings.graphics.gi.specularIntensity.tooltip",
+      "value": "How bright the traced reflection is. 1 matches the room; above it reflections read stronger than the surfaces they mirror."
+    },
+    {
+      "key": "settings.graphics.gi.specularMaxRoughness",
+      "value": "Reflection Max Roughness"
+    },
+    {
+      "key": "settings.graphics.gi.specularMaxRoughness.tooltip",
+      "value": "How rough a surface can be and still take the traced reflection. Rougher surfaces keep the reflection probe; raising this puts the trace on more surfaces."
+    },
+    {
+      "key": "settings.graphics.gi.specularRayLength",
+      "value": "Reflection Distance"
+    },
+    {
+      "key": "settings.graphics.gi.specularRayLength.tooltip",
+      "value": "How far the mirror ray reaches. A reflection carries much further than a bounce - the far wall of a room is a bounce nobody can see and a reflection everybody can."
+    },
+    {
+      "key": "settings.graphics.gi.specularFadeDistance",
+      "value": "Reflection Fade Distance"
+    },
+    {
+      "key": "settings.graphics.gi.specularFadeDistance.tooltip",
+      "value": "How far from the camera surfaces still trace reflections. Beyond it they keep the reflection probe, which is where the cost stops paying for itself."
     },
     {
       "key": "settings.graphics.gi.unsupported",
@@ -8269,6 +9153,10 @@
     {
       "key": "settings.chat.textSize",
       "value": "Chat Text Size"
+    },
+    {
+      "key": "settings.chat.duration",
+      "value": "Chat Message Duration"
     },
     {
       "key": "settings.chat.raycast.title",
@@ -9264,7 +10152,7 @@
     },
     {
       "key": "settings.bodyTracking.anat.chestIkTarget.description",
-      "value": "Places the chest at its own target instead of leaving it wherever the head solve happens to put it, so the torso follows your real chest (or a chest tracker) more faithfully. The head stays exactly on the headset."
+      "value": "With a chest tracker, pulls the chest bone onto the tracker's position instead of leaving it wherever the head solve happens to put it. The head keeps priority and stays on the headset. Does nothing without a chest tracker."
     },
     {
       "key": "settings.bodyTracking.anat.legSwivelSmoothing.title",
@@ -10439,6 +11327,10 @@
       "value": "{0} is already running. Restart Basis to use {1} instead."
     },
     {
+      "key": "settings.platform.standaloneNoDesktop",
+      "value": "This is a standalone headset, there is no desktop display to switch to."
+    },
+    {
       "key": "settings.remoteAudio.remotePlayers",
       "value": "Remote Players"
     },
@@ -10668,7 +11560,7 @@
     },
     {
       "key": "settings.graphics.vrs.outer.tooltip",
-      "value": "Where the lowest shading rate (4x4) begins. Between the sharp center and this point renders at half rate (2x2); beyond it renders at quarter rate."
+      "value": "Where the periphery begins. Between the sharp center and this point renders at half rate (2x2); beyond it the rate steps down through a transition band to the lowest rate (4x4)."
     },
     {
       "key": "settings.developer.featureSections.title",
@@ -11231,8 +12123,12 @@
       "value": "Background Opacity"
     },
     {
-      "key": "mediaPlayer.resync",
-      "value": "Resync"
+      "key": "mediaPlayer.resyncLocal",
+      "value": "Local Resync"
+    },
+    {
+      "key": "mediaPlayer.resyncEveryone",
+      "value": "Resync Everyone"
     },
     {
       "key": "mediaPlayer.advanced",
@@ -11349,6 +12245,94 @@
     {
       "key": "settings.mediapipe.handRotation.description",
       "value": "Off keeps the wrist aligned to the forearm (position only) to avoid noisy webcam wrist rotation."
+    },
+    {
+      "key": "settings.mediapipe.lowLightBoost",
+      "value": "Low Light Boost"
+    },
+    {
+      "key": "settings.mediapipe.lowLightBoost.description",
+      "value": "Brightens dark webcam frames before tracking runs, metered on your face when it is visible. Improves detection and steadiness in a dim room."
+    },
+    {
+      "key": "settings.mediapipe.rejectGlitches",
+      "value": "Reject Tracking Glitches"
+    },
+    {
+      "key": "settings.mediapipe.rejectGlitches.description",
+      "value": "Ignores a sudden jump that lasts only one camera frame. Real fast movements arrive one frame later; single-frame spikes never reach the avatar."
+    },
+    {
+      "key": "settings.mediapipe.preview",
+      "value": "Camera Preview"
+    },
+    {
+      "key": "settings.mediapipe.preview.description",
+      "value": "Shows the webcam feed with the tracked landmarks drawn over it. Only rendered while this page is open."
+    },
+    {
+      "key": "settings.mediapipe.poseModel",
+      "value": "Body Model"
+    },
+    {
+      "key": "settings.mediapipe.poseModel.description",
+      "value": "Which pose model tracks your arms and torso. Heavier models are more accurate and cost more CPU."
+    },
+    {
+      "key": "settings.mediapipe.poseModel.lite",
+      "value": "Lite (fastest)"
+    },
+    {
+      "key": "settings.mediapipe.poseModel.full",
+      "value": "Full (balanced)"
+    },
+    {
+      "key": "settings.mediapipe.poseModel.heavy",
+      "value": "Heavy (most accurate)"
+    },
+    {
+      "key": "settings.mediapipe.cameraFpsAuto",
+      "value": "Slow Camera In Low Light"
+    },
+    {
+      "key": "settings.mediapipe.cameraFpsAuto.description",
+      "value": "Drops the camera to 15 frames per second while the room is dark, so the sensor gets a longer exposure. Restores your frame rate when the light comes back."
+    },
+    {
+      "key": "settings.mediapipe.gazeStrength",
+      "value": "Eye Gaze Strength"
+    },
+    {
+      "key": "settings.mediapipe.gazeStrength.description",
+      "value": "How far the avatar's eyes move for a given movement of your irises."
+    },
+    {
+      "key": "settings.mediapipe.status.off",
+      "value": "Webcam tracking is off."
+    },
+    {
+      "key": "settings.mediapipe.status.starting",
+      "value": "Starting the camera..."
+    },
+    {
+      "key": "settings.mediapipe.status.loading",
+      "value": "Loading tracking models..."
+    },
+    {
+      "key": "settings.mediapipe.status.noCamera",
+      "value": "No webcam found. Plug one in and it will be picked up automatically."
+    },
+    {
+      "key": "settings.mediapipe.status.stalled",
+      "value": "The camera stopped sending frames. Restarting it."
+    },
+    {
+      "key": "settings.mediapipe.status.black",
+      "value": "The camera is sending black frames. Check that nothing covers it and that Windows camera privacy settings allow this app."
+    },
+    {
+      "key": "settings.mediapipe.status.running",
+      "value": "Tracking."
     },
     {
       "key": "settings.mediapipe.invertBlink",
@@ -12327,6 +13311,10 @@
       "value": "Cancel"
     },
     {
+      "key": "ui.clear",
+      "value": "Clear"
+    },
+    {
       "key": "ui.validation.required",
       "value": "Required - this cannot be left empty."
     },
@@ -12455,6 +13443,50 @@
       "value": "Click this hand's thumbstick for its options."
     },
     {
+      "key": "ui.textPreview.title",
+      "value": "Preview"
+    },
+    {
+      "key": "ui.textPreview.body",
+      "value": "How this text displays with its formatting tags applied:"
+    },
+    {
+      "key": "ui.textPreview.details",
+      "value": "Details"
+    },
+    {
+      "key": "ui.textPreview.characters",
+      "value": "Characters"
+    },
+    {
+      "key": "ui.textPreview.formatting",
+      "value": "Formatting tags"
+    },
+    {
+      "key": "ui.textPreview.tag.bold",
+      "value": "bold"
+    },
+    {
+      "key": "ui.textPreview.tag.italic",
+      "value": "italic"
+    },
+    {
+      "key": "ui.textPreview.tag.color",
+      "value": "color"
+    },
+    {
+      "key": "ui.textPreview.tag.size",
+      "value": "size"
+    },
+    {
+      "key": "ui.textPreview.tag.strikethrough",
+      "value": "strikethrough"
+    },
+    {
+      "key": "ui.textPreview.tag.underline",
+      "value": "underline"
+    },
+    {
       "key": "ui.resetSection.nochanges",
       "value": "Everything in this section is already at its default."
     },
@@ -12581,6 +13613,30 @@
     {
       "key": "notifications.category.developer",
       "value": "Errors"
+    },
+    {
+      "key": "notifications.pending.count",
+      "value": "Pending ({0})"
+    },
+    {
+      "key": "notifications.pending.description",
+      "value": "Prompts still waiting on an answer. Select one to open or dismiss it."
+    },
+    {
+      "key": "notifications.history.count",
+      "value": "History ({0})"
+    },
+    {
+      "key": "notifications.history.description",
+      "value": "Answered and dismissed prompts. Select one for details."
+    },
+    {
+      "key": "notifications.clearHistory.tooltip",
+      "value": "Remove every answered notification. Pending ones are kept."
+    },
+    {
+      "key": "notifications.clearHistory.confirm",
+      "value": "Remove every answered notification? Pending ones are kept."
     },
     {
       "key": "settings.tab.performancelimits",
@@ -12885,6 +13941,34 @@
     {
       "key": "settings.moderator.title",
       "value": "Moderator"
+    },
+    {
+      "key": "settings.moderator.refresh",
+      "value": "Refresh"
+    },
+    {
+      "key": "settings.moderator.autoRefresh",
+      "value": "Auto Refresh"
+    },
+    {
+      "key": "settings.moderator.byUuid",
+      "value": "By UUID"
+    },
+    {
+      "key": "settings.moderator.byUuid.tooltip",
+      "value": "Open moderation actions for a typed UUID, even for a player who is offline."
+    },
+    {
+      "key": "settings.moderator.everyone",
+      "value": "Everyone"
+    },
+    {
+      "key": "settings.moderator.everyone.tooltip",
+      "value": "Actions that affect every player in the instance."
+    },
+    {
+      "key": "settings.moderator.header.description",
+      "value": "Click a player to open moderation actions."
     },
     {
       "key": "ui.option.on",
@@ -13516,7 +14600,7 @@
     },
     {
       "key": "settings.bodyTracking.headSwing.backward.tooltip",
-      "value": "How much of that carry also applies when you move backwards."
+      "value": "How much of that carry applies when looking up. Lower it toward 0 to keep the camera still on a look-up instead of sliding it backwards."
     },
     {
       "key": "library.instantiated.assignTracker.tooltip",
@@ -13815,6 +14899,18 @@
       "value": "Stops non-admin players from sharing new image pickups, and from receiving images shared while this is on. Images already shared stay until removed. Admins are unaffected."
     },
     {
+      "key": "settings.admin.title.lockGifs",
+      "value": "Lock GIFs"
+    },
+    {
+      "key": "settings.admin.title.lockGifs.tooltip",
+      "value": "Stop GIFs animating for non-admin players. They see each GIF's first frame, and animation resumes when this is turned off. Admins are unaffected."
+    },
+    {
+      "key": "settings.admin.title.lockGifs.description",
+      "value": "Stops GIFs animating for non-admin players: every GIF shows its first frame, GIFs they share stay still until the lock is lifted, and the server stops relaying GIF animation data from them. Animation resumes when this is turned off. Admins are unaffected."
+    },
+    {
       "key": "settings.admin.title.lockTextChat",
       "value": "Lock Text Chat"
     },
@@ -14093,12 +15189,16 @@
       "value": "Copies all fields to clipboard."
     },
     {
-      "key": "settings.admin.title.shout",
-      "value": "Shout"
+      "key": "settings.admin.title.announce",
+      "value": "Announce"
     },
     {
-      "key": "settings.admin.title.showShoutOnMenuBar",
-      "value": "Show Shout On Menu Bar"
+      "key": "settings.admin.title.audioModes",
+      "value": "Audio Modes"
+    },
+    {
+      "key": "settings.admin.title.showAnnounceOnMenuBar",
+      "value": "Show Announce On Menu Bar"
     },
     {
       "key": "settings.admin.title.globalContentLocks",
@@ -14255,6 +15355,30 @@
     {
       "key": "settings.admin.title.removeFromServerDefaults",
       "value": "Remove from Server Defaults"
+    },
+    {
+      "key": "settings.admin.confirm.addDefaultLibrary.title",
+      "value": "Add to server defaults?"
+    },
+    {
+      "key": "settings.admin.confirm.addDefaultLibrary.body",
+      "value": "Save this {0} to the server's default library? It will appear in every connected player's library and persist across server restarts."
+    },
+    {
+      "key": "settings.admin.confirm.addDefaultLibrary.confirm",
+      "value": "Add"
+    },
+    {
+      "key": "settings.admin.confirm.removeDefaultLibrary.title",
+      "value": "Remove from server defaults?"
+    },
+    {
+      "key": "settings.admin.confirm.removeDefaultLibrary.body",
+      "value": "Drop every default-library entry matching '{0}'? The change is immediate and propagates to every connected player."
+    },
+    {
+      "key": "settings.admin.confirm.removeDefaultLibrary.confirm",
+      "value": "Remove"
     },
     {
       "key": "settings.admin.title.remoteEndEffectorIK",
@@ -14478,7 +15602,7 @@
     },
     {
       "key": "menu.individualPlayer.voiceRecording.policy.description",
-      "value": "What happens when this player asks to record your voice."
+      "value": "What happens when this player asks to record your voice, or a Cilbox script running for them asks to route your voice through a world object (e.g. a radio prop)."
     },
     {
       "key": "menu.individualPlayer.voiceRecording.policy.ask",
@@ -14619,6 +15743,10 @@
     {
       "key": "settings.developer.backup.none",
       "value": "No backups found."
+    },
+    {
+      "key": "settings.developer.backup.scanning",
+      "value": "Looking for backups…"
     },
     {
       "key": "settings.developer.backup.unreadable",
@@ -15881,6 +17009,14 @@
       "value": "Avatar Limits"
     },
     {
+      "key": "settings.admin.title.locomotionPolicy",
+      "value": "Instance Locomotion"
+    },
+    {
+      "key": "settings.admin.title.locomotionPolicy.description",
+      "value": "Movement values every player in this instance runs with. Saved to the server and sent to each player as they join, so anyone arriving later gets them too. Leave a field switched off to let players keep their own value. A moderator override on one player still wins over this."
+    },
+    {
       "key": "settings.admin.opusFrameDuration",
       "value": "Opus Frame Duration"
     },
@@ -15969,6 +17105,22 @@
       "value": "Put the selected player onto the selected avatar. They can change back at any time."
     },
     {
+      "key": "settings.admin.renameField",
+      "value": "New Name"
+    },
+    {
+      "key": "settings.admin.renameField.tooltip",
+      "value": "The display name to give this player. It lasts until they reconnect."
+    },
+    {
+      "key": "settings.admin.rename",
+      "value": "Rename Player"
+    },
+    {
+      "key": "settings.admin.rename.tooltip",
+      "value": "Change this player's display name for everyone on the server."
+    },
+    {
       "key": "settings.admin.forceAvatar.applyAll",
       "value": "Force Avatar On Everyone"
     },
@@ -16039,6 +17191,14 @@
     {
       "key": "settings.admin.locomotion.runSpeed",
       "value": "Run Speed (m/s)"
+    },
+    {
+      "key": "settings.admin.locomotion.gravity.override",
+      "value": "Override Gravity"
+    },
+    {
+      "key": "settings.admin.locomotion.gravity",
+      "value": "Gravity Strength (m/s²)"
     },
     {
       "key": "settings.admin.locomotion.mode",
@@ -16241,6 +17401,18 @@
       "value": "Force avatar?"
     },
     {
+      "key": "settings.admin.confirm.rename.body",
+      "value": "Change this player's display name for everyone on the server? It lasts until they reconnect."
+    },
+    {
+      "key": "settings.admin.confirm.rename.confirm",
+      "value": "Rename"
+    },
+    {
+      "key": "settings.admin.confirm.rename.title",
+      "value": "Rename player?"
+    },
+    {
       "key": "settings.admin.confirm.forceAvatarAll.body",
       "value": "Put EVERY player in this instance onto the selected avatar? Protected players are skipped, and anyone can change back at any time."
     },
@@ -16277,28 +17449,52 @@
       "value": "Send message?"
     },
     {
-      "key": "settings.admin.confirm.shoutDisable.body",
+      "key": "settings.admin.confirm.announceDisable.body",
       "value": "Disable non-spatialized broadcast voice for this player?"
     },
     {
-      "key": "settings.admin.confirm.shoutDisable.confirm",
+      "key": "settings.admin.confirm.announceDisable.confirm",
       "value": "Disable"
     },
     {
-      "key": "settings.admin.confirm.shoutDisable.title",
-      "value": "Disable shout mode?"
+      "key": "settings.admin.confirm.announceDisable.title",
+      "value": "Disable announce mode?"
+    },
+    {
+      "key": "settings.admin.confirm.announceEnable.body",
+      "value": "Enable non-spatialized broadcast voice for this player?"
+    },
+    {
+      "key": "settings.admin.confirm.announceEnable.confirm",
+      "value": "Enable"
+    },
+    {
+      "key": "settings.admin.confirm.announceEnable.title",
+      "value": "Enable announce mode?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutEnable.title",
+      "value": "Enable shout mode?"
     },
     {
       "key": "settings.admin.confirm.shoutEnable.body",
-      "value": "Enable non-spatialized broadcast voice for this player?"
+      "value": "Give this player double voice range and more level, with the audio still spatial?"
     },
     {
       "key": "settings.admin.confirm.shoutEnable.confirm",
       "value": "Enable"
     },
     {
-      "key": "settings.admin.confirm.shoutEnable.title",
-      "value": "Enable shout mode?"
+      "key": "settings.admin.confirm.shoutDisable.title",
+      "value": "Disable shout mode?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutDisable.body",
+      "value": "Return this player's voice to its normal range and level?"
+    },
+    {
+      "key": "settings.admin.confirm.shoutDisable.confirm",
+      "value": "Disable"
     },
     {
       "key": "settings.admin.confirm.teleportAll.body",
@@ -17277,6 +18473,14 @@
       "value": "Switch between VR and desktop on its own as the headset comes and goes."
     },
     {
+      "key": "settings.controls.dominantHand.right",
+      "value": "Right"
+    },
+    {
+      "key": "settings.controls.dominantHand.left",
+      "value": "Left"
+    },
+    {
       "key": "settings.controls.dominantHand.right.tooltip",
       "value": "Treat your right hand as the main interaction hand."
     },
@@ -17291,6 +18495,18 @@
     {
       "key": "settings.admin.opusFrameDuration.40.tooltip",
       "value": "Send voice in 40 ms packets. Less bandwidth and overhead, a little more delay."
+    },
+    {
+      "key": "settings.admin.title.type.avatar",
+      "value": "Avatar"
+    },
+    {
+      "key": "settings.admin.title.type.world",
+      "value": "World"
+    },
+    {
+      "key": "settings.admin.title.type.prop",
+      "value": "Prop"
     },
     {
       "key": "settings.admin.title.type.avatar.tooltip",
@@ -17334,15 +18550,15 @@
     },
     {
       "key": "menu.individualPlayer.voiceRecording.policy.ask.tooltip",
-      "value": "Prompt you each time this player asks to record you."
+      "value": "Prompt you each time this player, or a Cilbox script running for them, asks to record or route your voice."
     },
     {
       "key": "menu.individualPlayer.voiceRecording.policy.allow.tooltip",
-      "value": "Let this player record your voice without asking again."
+      "value": "Automatically approve this player's recording and Cilbox voice-routing requests without asking again."
     },
     {
       "key": "menu.individualPlayer.voiceRecording.policy.deny.tooltip",
-      "value": "Refuse this player's recording requests without asking again."
+      "value": "Automatically refuse this player's recording and Cilbox voice-routing requests without asking again."
     },
     {
       "key": "menu.individualPlayer.directConnection.policy.ask.tooltip",
@@ -17355,6 +18571,66 @@
     {
       "key": "menu.individualPlayer.directConnection.policy.decline.tooltip",
       "value": "Decline direct connection requests from this player automatically."
+    },
+    {
+      "key": "library.sort.name",
+      "value": "Name"
+    },
+    {
+      "key": "library.sort.dateOldestToNewest",
+      "value": "Oldest First"
+    },
+    {
+      "key": "library.sort.dateNewestToOldest",
+      "value": "Newest First"
+    },
+    {
+      "key": "library.filter.all",
+      "value": "All"
+    },
+    {
+      "key": "library.filter.embedded",
+      "value": "Embedded"
+    },
+    {
+      "key": "library.filter.local",
+      "value": "Local"
+    },
+    {
+      "key": "library.filter.networked",
+      "value": "Networked"
+    },
+    {
+      "key": "library.filter.gameObject",
+      "value": "Props"
+    },
+    {
+      "key": "library.filter.scene",
+      "value": "Worlds"
+    },
+    {
+      "key": "library.filter.avatar",
+      "value": "Avatars"
+    },
+    {
+      "key": "library.filter.adminOnly",
+      "value": "Admin Only"
+    },
+    {
+      "key": "library.filter.persistentOnly",
+      "value": "Persistent"
+    },
+    {
+      "key": "library.filter.notPersistent",
+      "value": "Temporary"
+    },
+    {
+      "key": "library.filter.placedByMe",
+      "value": "Placed By Me"
+    },
+    {
+      "key": "library.filter.notPlacedByMe",
+      "value": "Placed By Others"
     },
     {
       "key": "library.sort.name.tooltip",
@@ -17773,6 +19049,26 @@
       "value": "The presets folder could not be read. See the log."
     },
     {
+      "key": "camera.dollyPreset.share",
+      "value": "Share"
+    },
+    {
+      "key": "camera.dollyPreset.share.tooltip",
+      "value": "Put this track in the room as an orb. Anyone who takes it keeps their own copy of the track; it does not touch the one you have laid out."
+    },
+    {
+      "key": "camera.dollyPreset.shared",
+      "value": "Placed \"{0}\" for the room to take."
+    },
+    {
+      "key": "camera.dollyPreset.error.shareTooLarge",
+      "value": "This track is too large to share."
+    },
+    {
+      "key": "camera.dollyPreset.error.shareOffline",
+      "value": "Join a server to share a track."
+    },
+    {
       "key": "settings.microphone.test.title",
       "value": "Test Microphone"
     },
@@ -18103,6 +19399,42 @@
     {
       "key": "settings.graphics.renderer.restart.later",
       "value": "Later"
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning.title",
+      "value": "DirectX 12 Is Unstable"
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning.body",
+      "value": "Basis is rendering with DirectX 12.\n\nUnity's DirectX 12 backend is very buggy. It can crash Basis while avatars are loading, stall the first time new shaders are drawn, and break rendering outright. These are bugs inside the Unity engine, not in Basis. Basis cannot fix or work around them; only Unity can.\n\nDirectX 11 does not have these problems, and every avatar and world works on it unchanged. Only hardware ray tracing and variable rate shading need DirectX 12.\n\nThe graphics API can be changed at any time under Settings → Graphics → Graphics API."
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning.switch",
+      "value": "Switch to DirectX 11"
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning.keep",
+      "value": "Keep DirectX 12"
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning.dontShowAgain",
+      "value": "Don't Show Again"
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning",
+      "value": "DirectX 12 Warning"
+    },
+    {
+      "key": "settings.graphics.renderer.dx12Warning.tooltip",
+      "value": "Warn at startup whenever Basis is rendering with DirectX 12, since Unity's DirectX 12 backend is unstable. Don't Show Again on that warning turns this off."
+    },
+    {
+      "key": "settings.controls.questControllerFix",
+      "value": "Quest Controller Fix"
+    },
+    {
+      "key": "settings.controls.questControllerFix.tooltip",
+      "value": "On, the avatar hand on Quest Touch controllers over SteamVR is anchored to a fixed wrist, so resting a thumb on the stick or face buttons no longer tilts the hand and laser. Finger poses still follow the touch sensors. Only affects Quest controllers in SteamVR mode."
     }
   ]
 }

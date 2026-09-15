@@ -219,8 +219,8 @@ public static class BasisServerMessageRegistry
 
     private static void RegisterCoreHandlers()
     {
-        RegisterCore(BasisNetworkCommons.ShoutVoiceChannel, (peer, reader, channel, dm) =>
-            BasisServerHandleEvents.HandleShoutVoiceMessage(reader, peer)); // recycles inside
+        RegisterCore(BasisNetworkCommons.AnnounceVoiceChannel, (peer, reader, channel, dm) =>
+            BasisServerHandleEvents.HandleAnnounceVoiceMessage(reader, peer)); // recycles inside
 
         RegisterCore(BasisNetworkCommons.AuthIdentityChannel, (peer, reader, channel, dm) =>
             BasisServerHandleEvents.HandleAuth(reader, peer)); // recycles inside
@@ -288,7 +288,7 @@ public static class BasisServerMessageRegistry
                 BasisServerHandleEvents.LoadResource(reader, peer, LRuuid);
                 return;
             }
-            BNL.LogError($"User UUID not found for peer: {peer}");
+            BNL.LogError($"User UUID not found for peer: {peer.Id}");
             reader.Recycle();
         });
 
@@ -391,7 +391,7 @@ public static class BasisServerMessageRegistry
     {
         if (!NetworkServer.AuthIdentity.NetIDToUUID(peer, out uuid))
         {
-            BNL.LogError($"User UUID not found for peer: {peer}");
+            BNL.LogError($"User UUID not found for peer: {peer.Id}");
             reader.Recycle();
             return false;
         }

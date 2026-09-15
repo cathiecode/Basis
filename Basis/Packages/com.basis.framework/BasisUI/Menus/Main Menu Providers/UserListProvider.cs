@@ -315,6 +315,7 @@ namespace Basis.BasisUI
 
                 BasisNetworkPlayer.OnRemotePlayerJoined += OnRemoteJoined;
                 BasisNetworkPlayer.OnRemotePlayerLeft += OnRemoteLeft;
+                BasisNetworkModeration.OnPlayerRenamed += OnPlayerRenamed;
                 PinnedPlayers.Changed += OnPinsChanged;
 
                 SearchField.OnValueChanged += OnSearchChanged;
@@ -341,6 +342,7 @@ namespace Basis.BasisUI
             {
                 BasisNetworkPlayer.OnRemotePlayerJoined -= OnRemoteJoined;
                 BasisNetworkPlayer.OnRemotePlayerLeft -= OnRemoteLeft;
+                BasisNetworkModeration.OnPlayerRenamed -= OnPlayerRenamed;
                 PinnedPlayers.Changed -= OnPinsChanged;
                 ClearAllEntries();
             }
@@ -390,6 +392,22 @@ namespace Basis.BasisUI
             private void OnRemoteJoined(BasisNetworkPlayer netPlayer, BasisRemotePlayer _) => _rosterDirty = true;
 
             private void OnRemoteLeft(BasisNetworkPlayer netPlayer, BasisRemotePlayer _) => _rosterDirty = true;
+
+            private void OnPlayerRenamed(ushort playerId, string newName)
+            {
+                if (!_entries.TryGetValue(playerId, out PlayerEntry entry) || entry.Button == null || entry.NetPlayer == null) return;
+                ApplyTitle(entry);
+                if (_sortMode == SortMode.Name) _orderDirty = true;
+                _filterDirty = true;
+            }
+
+            private static void ApplyTitle(PlayerEntry entry)
+            {
+                string name = entry.NetPlayer.SafeDisplayName;
+                if (string.IsNullOrEmpty(name)) name = BasisLocalization.Get("ui.unknown");
+                entry.Button.Descriptor.SetTitle(
+                    entry.IsLocal ? BasisLocalization.Get("menu.players.you", name) : name);
+            }
 
             private void OnPinsChanged()
             {
@@ -466,6 +484,7 @@ namespace Basis.BasisUI
                 {
                     if (kvp.Value != null) _orderBuffer.Add(kvp.Value);
                 }
+                PrepareSortKeys();
                 _orderBuffer.Sort(_comparison);
 
                 bool changed = false;
@@ -518,6 +537,7 @@ namespace Basis.BasisUI
                 {
                     if (kvp.Value.NetPlayer != null) _orderBuffer.Add(kvp.Value.NetPlayer);
                 }
+                PrepareSortKeys();
                 _orderBuffer.Sort(_comparison);
             }
 
@@ -583,10 +603,7 @@ namespace Basis.BasisUI
                 entry.IsPinned = p != null && PinnedPlayers.IsPinned(p.UUID);
                 entry.LastDistanceTenths = int.MinValue;
 
-                string name = netPlayer.SafeDisplayName;
-                if (string.IsNullOrEmpty(name)) name = BasisLocalization.Get("ui.unknown");
-                entry.Button.Descriptor.SetTitle(
-                    entry.IsLocal ? BasisLocalization.Get("menu.players.you", name) : name);
+                ApplyTitle(entry);
 
                 ApplyPlatformIcon(entry, GetPlatformIconAddress(p != null ? p.PlayerPlatform : string.Empty));
 
@@ -806,6 +823,36 @@ namespace Basis.BasisUI
                 return player.Player != null && PinnedPlayers.IsPinned(player.Player.UUID);
             }
 
+            private readonly Dictionary<int, float> _sortDistanceKeys = new Dictionary<int, float>();
+            private readonly Dictionary<int, string> _sortPlatformKeys = new Dictionary<int, string>();
+
+            /// <summary>
+            /// Computes each player's sort key once before a sort. The comparator used to
+            /// recompute Transform-read distances and platform labels per comparison, which
+            /// is O(N log N) interop and allocation inside List.Sort.
+            /// </summary>
+            private void PrepareSortKeys()
+            {
+                if (_sortMode == SortMode.Distance)
+                {
+                    _sortDistanceKeys.Clear();
+                    for (int i = 0; i < _orderBuffer.Count; i++)
+                    {
+                        BasisNetworkPlayer player = _orderBuffer[i];
+                        _sortDistanceKeys[player.playerId] = DistanceTo(player.Player);
+                    }
+                }
+                else if (_sortMode == SortMode.Platform)
+                {
+                    _sortPlatformKeys.Clear();
+                    for (int i = 0; i < _orderBuffer.Count; i++)
+                    {
+                        BasisNetworkPlayer player = _orderBuffer[i];
+                        _sortPlatformKeys[player.playerId] = player.Player != null ? GetPlatformLabel(player.Player.PlayerPlatform) : "";
+                    }
+                }
+            }
+
             private int CompareForCurrentSort(BasisNetworkPlayer a, BasisNetworkPlayer b)
             {
                 // Pinned players group above unpinned ones in every sort mode —
@@ -819,8 +866,8 @@ namespace Basis.BasisUI
                 {
                     case SortMode.Distance:
                     {
-                        float da = DistanceTo(a.Player);
-                        float db = DistanceTo(b.Player);
+                        if (!_sortDistanceKeys.TryGetValue(a.playerId, out float da)) da = DistanceTo(a.Player);
+                        if (!_sortDistanceKeys.TryGetValue(b.playerId, out float db)) db = DistanceTo(b.Player);
                         return da.CompareTo(db);
                     }
                     case SortMode.Name:
@@ -832,8 +879,8 @@ namespace Basis.BasisUI
                     }
                     case SortMode.Platform:
                     {
-                        string pa = a.Player != null ? GetPlatformLabel(a.Player.PlayerPlatform) : "";
-                        string pb = b.Player != null ? GetPlatformLabel(b.Player.PlayerPlatform) : "";
+                        if (!_sortPlatformKeys.TryGetValue(a.playerId, out string pa)) pa = a.Player != null ? GetPlatformLabel(a.Player.PlayerPlatform) : "";
+                        if (!_sortPlatformKeys.TryGetValue(b.playerId, out string pb)) pb = b.Player != null ? GetPlatformLabel(b.Player.PlayerPlatform) : "";
                         int cmp = string.Compare(pa, pb, StringComparison.OrdinalIgnoreCase);
                         if (cmp != 0) return cmp;
                         return string.Compare(

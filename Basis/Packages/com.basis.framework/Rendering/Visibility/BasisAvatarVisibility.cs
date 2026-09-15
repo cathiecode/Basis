@@ -12,8 +12,6 @@ namespace Basis.Scripts.Rendering
 
         private static readonly List<BasisRemotePlayer> Registered = new List<BasisRemotePlayer>(32);
 
-        public static int RegisteredCount => Registered.Count;
-
         public static void Register(BasisRemotePlayer remote)
         {
             if (remote == null || remote.BasisAvatar == null)
@@ -41,7 +39,7 @@ namespace Basis.Scripts.Rendering
                 BasisVisibilityFlags.Dynamic);
 
             Registered.Add(remote);
-            ApplyShadowEligibility(remote, remote.CurrentLodLevel);
+            ApplyShadowEligibility(remote, remote.CurrentMeshLodLevel);
         }
 
         public static void Unregister(BasisRemotePlayer remote)
@@ -85,7 +83,7 @@ namespace Basis.Scripts.Rendering
         /// </summary>
         public static void OnAvatarAlwaysLoadedChanged(BasisRemotePlayer remote)
         {
-            ApplyShadowEligibility(remote, remote != null ? remote.CurrentLodLevel : 0);
+            ApplyShadowEligibility(remote, remote != null ? remote.CurrentMeshLodLevel : 0);
         }
 
         private static float ReadMaxScale(Transform root)

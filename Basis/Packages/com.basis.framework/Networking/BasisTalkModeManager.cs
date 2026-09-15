@@ -20,14 +20,21 @@ namespace Basis.Scripts.Networking
         private static readonly HashSet<ushort> privateMembers = new HashSet<ushort>();
         private static ushort thisPersonTarget;
         private static bool hasThisPersonTarget;
-        private static BasisTalkMode pendingShoutExitMode;
-        private static bool hasPendingShoutExitMode;
+        private static BasisTalkMode pendingAnnounceExitMode;
+        private static bool hasPendingAnnounceExitMode;
+
+        /// <summary>
+        /// True while an admin put us in shout, as opposed to us picking it ourselves. It keeps the
+        /// mode on offer without the toggle or the permission; leaving it hands the grant back to
+        /// the server so every listener stops widening for us.
+        /// </summary>
+        private static bool adminShoutHeld;
 
         [RuntimeInitializeOnLoadMethod]
         private static void Init()
         {
-            BasisNetworkModeration.OnShoutModeChanged -= HandleShoutModeChanged;
-            BasisNetworkModeration.OnShoutModeChanged += HandleShoutModeChanged;
+            BasisNetworkModeration.OnAnnounceModeChanged -= HandleAnnounceModeChanged;
+            BasisNetworkModeration.OnAnnounceModeChanged += HandleAnnounceModeChanged;
             BasisNetworkPlayer.OnRemotePlayerJoined -= HandleRemotePlayerJoined;
             BasisNetworkPlayer.OnRemotePlayerJoined += HandleRemotePlayerJoined;
             BasisNetworkPlayer.OnRemotePlayerLeft -= HandleRemotePlayerLeft;
@@ -36,31 +43,93 @@ namespace Basis.Scripts.Networking
             BasisP2PManager.OnSessionStateChanged += HandleP2PSessionChanged;
             BasisNetworkManagement.OnlocalPermissionsChanged -= HandlePermissionsChanged;
             BasisNetworkManagement.OnlocalPermissionsChanged += HandlePermissionsChanged;
-            BasisSettingsDefaults.ShoutShowOnMenuBar.OnChanged -= HandleShoutMenuBarPrefChanged;
-            BasisSettingsDefaults.ShoutShowOnMenuBar.OnChanged += HandleShoutMenuBarPrefChanged;
+            BasisSettingsDefaults.AnnounceShowOnMenuBar.OnChanged -= HandleAnnounceMenuBarPrefChanged;
+            BasisSettingsDefaults.AnnounceShowOnMenuBar.OnChanged += HandleAnnounceMenuBarPrefChanged;
             BasisSettingsDefaults.TalkToNoOne.OnChanged -= HandleTalkToNoOnePrefChanged;
             BasisSettingsDefaults.TalkToNoOne.OnChanged += HandleTalkToNoOnePrefChanged;
+            BasisSettingsDefaults.ShoutMode.OnChanged -= HandleShoutPrefChanged;
+            BasisSettingsDefaults.ShoutMode.OnChanged += HandleShoutPrefChanged;
 #if !BASIS_DISABLE_MICROPHONE
             BasisLocalMicrophoneDriver.OnPausedAction -= HandleLocalMuteChanged;
             BasisLocalMicrophoneDriver.OnPausedAction += HandleLocalMuteChanged;
 #endif
         }
 
-        public static bool LocalCanShout()
+        public static bool LocalCanAnnounce()
         {
             return BasisNetworkManagement.LocalPermissions != null &&
                    BasisNetworkManagement.LocalPermissions.Contains(PermNodes.PermissionsView);
         }
 
-        public static bool ShoutAvailableOnMenuBar()
+        public static bool AnnounceAvailableOnMenuBar()
         {
-            return LocalCanShout() && BasisSettingsDefaults.ShoutShowOnMenuBar.RawValue;
+            return LocalCanAnnounce() && BasisSettingsDefaults.AnnounceShowOnMenuBar.RawValue;
         }
 
         public static bool TalkToNoOneAvailable()
         {
             return BasisSettingsDefaults.TalkToNoOne.RawValue;
         }
+
+        /// <summary>
+        /// Shout's opt-in toggle lives on the Admin tab, which is itself gated on
+        /// <see cref="PermNodes.PermissionsView"/>. Check the permission here too rather than
+        /// trusting the UI to be the only way in: a persisted pref outlives the permission that
+        /// let someone set it, and a revoked admin would otherwise keep shouting.
+        /// </summary>
+        public static bool LocalCanShout()
+        {
+            return BasisNetworkManagement.LocalPermissions != null &&
+                   BasisNetworkManagement.LocalPermissions.Contains(PermNodes.PermissionsView);
+        }
+
+        public static bool ShoutAvailable()
+        {
+            // An admin-granted shout is available whether or not we opted into the menu-bar
+            // toggle, so the mode we are actually in never reads as unavailable.
+            return adminShoutHeld || (LocalCanShout() && BasisSettingsDefaults.ShoutMode.RawValue);
+        }
+
+        /// <summary>
+        /// Server told us an admin granted or revoked shout for the local player. Enter or leave
+        /// the mode. An announce in progress keeps precedence; the held shout lands when it ends.
+        /// A revoke only ends a shout the grant put us in, never one we chose ourselves.
+        /// </summary>
+        public static void OnAdminShoutChanged(bool enabled)
+        {
+            bool wasHeld = adminShoutHeld;
+            adminShoutHeld = enabled;
+            if (enabled)
+            {
+                BasisNetworkPlayer.OnLocalPlayerLeft -= HandleLocalPlayerLeft;
+                BasisNetworkPlayer.OnLocalPlayerLeft += HandleLocalPlayerLeft;
+                if (CurrentMode != BasisTalkMode.Shout && CurrentMode != BasisTalkMode.Announce) ApplyMode(BasisTalkMode.Shout);
+                else OnLocalTalkModeChanged?.Invoke();
+                return;
+            }
+
+            if (wasHeld && CurrentMode == BasisTalkMode.Shout)
+            {
+                ApplyMode(BasisTalkMode.Normal);
+                return;
+            }
+            OnLocalTalkModeChanged?.Invoke();
+        }
+
+        private static void HandleLocalPlayerLeft(BasisNetworkPlayer networkPlayer, BasisLocalPlayer localPlayer)
+        {
+            if (!adminShoutHeld) return;
+            adminShoutHeld = false;
+            if (CurrentMode == BasisTalkMode.Shout) ApplyMode(BasisTalkMode.Normal);
+            else OnLocalTalkModeChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// True while the local player's voice should carry <see cref="BasisShout.RangeMultiplier"/>
+        /// times as far as their microphone range. Read by the transmit tick when it decides who
+        /// goes on the voice recipient list.
+        /// </summary>
+        public static bool LocalIsShouting => CurrentMode == BasisTalkMode.Shout;
 
         private static int localOnlyHolds;
 
@@ -94,22 +163,24 @@ namespace Basis.Scripts.Networking
         private static readonly BasisTalkMode[] CycleOrder =
         {
             BasisTalkMode.Normal,
+            BasisTalkMode.Shout,
             BasisTalkMode.Private,
             BasisTalkMode.ThisPerson,
             BasisTalkMode.Direct,
-            BasisTalkMode.Shout,
+            BasisTalkMode.Announce,
             BasisTalkMode.NoOne,
         };
 
         /// <summary>
         /// True only when there is a reason to expose the mic-mode button: we're already
-        /// in a non-normal mode, shout is enabled on the menu bar, talk-to-no-one is opted
-        /// into, have a private set, a marked person, or at least one P2P-connected peer.
+        /// in a non-normal mode, shout or announce is enabled on the menu bar, talk-to-no-one is
+        /// opted into, have a private set, a marked person, or at least one P2P-connected peer.
         /// </summary>
         public static bool ShouldShowModeButton()
         {
             if (CurrentMode != BasisTalkMode.Normal) return true;
-            if (ShoutAvailableOnMenuBar()) return true;
+            if (AnnounceAvailableOnMenuBar()) return true;
+            if (ShoutAvailable()) return true;
             if (TalkToNoOneAvailable()) return true;
             if (privateMembers.Count > 0) return true;
             if (hasThisPersonTarget) return true;
@@ -124,7 +195,8 @@ namespace Basis.Scripts.Networking
                 case BasisTalkMode.Private: return privateMembers.Count > 0;
                 case BasisTalkMode.ThisPerson: return hasThisPersonTarget;
                 case BasisTalkMode.Direct: return BasisP2PManager.GetConnectedSessionCount() > 0;
-                case BasisTalkMode.Shout: return ShoutAvailableOnMenuBar();
+                case BasisTalkMode.Announce: return AnnounceAvailableOnMenuBar();
+                case BasisTalkMode.Shout: return ShoutAvailable();
                 case BasisTalkMode.NoOne: return TalkToNoOneAvailable();
                 default: return false;
             }
@@ -148,20 +220,26 @@ namespace Basis.Scripts.Networking
 
         public static void SetMode(BasisTalkMode mode)
         {
-            if (mode == BasisTalkMode.Shout)
+            if (mode == BasisTalkMode.Announce)
             {
-                if (LocalCanShout() && BasisNetworkPlayer.LocalPlayer != null)
+                if (LocalCanAnnounce() && BasisNetworkPlayer.LocalPlayer != null)
                 {
-                    BasisNetworkModeration.EnableShoutMode(BasisNetworkPlayer.LocalPlayer.playerId);
+                    BasisNetworkModeration.EnableAnnounceMode(BasisNetworkPlayer.LocalPlayer.playerId);
                 }
                 return;
             }
 
-            if (CurrentMode == BasisTalkMode.Shout && BasisNetworkPlayer.LocalPlayer != null)
+            if (adminShoutHeld && mode != BasisTalkMode.Shout)
             {
-                pendingShoutExitMode = mode;
-                hasPendingShoutExitMode = true;
-                BasisNetworkModeration.DisableShoutMode(BasisNetworkPlayer.LocalPlayer.playerId);
+                adminShoutHeld = false;
+                if (BasisNetworkPlayer.LocalPlayer != null) BasisNetworkModeration.DisableShoutMode(BasisNetworkPlayer.LocalPlayer.playerId);
+            }
+
+            if (CurrentMode == BasisTalkMode.Announce && BasisNetworkPlayer.LocalPlayer != null)
+            {
+                pendingAnnounceExitMode = mode;
+                hasPendingAnnounceExitMode = true;
+                BasisNetworkModeration.DisableAnnounceMode(BasisNetworkPlayer.LocalPlayer.playerId);
                 return;
             }
 
@@ -297,19 +375,19 @@ namespace Basis.Scripts.Networking
             }
         }
 
-        private static void HandleShoutModeChanged(ushort playerId, bool enabled)
+        private static void HandleAnnounceModeChanged(ushort playerId, bool enabled)
         {
             if (BasisNetworkPlayer.LocalPlayer == null || playerId != BasisNetworkPlayer.LocalPlayer.playerId) return;
 
             if (enabled)
             {
-                hasPendingShoutExitMode = false;
-                ApplyMode(BasisTalkMode.Shout);
+                hasPendingAnnounceExitMode = false;
+                ApplyMode(BasisTalkMode.Announce);
             }
-            else if (CurrentMode == BasisTalkMode.Shout)
+            else if (CurrentMode == BasisTalkMode.Announce)
             {
-                BasisTalkMode target = hasPendingShoutExitMode ? pendingShoutExitMode : BasisTalkMode.Normal;
-                hasPendingShoutExitMode = false;
+                BasisTalkMode target = adminShoutHeld ? BasisTalkMode.Shout : hasPendingAnnounceExitMode ? pendingAnnounceExitMode : BasisTalkMode.Normal;
+                hasPendingAnnounceExitMode = false;
                 ApplyMode(target);
             }
         }
@@ -360,7 +438,7 @@ namespace Basis.Scripts.Networking
             OnLocalTalkModeChanged?.Invoke();
         }
 
-        private static void HandleShoutMenuBarPrefChanged(bool _)
+        private static void HandleAnnounceMenuBarPrefChanged(bool _)
         {
             OnLocalTalkModeChanged?.Invoke();
         }
@@ -368,6 +446,16 @@ namespace Basis.Scripts.Networking
         private static void HandleTalkToNoOnePrefChanged(bool enabled)
         {
             if (!enabled && CurrentMode == BasisTalkMode.NoOne)
+            {
+                SetMode(BasisTalkMode.Normal);
+                return;
+            }
+            OnLocalTalkModeChanged?.Invoke();
+        }
+
+        private static void HandleShoutPrefChanged(bool enabled)
+        {
+            if (!enabled && CurrentMode == BasisTalkMode.Shout)
             {
                 SetMode(BasisTalkMode.Normal);
                 return;

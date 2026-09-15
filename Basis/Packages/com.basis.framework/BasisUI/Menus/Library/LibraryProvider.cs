@@ -196,7 +196,7 @@ namespace Basis.BasisUI
             string[] dateSortNames = Enum.GetNames(typeof(LibraryDateSortMode));
 
             dateSorting.Descriptor.SetSize(new Vector2(60, 80));
-            dateSorting.AssignEntries(dateSortNames.ToList(), null, EnumOptionTooltips(dateSortNames, "library.sort."));
+            dateSorting.AssignLocalizedEntries(dateSortNames.ToList(), EnumOptionKeys(dateSortNames, "library.sort."));
             dateSorting.SetValueWithoutNotify(_currentSort.ToString());
 
             // when sorting changes, update and refresh
@@ -216,7 +216,7 @@ namespace Basis.BasisUI
             string[] itemTypeNames = Enum.GetNames(typeof(LibraryItemTypeFilter));
 
             itemTypeSorting.Descriptor.SetSize(new Vector2(60, 80));
-            itemTypeSorting.AssignEntries(itemTypeNames.ToList(), null, EnumOptionTooltips(itemTypeNames, "library.filter."));
+            itemTypeSorting.AssignLocalizedEntries(itemTypeNames.ToList(), EnumOptionKeys(itemTypeNames, "library.filter."));
             itemTypeSorting.SetValueWithoutNotify(_currentItemTypeFilter.ToString());
 
             // when sorting changes, update and refresh
@@ -271,15 +271,21 @@ namespace Basis.BasisUI
         /// is the prefix plus the camelCased member, so LibraryItemTypeFilter.PlacedByMe reads from
         /// "library.filter.placedByMe.tooltip".
         /// </summary>
-        private static List<string> EnumOptionTooltips(string[] memberNames, string keyPrefix)
+        /// <summary>
+        /// Derives each enum member's display-label localization key (e.g. "GameObject" under
+        /// prefix "library.filter." becomes "library.filter.gameObject"). Passed straight to
+        /// <see cref="PanelDropdown.AssignLocalizedEntries(List{string}, List{string})"/>, which
+        /// resolves the label via this key and its tooltip via the same key + ".tooltip".
+        /// </summary>
+        private static List<string> EnumOptionKeys(string[] memberNames, string keyPrefix)
         {
-            List<string> tooltips = new List<string>(memberNames.Length);
+            List<string> keys = new List<string>(memberNames.Length);
             foreach (string member in memberNames)
             {
                 string camel = char.ToLowerInvariant(member[0]) + member.Substring(1);
-                tooltips.Add(BasisLocalization.Get(keyPrefix + camel + ".tooltip"));
+                keys.Add(keyPrefix + camel);
             }
-            return tooltips;
+            return keys;
         }
 
         #endregion
@@ -378,15 +384,16 @@ namespace Basis.BasisUI
         }
 
         /// <summary>
-        /// Resolve the bundle's content type by fetching its meta-only payload and
-        /// inspecting <c>ComponentNames</c>. Returns <see cref="BundledContentHolder.Mode.Legacy"/>
-        /// when the URL is unreachable, the meta load fails, or the bundle predates
-        /// component-name metadata. Used by the in-game add dialog and the admin
-        /// "default library" add UI so they share one detection path.
+        /// Resolve the bundle's content type by fetching its meta-only payload and handing the
+        /// connector to <see cref="ResolveModeFromConnector"/>. Returns
+        /// <see cref="BundledContentHolder.Mode.Legacy"/> when the URL is unreachable, the meta
+        /// load fails, or the bundle declares nothing the connector can be read for. Used by the
+        /// in-game add dialog, the BEE drop and the admin "default library" add UI so they share
+        /// one detection path.
         /// </summary>
-        public static async Task<BundledContentHolder.Mode> TryDetectModeFromUrl(string url, string password)
+        public static async Task<(BundledContentHolder.Mode Mode, BasisMetaLoadResult Meta)> TryDetectModeFromUrl(string url, string password)
         {
-            if (string.IsNullOrWhiteSpace(url)) return BundledContentHolder.Mode.Legacy;
+            if (string.IsNullOrWhiteSpace(url)) return (BundledContentHolder.Mode.Legacy, default(BasisMetaLoadResult));
 
             BasisDataStoreItemKeys.ItemKey tempItem = new BasisDataStoreItemKeys.ItemKey
             {
@@ -399,41 +406,73 @@ namespace Basis.BasisUI
             BasisProgressReport report = new BasisProgressReport();
             using CancellationTokenSource cts = new CancellationTokenSource();
 
-            bool isValid;
+            BasisMetaLoadResult meta;
             try
             {
-                isValid = await BasisBeeManagement.HandleMetaOnlyLoad(tempWrapper.basisTrackedBundleWrapper, report, cts.Token);
+                meta = await BasisBeeManagement.HandleMetaOnlyLoad(tempWrapper.basisTrackedBundleWrapper, report, cts.Token);
             }
             catch (Exception e)
             {
                 BasisDebug.LogWarning($"TryDetectModeFromUrl: meta-only load threw for {url}: {e.Message}");
-                return BundledContentHolder.Mode.Legacy;
+                return (BundledContentHolder.Mode.Legacy, default(BasisMetaLoadResult));
             }
 
-            if (!isValid) return BundledContentHolder.Mode.Legacy;
+            if (!meta.Loaded) return (BundledContentHolder.Mode.Legacy, meta);
 
             BasisLoadableBundleWrapper loaded = await LoadWrapperFromDisc(tempItem, tempWrapper);
-            BundledContentHolder.Mode itemType = BundledContentHolder.Mode.Legacy;
-            // MetaData is a struct (value type) so it can't appear in a ?. chain — gate
-            // up to BasisBundleConnector with ?., then read MetaData.ComponentNames directly.
-            var connector = loaded?.BasisLoadableBundle?.BasisBundleConnector;
-            if (connector != null)
+            return (ResolveModeFromConnector(loaded?.BasisLoadableBundle?.BasisBundleConnector), meta);
+        }
+
+        /// <summary>
+        /// Content type of a bundle read off its connector alone.
+        ///
+        /// The build-time ContentKind stamp is asked first and settles everything it answers: the
+        /// SDK writes it from the BasisAvatar/BasisProp/BasisScene the build was started from, so
+        /// it says what the bundle <i>is</i> rather than what ended up inside it. Build hooks mutate
+        /// the clone the census is walked off — NDMF's, running over a prop, added a BasisAvatar to
+        /// its root — and nothing downstream of the census could tell that apart from an avatar.
+        ///
+        /// The sections are asked next, and they settle worlds outright: a scene AssetMode is
+        /// written by the one build path a world can come from, and by every version of it, so it
+        /// also names worlds too old to carry a stamp or a component census.
+        ///
+        /// The census is the last fallback, for bundles built before the stamp existed, and it can
+        /// only ever say what a bundle <i>contains</i>. A world's census is summed over every root
+        /// in the scene, so a world holding one prop counts a BasisProp next to its BasisScene —
+        /// which is why the names are ranked most-specific-first here instead of scanned
+        /// last-one-wins, where a world was handed back as a Prop purely because its prop happened
+        /// to be walked after its BasisScene.
+        /// </summary>
+        public static BundledContentHolder.Mode ResolveModeFromConnector(BasisBundleConnector connector)
+        {
+            if (connector == null) return BundledContentHolder.Mode.Legacy;
+
+            if (BasisBundleConnector.IsContentKind(connector, BasisBundleConnector.SceneContentKind)) return BundledContentHolder.Mode.World;
+            if (BasisBundleConnector.IsContentKind(connector, BasisBundleConnector.AvatarContentKind)) return BundledContentHolder.Mode.Avatar;
+            if (BasisBundleConnector.IsContentKind(connector, BasisBundleConnector.PropContentKind)) return BundledContentHolder.Mode.Prop;
+
+            if (BasisBundleConnector.IsSceneBundle(connector)) return BundledContentHolder.Mode.World;
+
+            // MetaData is a struct (value type) so it can't appear in a ?. chain — the null gate
+            // above covers the connector, then MetaData.ComponentNames is read directly.
+            BasisBundleConnector.BasisComponentName[] components = connector.MetaData.ComponentNames;
+            if (components == null) return BundledContentHolder.Mode.Legacy;
+
+            bool hasScene = false, hasAvatar = false, hasProp = false;
+            for (int Index = 0; Index < components.Length; Index++)
             {
-                var components = connector.MetaData.ComponentNames;
-                if (components != null)
+                switch (components[Index].Name?.ToLowerInvariant())
                 {
-                    foreach (BasisBundleConnector.BasisComponentName comp in components)
-                    {
-                        switch (comp.Name?.ToLower())
-                        {
-                            case "basisprop": itemType = BundledContentHolder.Mode.Prop; break;
-                            case "basisavatar": itemType = BundledContentHolder.Mode.Avatar; break;
-                            case "basisscene": itemType = BundledContentHolder.Mode.World; break;
-                        }
-                    }
+                    case "basisscene": hasScene = true; break;
+                    case "basisavatar": hasAvatar = true; break;
+                    case "basisprop": hasProp = true; break;
                 }
             }
-            return itemType;
+
+            if (hasScene) return BundledContentHolder.Mode.World;
+            if (hasAvatar) return BundledContentHolder.Mode.Avatar;
+            if (hasProp) return BundledContentHolder.Mode.Prop;
+            return BundledContentHolder.Mode.Legacy;
         }
 
         #endregion
@@ -1822,16 +1861,18 @@ namespace Basis.BasisUI
             };
         }
 
-        private static void ApplyMetaDataToButton(PanelButton buttonPanel, CachedMetaData.CachedContent cachedMeta, string urlKey)
+        private static async void ApplyMetaDataToButton(PanelButton buttonPanel, CachedMetaData.CachedContent cachedMeta, string urlKey)
         {
-            Sprite iconSprite = CachedMetaData.CreateSpriteFromMetaData(cachedMeta);
-
-            buttonPanel.SetIcon(iconSprite, false);
-
             var desc = buttonPanel.Descriptor;
             desc.SetTitle(LibraryProviderStrUtil.TitleToCase(!string.IsNullOrEmpty(cachedMeta.Name) ? cachedMeta.Name : urlKey));
             desc.SetDescription(urlKey);
             desc.ForceRebuild();
+
+            Sprite iconSprite = cachedMeta.CachedSprite != null
+                ? cachedMeta.CachedSprite
+                : await CachedMetaData.CreateSpriteFromMetaDataAsync(cachedMeta, urlKey);
+            if (buttonPanel == null) return;
+            buttonPanel.SetIcon(iconSprite, false);
         }
 
         #endregion
@@ -2897,6 +2938,7 @@ namespace Basis.BasisUI
                 case BasisShareableKind.Avatar: return AddressableAssets.Sprites.Avatars;
                 case BasisShareableKind.World: return AddressableAssets.Sprites.World;
                 case BasisShareableKind.Server: return AddressableAssets.Sprites.Network;
+                case BasisShareableKind.DollyTrack: return AddressableAssets.Sprites.Camera;
                 default: return AddressableAssets.Sprites.Items;
             }
         }
@@ -2910,6 +2952,7 @@ namespace Basis.BasisUI
                 case BasisShareableKind.World: return BasisLocalization.Get("library.shareable.world");
                 case BasisShareableKind.Server: return BasisLocalization.Get("library.shareable.server");
                 case BasisShareableKind.Image: return BasisLocalization.Get("library.shareable.image");
+                case BasisShareableKind.DollyTrack: return BasisLocalization.Get("library.shareable.dollyTrack");
                 default: return BasisLocalization.Get("library.shareable.other");
             }
         }

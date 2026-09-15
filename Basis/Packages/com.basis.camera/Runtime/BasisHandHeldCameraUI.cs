@@ -822,6 +822,7 @@ public partial class BasisHandHeldCameraUI
             puckLookAtPreview = HHC != null && HHC.puckLookAtPreview,
             capture360 = HHC != null && HHC.capture360Enabled,
             useAutoLeveling = HHC != null && HHC.useAutoLeveling,
+            cameraRoll = HHC != null && HHC.cameraRollEnabled,
             useVRHandheldSmoothing = HHC != null && HHC.useVRHandheldSmoothing,
             vrStabilizationPositionDamping = HHC != null ? HHC.vrHandheldPositionDamping : baseline.vrStabilizationPositionDamping,
             vrStabilizationYawDamping = HHC != null ? HHC.vrHandheldYawDamping : baseline.vrStabilizationYawDamping,
@@ -864,6 +865,10 @@ public partial class BasisHandHeldCameraUI
             videoQuality = HHC != null ? HHC.VideoRecordingQuality : baseline.videoQuality,
             videoTimeLimit = HHC == null || HHC.VideoRecordingTimeLimit,
             videoContinuousClips = HHC != null && HHC.VideoContinuousClips,
+            photogrammetryDistanceMeters = HHC != null ? HHC.PhotogrammetryDistanceMeters : baseline.photogrammetryDistanceMeters,
+            photogrammetryAngleDegrees = HHC != null ? HHC.PhotogrammetryAngleDegrees : baseline.photogrammetryAngleDegrees,
+            photogrammetryWidth = HHC != null ? HHC.PhotogrammetryWidth : baseline.photogrammetryWidth,
+            photogrammetryPathSettleSeconds = HHC != null ? HHC.PhotogrammetryPathSettleSeconds : baseline.photogrammetryPathSettleSeconds,
             streamTransport = HHC != null ? (int)HHC.VideoTransport : baseline.streamTransport,
             streamWidth = HHC != null ? HHC.VideoOutputSettings.Width : baseline.streamWidth,
             streamHeight = HHC != null ? HHC.VideoOutputSettings.Height : baseline.streamHeight,
@@ -872,8 +877,11 @@ public partial class BasisHandHeldCameraUI
             streamPort = HHC != null ? HHC.VideoOutputSettings.WebPort : baseline.streamPort,
             streamSenderName = HHC != null ? HHC.VideoOutputSettings.SenderName ?? string.Empty : baseline.streamSenderName,
             directToScreen = HHC != null && HHC.DirectToScreen,
+            directToScreenFit = HHC != null ? (int)HHC.DirectToScreenFit : baseline.directToScreenFit,
+            directToScreenAlignX = HHC != null ? HHC.DirectToScreenAlignment.x : baseline.directToScreenAlignX,
+            directToScreenAlignY = HHC != null ? HHC.DirectToScreenAlignment.y : baseline.directToScreenAlignY,
             backgroundMode = HHC != null ? (int)HHC.backgroundMode : 0,
-            backgroundCustomColor = HHC != null ? HHC.backgroundCustomColor : BasisHandHeldCamera.ChromaGreen,
+            backgroundCustomColor = HHC != null ? HHC.backgroundCustomColor : BasisCameraBackgrounds.ChromaGreen,
             backgroundKeepsWorld = HHC != null && HHC.backgroundKeepsWorld,
         };
 
@@ -1104,6 +1112,14 @@ public partial class BasisHandHeldCameraUI
             settings.modifiers.trackAim = BasisCameraTrackAimSettings.Default;
         }
 
+        if (settings.settingsVersion < 13)
+        {
+            // Direct To Screen's placement did not exist, and a zero alignment is a corner rather
+            // than the centre the feed had always been drawn at.
+            settings.directToScreenAlignX = BasisCameraDirectToScreen.DefaultAlignment.x;
+            settings.directToScreenAlignY = BasisCameraDirectToScreen.DefaultAlignment.y;
+        }
+
         settings.modifiers ??= new BasisCameraModifierStack();
         settings.modifiers.Sanitize();
         settings.settingsVersion = CameraSettings.CurrentVersion;
@@ -1222,7 +1238,7 @@ public partial class BasisHandHeldCameraUI
 
             HHC.backgroundCustomColor = settings.backgroundCustomColor.a > 0f
                 ? settings.backgroundCustomColor
-                : BasisHandHeldCamera.ChromaGreen;
+                : BasisCameraBackgrounds.ChromaGreen;
             HHC.backgroundKeepsWorld = settings.backgroundKeepsWorld;
             HHC.SetBackgroundMode((BasisCameraBackgroundMode)settings.backgroundMode);
 
@@ -1350,6 +1366,7 @@ public partial class BasisHandHeldCameraUI
         HHC.SetPuckLookAtPreview(settings.puckLookAtPreview);
         HHC.capture360Enabled = settings.capture360;
         HHC.useAutoLeveling = settings.useAutoLeveling;
+        HHC.SetCameraRollEnabled(settings.cameraRoll);
         HHC.useVRHandheldSmoothing = settings.useVRHandheldSmoothing;
         HHC.SetVRStabilizationPositionDamping(settings.vrStabilizationPositionDamping);
         HHC.SetVRStabilizationYawDamping(settings.vrStabilizationYawDamping);
@@ -1395,10 +1412,17 @@ public partial class BasisHandHeldCameraUI
         HHC.SetVideoRecordingQuality(settings.videoQuality);
         HHC.VideoRecordingTimeLimit = settings.videoTimeLimit;
         HHC.VideoContinuousClips = settings.videoContinuousClips;
+        HHC.SetPhotogrammetryDistance(settings.photogrammetryDistanceMeters);
+        HHC.SetPhotogrammetryAngle(settings.photogrammetryAngleDegrees);
+        HHC.SetPhotogrammetryWidth(settings.photogrammetryWidth);
+        HHC.SetPhotogrammetryPathSettleSeconds(settings.photogrammetryPathSettleSeconds);
         HHC.ApplyStreamSettings((BasisVideoTransport)settings.streamTransport, settings.streamWidth, settings.streamHeight, settings.streamFrameRate, settings.streamQuality, settings.streamPort, settings.streamSenderName);
 
         // After the body, which this defers to: a file that names a film body and asks for the
         // monitor loads with the setting kept and the window left alone, as the panel then says.
+        // The fit and alignment first, so the window is taken over already placed.
+        HHC.SetDirectToScreenFit(BasisCameraDirectToScreen.SanitizeFit(settings.directToScreenFit));
+        HHC.SetDirectToScreenAlignment(settings.directToScreenAlignX, settings.directToScreenAlignY);
         HHC.SetDirectToScreen(settings.directToScreen);
 
 #if Basis_VOLUMETRIC_SUPPORTED

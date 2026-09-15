@@ -26,7 +26,9 @@ namespace Basis.Scripts.Networking
         public const string LastConnectedServerIdFile = "LastConnectedServerId.BAS";
 
         public static bool AutoConnectAttempted;
+        public static bool HasBootstrapConnection { get; private set; }
         private static bool _connectInProgress;
+        public static bool ConnectInProgress => _connectInProgress;
 
         // Stable key the loading bar uses to merge updates for the same connection
         // attempt, distinct from the bundle-load key BasisSceneLoad reports under.
@@ -250,7 +252,8 @@ namespace Basis.Scripts.Networking
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void RegisterCommandLineAutoConnect()
         {
-            if (!TryGetBootstrapConnection(out ServerDirectoryEntry target)) return;
+            if (!TryGetBootstrapConnection(out ServerDirectoryEntry target, out bool isHostMode)) return;
+            HasBootstrapConnection = true;
 
             void Trigger()
             {
@@ -266,21 +269,31 @@ namespace Basis.Scripts.Networking
                     return;
                 }
 
-                _ = ConnectAsync(target, userName);
+                _ = ConnectAsync(target, userName, isHostMode);
             }
 
             if (BasisNetworkManagement.IsInitialized) Trigger();
             else BasisNetworkManagement.OnIstanceCreated += Trigger;
         }
 
-        private static bool TryGetBootstrapConnection(out ServerDirectoryEntry entry)
+        private static bool TryGetBootstrapConnection(out ServerDirectoryEntry entry, out bool isHostMode)
         {
-            if (TryGetCommandLineConnection(out entry)) return true;
+            bool hostReconnect = BasisAppRelaunch.ConsumeHostReconnectRequested();
+            isHostMode = false;
+
+            if (TryGetCommandLineConnection(out entry))
+            {
+                isHostMode = hostReconnect;
+                return true;
+            }
             if (BasisDeepLinkProvider.TryConsumeStartupLink(out entry)) return true;
 #if UNITY_EDITOR
             if (BasisAppRelaunch.TryConsumeEditorConnection(out string editorConnection)
                 && BuildEntryFromConnectionString(editorConnection, out entry))
+            {
+                isHostMode = hostReconnect;
                 return true;
+            }
 #endif
             entry = null;
             return false;

@@ -1,3 +1,4 @@
+using Basis.BasisUI;
 using Basis.Scripts.BasisSdk.Players;
 using Basis.Scripts.Common;
 using Basis.Scripts.Device_Management.Devices.OpenVR.Structs;
@@ -19,6 +20,13 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
         // Raw skeleton (local-to-skeleton) data from SteamVR
         public Vector3[] BonePositions;      // local positions relative to skeleton root (meters)
         public Quaternion[] BoneRotations;   // local rotations relative to skeleton root
+        public const int WristAnchorPollFrames = 120;
+        public const string OculusTouchControllerType = "oculus_touch";
+        private static readonly VRBoneTransform_t[] referenceBones = new VRBoneTransform_t[SteamVR_Action_Skeleton.numBones];
+        private Vector3 wristAnchorPosition;
+        private Quaternion wristAnchorRotation;
+        private bool wristAnchored, wristSampled;
+        private int nextWristAnchorPoll;
 
         // Device pose (controller) from compositor
         public TrackedDevicePose_t devicePose = new TrackedDevicePose_t();
@@ -26,6 +34,7 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
         public EVRCompositorError result;
         public Vector3 LeftRaycastOffset = new Vector3(0, 0, 0.06f);
         public Vector3 RightRaycastOffset = new Vector3(0, 0, 0.06f);
+        public override bool AppliesDeviceOffsetAtSource => true;
         public void Initialize(OpenVRDevice device, string UniqueID, string UnUniqueID, string subSystems, bool AssignTrackedRole, BasisBoneTrackedRole basisBoneTrackedRole, SteamVR_Input_Sources SteamVR_Input_Sources)
         {
             HandBiasSplay = -0.8f;
@@ -45,6 +54,8 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
 
             inputSource = SteamVR_Input_Sources;
             Device = device;
+            wristAnchored = false;
+            nextWristAnchorPoll = 0;
             TrackingHardware = BasisTrackingHardware.Lighthouse;
 
             InitializeTracking(UniqueID, UnUniqueID, subSystems, AssignTrackedRole, basisBoneTrackedRole,true);
@@ -78,16 +89,7 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
             }
 
             // Poll input state here so InputUpdate() sees fresh data after LastUpdatePlayerControl()
-            CurrentInputState.GripButton = SteamVR_Actions._default.Grip.GetState(inputSource);
-            CurrentInputState.SystemOrMenuButton = SteamVR_Actions._default.System.GetState(inputSource);
-            CurrentInputState.PrimaryButtonGetState = SteamVR_Actions._default.A_Button.GetState(inputSource);
-            CurrentInputState.SecondaryButtonGetState = SteamVR_Actions._default.B_Button.GetState(inputSource);
-            CurrentInputState.Primary2DAxisClick = SteamVR_Actions._default.JoyStickClick.GetState(inputSource);
-            CurrentInputState.Primary2DAxisRaw = SteamVR_Actions._default.Joystick.GetAxis(inputSource);
-            CurrentInputState.Trigger = SteamVR_Actions._default.Trigger.GetAxis(inputSource);
-            CurrentInputState.SecondaryTrigger = SteamVR_Actions._default.HandTrigger.GetAxis(inputSource);
-            CurrentInputState.Secondary2DAxisRaw = SteamVR_Actions._default.TrackPad.GetAxis(inputSource);
-            CurrentInputState.Secondary2DAxisClick = SteamVR_Actions._default.TrackPadTouched.GetState(inputSource);
+            PollButtons();
             PollPose();
         }
         public override void RenderPollData()
@@ -99,6 +101,14 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
             }
 
             // Buttons / axes
+            PollButtons();
+
+            PollPose();
+
+            UpdateInputEvents();
+        }
+        private void PollButtons()
+        {
             CurrentInputState.GripButton = SteamVR_Actions._default.Grip.GetState(inputSource);
             CurrentInputState.SystemOrMenuButton = SteamVR_Actions._default.System.GetState(inputSource);
             CurrentInputState.PrimaryButtonGetState = SteamVR_Actions._default.A_Button.GetState(inputSource);
@@ -109,10 +119,12 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
             CurrentInputState.SecondaryTrigger = SteamVR_Actions._default.HandTrigger.GetAxis(inputSource);
             CurrentInputState.Secondary2DAxisRaw = SteamVR_Actions._default.TrackPad.GetAxis(inputSource);
             CurrentInputState.Secondary2DAxisClick = SteamVR_Actions._default.TrackPadTouched.GetState(inputSource);
-
-            PollPose();
-
-            UpdateInputEvents();
+            CurrentInputState.PrimaryButtonTouch = SteamVR_Actions._default.A_Touch.GetState(inputSource);
+            CurrentInputState.SecondaryButtonTouch = SteamVR_Actions._default.B_Touch.GetState(inputSource);
+            CurrentInputState.Primary2DAxisTouch = SteamVR_Actions._default.JoystickTouch.GetState(inputSource);
+            CurrentInputState.Secondary2DAxisTouch = SteamVR_Actions._default.TrackPadTouched.GetState(inputSource);
+            CurrentInputState.TriggerTouch = SteamVR_Actions._default.TriggerTouch.GetState(inputSource);
+            CurrentInputState.ThumbrestTouch = SteamVR_Actions._default.ThumbrestTouch.GetState(inputSource);
         }
         private void PollPose()
         {
@@ -187,8 +199,9 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
             BoneRotations = skeletonAction.boneRotations;
 
             // Raw device pose in *unscaled* world space
-            ComputeUnscaledDeviceCoord(ref UnscaledDeviceCoord, devicePose.mDeviceToAbsoluteTracking.GetPosition());
-            UnscaledDeviceCoord.rotation = devicePose.mDeviceToAbsoluteTracking.GetRotation();
+            ComputeUnscaledDeviceCoord(ref PhysicalDeviceCoord, devicePose.mDeviceToAbsoluteTracking.GetPosition());
+            PhysicalDeviceCoord.rotation = devicePose.mDeviceToAbsoluteTracking.GetRotation();
+            ResolveUnscaledFromPhysical(true);
 
             if (RenderModelAnchor != null)
             {
@@ -203,8 +216,16 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
 
             // Wrist data from skeleton
             int idxWrist = SteamVR_Skeleton_JointIndexes.wrist;
-            Vector3 wristLocalPos = BonePositions[idxWrist];       // meters, local to skeleton root
-            Quaternion wristLocalRot = BoneRotations[idxWrist];
+            bool skeletonActive = skeletonAction.GetActive();
+            wristSampled |= skeletonActive;
+            if (skeletonActive && Time.frameCount >= nextWristAnchorPoll)
+            {
+                nextWristAnchorPoll = Time.frameCount + WristAnchorPollFrames;
+                RefreshWristAnchor(skeletonAction);
+            }
+            bool useWristAnchor = wristAnchored && BasisSettingsDefaults.QuestControllerFix.RawValue;
+            Vector3 wristLocalPos = useWristAnchor ? wristAnchorPosition : wristSampled ? BonePositions[idxWrist] : Vector3.zero;
+            Quaternion wristLocalRot = useWristAnchor ? wristAnchorRotation : wristSampled ? BoneRotations[idxWrist] : Quaternion.identity;
 
             // Rotation offset (per hand)
             Quaternion rotOffset = Quaternion.Euler(isLeft ? leftHandToIKRotationOffset : rightHandToIKRotationOffset);
@@ -253,6 +274,23 @@ namespace Basis.Scripts.Device_Management.Devices.OpenVR
                 HandFinal.rotation,
                 ActiveRaycastOffset
             );
+        }
+
+        private void RefreshWristAnchor(SteamVR_Action_Skeleton skeletonAction)
+        {
+            if (DeviceControllerType != OculusTouchControllerType || skeletonAction.GetSkeletalTrackingLevel() != EVRSkeletalTrackingLevel.VRSkeletalTracking_Estimated)
+            {
+                wristAnchored = false;
+                return;
+            }
+            if (wristAnchored || Valve.VR.OpenVR.Input.GetSkeletalReferenceTransforms(skeletonAction.handle, EVRSkeletalTransformSpace.Parent, EVRSkeletalReferencePose.OpenHand, referenceBones) != EVRInputError.None)
+            {
+                return;
+            }
+            VRBoneTransform_t wrist = referenceBones[SteamVR_Skeleton_JointIndexes.wrist];
+            wristAnchorPosition = new Vector3(-wrist.position.v0, wrist.position.v1, wrist.position.v2);
+            wristAnchorRotation = new Quaternion(wrist.orientation.x, -wrist.orientation.y, -wrist.orientation.z, wrist.orientation.w);
+            wristAnchored = true;
         }
 
         private BasisOpenVRRenderModel _runtimeModel;

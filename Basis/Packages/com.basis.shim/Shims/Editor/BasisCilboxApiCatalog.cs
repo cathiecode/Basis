@@ -248,6 +248,43 @@ input.SetLocomotion(BasisPlayerInputBlend.Additive,
 input.SetVerticalDelta(BasisPlayerInputBlend.Additive, 0.25f);
 input.Clear();",
             },
+            new CilboxApiEntry
+            {
+                GroupKey = GroupPlayers,
+                TitleKey = "sdk.cilbox.api.platform.title",
+                SummaryKey = "sdk.cilbox.api.platform.summary",
+                Requires = new[] { new CilboxApiRequirement("Basis.Shims.BasisPlatformShim", "IsDetected"), new CilboxApiRequirement("Basis.Shims.BasisPlatformEventShim", "Rebind"), new CilboxApiRequirement("BasisPlatformSwitch", "Apply") },
+                Example =
+@"using Basis.Shims;
+using Basis.Scripts.Device_Management;
+
+bool vr = BasisPlatformShim.IsVR;
+bool mobile = BasisPlatformShim.IsMobileGpu;
+bool quest = vr && BasisPlatformShim.IsDetected(""Android"");
+string mode = BasisPlatformShim.CurrentMode;
+
+// BasisPlatformSwitch (com.basis.examples) does the same without code: each rule
+// names a condition and the objects and components to enable or disable while it
+// holds. A script can read or rewrite the rules and re-apply them.
+public BasisPlatformSwitch platformSwitch;
+
+// Adding the event component is the opt-in. The callback is found by name on
+// your own script, fires once on opt-in and again whenever the player swaps
+// between VR and desktop or takes the headset off.
+void Start()
+{
+    BasisPlatformSwitchRule rule = platformSwitch.Rules[0];
+    rule.When = BasisPlatformCondition.VR;
+    platformSwitch.Apply();
+    GetComponent<BasisPlatformEventShim>();
+}
+
+void OnPlatformChanged(string mode, bool vr, bool headsetWorn)
+{
+    vrOnlyControls.SetActive(vr);
+    desktopHud.SetActive(!vr);
+}",
+            },
 
             // ---------------------------------------------------------- avatar
             new CilboxApiEntry
@@ -590,6 +627,32 @@ float fov = main.fieldOfView;
             new CilboxApiEntry
             {
                 GroupKey = GroupRendering,
+                TitleKey = "sdk.cilbox.api.graphicssettings.title",
+                SummaryKey = "sdk.cilbox.api.graphicssettings.summary",
+                Requires = new[] { new CilboxApiRequirement("Basis.Shims.BasisGraphicsSettingsShim", "Get") },
+                Example =
+@"using Basis.Shims;
+
+// Tiers are ordinals over BasisGraphicsSettingsShim.Tiers, cheapest first, so a
+// world compares numbers instead of spelling ""Very Low"" correctly.
+bool cheap = BasisGraphicsSettingsShim.QualityTier <= BasisGraphicsSettingsShim.TierLow;
+backgroundDonut.SetActive(!cheap);
+RenderSettings.skybox = cheap ? flatSky : cloudSky;
+
+// Anything else on ReadableKeys, by key.
+float scale = BasisGraphicsSettingsShim.RenderResolution;
+bool gi = BasisGraphicsSettingsShim.GetFlag(""useglobalillumination"", false);
+
+// Adding the event component is the opt-in. The callback is found by name on
+// your own script, fires once on opt-in as well as on every later change, and
+// is coalesced to one call per frame so a Performance Mode batch is one event.
+void Start() { GetComponent<BasisGraphicsSettingsEventShim>(); }
+
+void OnGraphicsSettingsChanged(string qualityLevel, int qualityTier) { }",
+            },
+            new CilboxApiEntry
+            {
+                GroupKey = GroupRendering,
                 TitleKey = "sdk.cilbox.api.particles.title",
                 SummaryKey = "sdk.cilbox.api.particles.summary",
                 Requires = new[] { new CilboxApiRequirement("UnityEngine.ParticleSystem") },
@@ -670,6 +733,25 @@ void OnDestroy()
 if (seat.IsAvailable) seat.TrySeatLocalPlayer();
 if (seat.IsLocalPlayerSeated) seat.SetOccupantYaw(90f);
 seat.EjectLocalPlayer();",
+            },
+            new CilboxApiEntry
+            {
+                GroupKey = GroupInteraction,
+                TitleKey = "sdk.cilbox.api.permissionevents.title",
+                SummaryKey = "sdk.cilbox.api.permissionevents.summary",
+                Requires = new[] { new CilboxApiRequirement("Basis.Shims.BasisPermissionEventShim", "Rebind") },
+                Example =
+@"using Basis.Shims;
+
+// Adding the component is the opt-in. The callback is found by name on your own
+// script, and fires once on opt-in as well as on every later change, so there is
+// nothing to subscribe to and nothing to poll.
+void Start() { GetComponent<BasisPermissionEventShim>(); }
+
+void OnLocalPermissionsChanged(bool isAdmin, bool isModerator)
+{
+    staffDoor.SetActive(isAdmin || isModerator);
+}",
             },
             new CilboxApiEntry
             {

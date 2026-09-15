@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -109,6 +110,7 @@ namespace Basis.ImagePickup
             public BasisNativeAnimationPayload AnimationPayload;
             public long PlaybackEpochUtcTicks;
             public readonly HashSet<ushort> SentRecipients = new();
+            public readonly HashSet<ushort> AnimationRecipients = new();
         }
 
         /// <summary>
@@ -332,6 +334,8 @@ namespace Basis.ImagePickup
         private static readonly HashSet<Guid> _animationAttempted = new();
         private static long _reservedInboundTransferBytes;
         private static bool _gifDecodePausedForMemory;
+        private static bool _gifLockNoticeShown;
+        private static bool _gifsBlocked;
         private static bool _backPanelsVisible;
         private static bool _backPanelSyncPending;
         private static bool _destroying;
@@ -363,6 +367,16 @@ namespace Basis.ImagePickup
         /// </summary>
         private static readonly HashSet<Guid> _serverHeldImages = new();
         private static bool _initialized;
+
+        /// <summary>
+        /// Bumped every time this client leaves an instance. The network id resolve is asynchronous, so a
+        /// reply still in flight when the connection went away would otherwise arm the next server with the
+        /// previous server's id; the resolve captures this and drops its answer if it moved.
+        /// <see cref="_identityResolveGeneration"/> doubles as the in-flight token, so several joins arriving
+        /// before the first answer do not each start their own resolve.
+        /// </summary>
+        private static int _connectionGeneration;
+        private static int _identityResolveGeneration = -1;
         private static float _nextRecipientRangeRefreshTime;
 
         /// <summary>
@@ -383,6 +397,7 @@ namespace Basis.ImagePickup
         private static readonly List<Vector3> _visibilityCameraPositions = new(8);
         private static readonly List<Vector3> _visibilityCameraForwards = new(8);
         private static readonly List<bool> _visibilityCameraOrthographic = new(8);
+        private static readonly List<int> _visibilityCameraCullingMasks = new(8);
         private static readonly List<Camera> _registeredCameraScratch = new(8);
         private static readonly List<Plane[]> _visibilityFrustums = new(8);
         private static readonly RaycastHit[] _raycastHits = new RaycastHit[RaycastHitBufferSize];
@@ -442,10 +457,7 @@ namespace Basis.ImagePickup
             BasisNetworkPlayer.OnPlayerLeft -= OnPlayerLeft;
             Application.quitting -= Shutdown;
 
-            if (HasNetworkID)
-                BasisNetworkGenericMessages.UnregisterDirectHandler(NetworkID);
-            HasNetworkID = false;
-            NetworkID = 0;
+            ReleaseNetworkIdentity();
 
             _scratchIds.Clear();
             foreach (Guid id in _images.Keys)
@@ -518,6 +530,8 @@ namespace Basis.ImagePickup
             _spawnRateBySender.Clear();
             _reservedInboundTransferBytes = 0;
             _gifDecodePausedForMemory = false;
+            _gifLockNoticeShown = false;
+            _gifsBlocked = false;
             _nextRecipientRangeRefreshTime = 0f;
             BasisImagePickupLinkProbe.Reset();
             BasisImagePickupBandwidth.Reset();
@@ -534,14 +548,19 @@ namespace Basis.ImagePickup
                 BasisDebug.LogError("Image pickup manager cannot start; the local player is not connected.", LogTag);
                 return;
             }
-            if (HasNetworkID)
+            int generation = _connectionGeneration;
+            if (HasNetworkID || _identityResolveGeneration == generation)
                 return;
+            _identityResolveGeneration = generation;
 
             BasisIdResolutionResult resolution = await BasisNetworkIdResolver.ResolveAsync(FixedNetworkIdentifier);
-            if (!_initialized || HasNetworkID)
+            // The id belongs to whichever connection answered. If that connection is gone the answer is the
+            // previous server's index, and arming with it leaves us listening on nothing.
+            if (!_initialized || HasNetworkID || generation != _connectionGeneration)
                 return;
             if (!resolution.Success)
             {
+                _identityResolveGeneration = -1;
                 BasisDebug.LogError(
                     $"Image pickup manager could not resolve the network identifier '{FixedNetworkIdentifier}'.",
                     LogTag
@@ -552,8 +571,8 @@ namespace Basis.ImagePickup
             NetworkID = resolution.Id;
             HasNetworkID = true;
             BasisNetworkGenericMessages.RegisterDirectHandler(NetworkID, OnDirectNetworkMessage);
-            // BasisNetworkLifeCycle nulls the whole delegate on teardown, so re-arm per join rather than
-            // once in Initialize — the same pattern BasisServerProvidedItems uses.
+            // Armed per join rather than once in Initialize so the leave handler only exists while there is a
+            // connection to leave — the same pattern BasisServerProvidedItems uses. The -= keeps that idempotent.
             BasisNetworkPlayer.OnLocalPlayerLeft -= HandleLocalPlayerLeft;
             BasisNetworkPlayer.OnLocalPlayerLeft += HandleLocalPlayerLeft;
             BasisDebug.Log($"Image pickup manager ready (network id {NetworkID}).", LogTag);
@@ -566,6 +585,9 @@ namespace Basis.ImagePickup
         /// </summary>
         private static void HandleLocalPlayerLeft(BasisNetworkPlayer networkPlayer, BasisLocalPlayer localPlayer)
         {
+            // Ahead of the early out below, because the identity has to go even when there is nothing to clear.
+            ReleaseNetworkIdentity();
+
             int trackedImageCount = _images.Count;
             if (trackedImageCount == 0 && _inbound.Count == 0 && _inboundAnimations.Count == 0)
                 return;
@@ -606,6 +628,56 @@ namespace Basis.ImagePickup
                 $"Image pickup manager cleared {trackedImageCount:N0} shared image(s) on leaving the instance.",
                 LogTag
             );
+        }
+
+        /// <summary>
+        /// Drops the network id and its handler registration, and opens a new connection generation.
+        ///
+        /// The id is per server, not per client: the server hands ids out from a counter that starts at zero on
+        /// an empty instance, so <see cref="FixedNetworkIdentifier"/> is a different ushort on every server a
+        /// client visits. Keeping the previous server's id past a disconnect left the manager armed on an index
+        /// the new server uses for something else, or for nothing, so every image message the new server
+        /// delivered found no handler and sat in the deferred queue forever - images already in the instance
+        /// never appeared, and ours never left.
+        /// </summary>
+        /// <summary>
+        /// Confirms the id we hold was issued by the connection we are actually on, and resolves a new one if
+        /// it was not.
+        ///
+        /// <see cref="HandleLocalPlayerLeft"/> is the ordinary place the id is released, but the teardown only
+        /// raises that event while it can still find the local player, so a connection that died hard leaves us
+        /// armed on the last server's index with nothing to say so. <c>BasisNetworkIdResolver.KnownIdMap</c> is
+        /// emptied on every teardown and refilled by the server on join, so an id it does not confirm is one
+        /// from a room we have already left.
+        /// </summary>
+        private static void EnsureNetworkIdentity()
+        {
+            if (!BasisNetworkConnection.LocalPlayerIsConnected)
+                return;
+
+            if (HasNetworkID)
+            {
+                if (BasisNetworkIdResolver.KnownIdMap.TryGetValue(FixedNetworkIdentifier, out ushort issued)
+                    && issued == NetworkID)
+                {
+                    return;
+                }
+                ReleaseNetworkIdentity();
+            }
+
+            HandleLocalPlayerJoined(null, null);
+        }
+
+        private static void ReleaseNetworkIdentity()
+        {
+            _connectionGeneration++;
+            _identityResolveGeneration = -1;
+            if (HasNetworkID)
+                BasisNetworkGenericMessages.UnregisterDirectHandler(NetworkID);
+            HasNetworkID = false;
+            NetworkID = 0;
+            // Whether the next server holds any of our images is its own answer to give.
+            _serverHeldImages.Clear();
         }
 
         /// <summary>
@@ -898,17 +970,43 @@ namespace Basis.ImagePickup
                     continue;
                 }
 
-                SpawnValidatedFile(
-                    queued.Label,
-                    queued.Data != null
-                        ? BasisImageSecurity.ValidateSourceBytes(queued.Data)
-                        : BasisImageSecurity.ValidateFile(queued.Path),
-                    queued.Position,
-                    queued.Rotation,
-                    Guid.NewGuid(),
-                    null
-                );
+                SpawnValidatedFileAsync(queued);
             }
+        }
+
+        /// <summary>
+        /// Runs one queued static-image import through the async validation pipeline — decode on
+        /// the main thread, downscale/re-encode/alpha scan on a worker — then spawns the card.
+        /// The admin lock is re-checked when the result lands, the same window the GIF path guards.
+        /// </summary>
+        private static async void SpawnValidatedFileAsync(QueuedFileSpawn queued)
+        {
+            BasisImageValidationResult result = queued.Data != null
+                ? await BasisImageSecurity.ValidateSourceBytesAsync(queued.Data)
+                : await BasisImageSecurity.ValidateFileAsync(queued.Path);
+
+            if (
+                BasisNetworkModeration.GlobalImagesLocked
+                && !BasisNetworkModeration.LocalPlayerHasGlobalLockBypass()
+            )
+            {
+                DisposeRejectedValidationResult(ref result);
+                string lockedReason = BasisLocalization.Get(
+                    "imagePickup.popup.reason.adminLockedDuringDecode"
+                );
+                BasisImagePickupRejectionPopup.Show(queued.Label, lockedReason);
+                BasisDebug.LogWarning($"Image pickup rejected: {lockedReason}", LogTag);
+                return;
+            }
+
+            SpawnValidatedFile(
+                queued.Label,
+                result,
+                queued.Position,
+                queued.Rotation,
+                Guid.NewGuid(),
+                null
+            );
         }
 
         /// <summary>
@@ -933,6 +1031,12 @@ namespace Basis.ImagePickup
                 BasisImagePickupRejectionPopup.Show(queued.Label, headerError);
                 BasisDebug.LogWarning($"Image pickup rejected: {headerError}", LogTag);
                 return false;
+            }
+
+            if (BasisNetworkModeration.GifsBlockedLocally && !_gifLockNoticeShown)
+            {
+                _gifLockNoticeShown = true;
+                BasisImagePickupRejectionPopup.ShowGifsLocked();
             }
 
             Guid id = Guid.NewGuid();
@@ -1549,6 +1653,16 @@ namespace Basis.ImagePickup
         private static void SimulateUpdateBody()
         {
             RefreshServerRelayBudget();
+            bool gifsBlocked = BasisNetworkModeration.GifsBlockedLocally;
+            if (gifsBlocked != _gifsBlocked)
+            {
+                _gifsBlocked = gifsBlocked;
+                if (!gifsBlocked)
+                {
+                    _gifLockNoticeShown = false;
+                    _nextRecipientRangeRefreshTime = 0f;
+                }
+            }
             BasisImagePickupLinkProbe.Tick(Time.unscaledTime);
             BasisImagePickupBandwidth.Refill(Time.unscaledDeltaTime);
 
@@ -2028,9 +2142,36 @@ namespace Basis.ImagePickup
                 return false;
 
             MarkRecipientsSent(owned.SentRecipients, recipients);
-            if (owned.AnimationPayload != null && owned.PlaybackEpochUtcTicks > 0)
+            if (owned.AnimationPayload != null && owned.PlaybackEpochUtcTicks > 0 && !BasisNetworkModeration.GifsBlockedLocally)
+            {
                 SendAnimation(id, owned, recipients);
+                MarkRecipientsSent(owned.AnimationRecipients, recipients);
+            }
             return true;
+        }
+
+        private static void ResumeOwnedAnimations()
+        {
+            if (BasisNetworkModeration.GifsBlockedLocally)
+                return;
+            foreach (KeyValuePair<Guid, OwnedImage> entry in _owned)
+            {
+                OwnedImage owned = entry.Value;
+                if (owned?.Object == null || owned.AnimationPayload == null || owned.PlaybackEpochUtcTicks <= 0)
+                    continue;
+                _scratchRecipientIds.Clear();
+                foreach (ushort recipient in owned.SentRecipients)
+                {
+                    if (!owned.AnimationRecipients.Contains(recipient))
+                        _scratchRecipientIds.Add(recipient);
+                }
+                if (_scratchRecipientIds.Count == 0)
+                    continue;
+                _scratchRecipientIds.Sort();
+                ushort[] recipients = _scratchRecipientIds.ToArray();
+                SendAnimation(entry.Key, owned, recipients);
+                MarkRecipientsSent(owned.AnimationRecipients, recipients);
+            }
         }
 
         private static void RefreshRangeRecipients(float now)
@@ -2046,6 +2187,7 @@ namespace Basis.ImagePickup
             if (ownerId == UnownedPlayerId)
                 return;
 
+            ResumeOwnedAnimations();
             GatherReplicationCandidates(ownerId);
             if (_scratchCandidates.Count == 0)
                 return;
@@ -2073,7 +2215,15 @@ namespace Basis.ImagePickup
 
         private static void OnPlayerJoined(BasisNetworkPlayer player)
         {
-            if (player == null || _owned.Count == 0)
+            if (player == null)
+                return;
+
+            // HandleLocalPlayerJoined is the ordinary way in, but it runs off events a connection that dropped
+            // hard never raises. OnPlayerJoined is raised for the local player too, so checking here confirms the
+            // id we hold was issued by the server we are actually on and re-resolves it when it was not.
+            EnsureNetworkIdentity();
+
+            if (_owned.Count == 0)
                 return;
             // Let the next range pass batch every newly eligible player into one cohort rather than
             // queueing a separate one-player transfer per arrival.
@@ -2152,7 +2302,12 @@ namespace Basis.ImagePickup
             }
 
             foreach (OwnedImage owned in _owned.Values)
-                owned?.SentRecipients.Remove(left);
+            {
+                if (owned == null)
+                    continue;
+                owned.SentRecipients.Remove(left);
+                owned.AnimationRecipients.Remove(left);
+            }
 
             RemoveOutboundImageTransfersForRecipient(left);
             RemoveOutboundAnimationTransfersForRecipient(left);
@@ -2164,18 +2319,32 @@ namespace Basis.ImagePickup
             if (buffer == null || buffer.Length < 1)
                 return;
 
+            byte opcode = buffer[0];
+            if (opcode == OpChunk || opcode == OpAnimationChunk)
+            {
+                try
+                {
+                    if (opcode == OpChunk)
+                        HandleChunk(senderId, buffer);
+                    else
+                        HandleAnimationChunk(senderId, buffer);
+                }
+                catch (Exception e)
+                {
+                    BasisDebug.LogWarning($"Image pickup: malformed message from {senderId} ({e.Message}).", LogTag);
+                }
+                return;
+            }
+
             using var stream = new MemoryStream(buffer, false);
             using var reader = new BinaryReader(stream, Encoding.UTF8);
-            byte opcode = reader.ReadByte();
+            reader.ReadByte();
             try
             {
                 switch (opcode)
                 {
                     case OpSpawn:
                         HandleSpawn(senderId, reader);
-                        break;
-                    case OpChunk:
-                        HandleChunk(senderId, reader);
                         break;
                     case OpTransform:
                         HandleTransform(senderId, reader);
@@ -2188,9 +2357,6 @@ namespace Basis.ImagePickup
                         break;
                     case OpAnimationSpawn:
                         HandleAnimationSpawn(senderId, reader);
-                        break;
-                    case OpAnimationChunk:
-                        HandleAnimationChunk(senderId, reader);
                         break;
                     case OpServerCacheState:
                         HandleServerCacheState(senderId, reader);
@@ -2284,11 +2450,25 @@ namespace Basis.ImagePickup
             }
         }
 
-        private static void HandleChunk(ushort senderId, BinaryReader reader)
+        internal static bool TryReadChunkHeader(byte[] buffer, out Guid id, out int chunkIndex, out int length)
         {
-            Guid id = new Guid(reader.ReadBytes(16));
-            int chunkIndex = reader.ReadInt32();
-            int length = reader.ReadInt32();
+            if (buffer == null || buffer.Length < ImageChunkHeaderBytes)
+            {
+                id = default;
+                chunkIndex = 0;
+                length = 0;
+                return false;
+            }
+            id = new Guid(new ReadOnlySpan<byte>(buffer, 1, BasisGuid128.SerializedSize));
+            chunkIndex = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(buffer, 1 + BasisGuid128.SerializedSize, sizeof(int)));
+            length = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(buffer, 1 + BasisGuid128.SerializedSize + sizeof(int), sizeof(int)));
+            return true;
+        }
+
+        private static void HandleChunk(ushort senderId, byte[] buffer)
+        {
+            if (!TryReadChunkHeader(buffer, out Guid id, out int chunkIndex, out int length))
+                throw new EndOfStreamException("Image chunk header is truncated.");
 
             if (!_inbound.TryGetValue(id, out InboundTransfer transfer))
             {
@@ -2344,7 +2524,7 @@ namespace Basis.ImagePickup
                 return;
             }
 
-            long remainingBytes = reader.BaseStream.Length - reader.BaseStream.Position;
+            long remainingBytes = buffer.Length - ImageChunkHeaderBytes;
             if (remainingBytes < length)
             {
                 LogChunkRejected(
@@ -2355,24 +2535,13 @@ namespace Basis.ImagePickup
                 return;
             }
 
-            byte[] data = reader.ReadBytes(length);
-            if (data.Length != length)
-            {
-                LogChunkRejected(
-                    transfer,
-                    chunkIndex,
-                    $"only {data.Length} of {length} bytes could be read"
-                );
-                return;
-            }
-
             if (!transfer.Received[chunkIndex])
             {
                 transfer.Deadline =
                     Time.unscaledTime
                     + BasisImagePickupSettings.InboundTransferTimeoutSeconds;
                 transfer.LastProgressTime = Time.unscaledTime;
-                Buffer.BlockCopy(data, 0, transfer.Buffer, offset, length);
+                Buffer.BlockCopy(buffer, ImageChunkHeaderBytes, transfer.Buffer, offset, length);
                 transfer.Received[chunkIndex] = true;
                 transfer.ReceivedCount++;
                 transfer.Rate.MovedBytes += length;
@@ -2400,13 +2569,13 @@ namespace Basis.ImagePickup
             );
         }
 
-        private static void FinalizeTransfer(InboundTransfer transfer)
+        private static async void FinalizeTransfer(InboundTransfer transfer)
         {
             _inbound.Remove(transfer.Id);
             ReleaseInboundTransferBytes(transfer.ReservedBytes);
             transfer.ReservedBytes = 0;
 
-            BasisImageValidationResult result = BasisImageSecurity.ValidateBytes(transfer.Buffer);
+            BasisImageValidationResult result = await BasisImageSecurity.ValidateBytesAsync(transfer.Buffer);
             if (!result.Ok)
             {
                 RemoveImage(transfer.Id);
@@ -2531,11 +2700,10 @@ namespace Basis.ImagePickup
             }
         }
 
-        private static void HandleAnimationChunk(ushort senderId, BinaryReader reader)
+        private static void HandleAnimationChunk(ushort senderId, byte[] buffer)
         {
-            Guid id = new Guid(reader.ReadBytes(16));
-            int chunkIndex = reader.ReadInt32();
-            int length = reader.ReadInt32();
+            if (!TryReadChunkHeader(buffer, out Guid id, out int chunkIndex, out int length))
+                throw new EndOfStreamException("Animation chunk header is truncated.");
 
             if (!_inboundAnimations.TryGetValue(id, out InboundAnimationTransfer transfer))
                 return;
@@ -2553,8 +2721,7 @@ namespace Basis.ImagePickup
             if (length != expectedLength)
                 return;
 
-            byte[] data = reader.ReadBytes(length);
-            if (data.Length != length)
+            if (buffer.Length - ImageChunkHeaderBytes < length)
                 return;
 
             if (transfer.Received[chunkIndex] == 0)
@@ -2562,7 +2729,7 @@ namespace Basis.ImagePickup
                 transfer.Deadline =
                     Time.unscaledTime
                     + BasisImagePickupSettings.InboundTransferTimeoutSeconds;
-                NativeArray<byte>.Copy(data, 0, transfer.Buffer, offset, length);
+                NativeArray<byte>.Copy(buffer, ImageChunkHeaderBytes, transfer.Buffer, offset, length);
                 transfer.Received[chunkIndex] = 1;
                 transfer.ReceivedCount++;
                 transfer.Rate.MovedBytes += length;
@@ -4045,6 +4212,21 @@ namespace Basis.ImagePickup
 
         private static void ProcessOutboundAnimationTransfers()
         {
+            if (BasisNetworkModeration.GifsBlockedLocally)
+            {
+                while (_outboundAnimations.Count > 0)
+                {
+                    OutboundAnimationTransfer held = _outboundAnimations.Dequeue();
+                    if (_owned.TryGetValue(held.Id, out OwnedImage heldOwner) && held.Recipients != null)
+                    {
+                        for (int i = 0; i < held.Recipients.Length; i++)
+                            heldOwner.AnimationRecipients.Remove(held.Recipients[i]);
+                    }
+                    DisposeOutboundAnimationTransfer(held);
+                }
+                return;
+            }
+
             int chunksRemaining =
                 BasisImagePickupSettings.MaxAnimationNetworkChunksPerFrame;
 
@@ -4427,7 +4609,7 @@ namespace Basis.ImagePickup
         /// <see cref="ImageChunkHeaderBytes"/> plus <paramref name="length"/> bytes long. The transports
         /// copy the buffer before returning, so a caller may reuse one array for every chunk of a transfer.
         /// </summary>
-        private static void EncodeChunkInto(
+        internal static void EncodeChunkInto(
             byte[] destination,
             Guid id,
             int chunkIndex,
@@ -4436,14 +4618,11 @@ namespace Basis.ImagePickup
             int length
         )
         {
-            using var stream = new MemoryStream(destination, true);
-            using var writer = new BinaryWriter(stream, Encoding.UTF8);
-            writer.Write(OpChunk);
-            BasisAnimatedImageNetworkCodec.WriteGuid(writer, id);
-            writer.Write(chunkIndex);
-            writer.Write(length);
-            writer.Write(source, offset, length);
-            writer.Flush();
+            destination[0] = OpChunk;
+            BasisGuid128.FromGuid(id).WriteTo(new Span<byte>(destination, 1, BasisGuid128.SerializedSize));
+            BinaryPrimitives.WriteInt32LittleEndian(new Span<byte>(destination, 1 + BasisGuid128.SerializedSize, sizeof(int)), chunkIndex);
+            BinaryPrimitives.WriteInt32LittleEndian(new Span<byte>(destination, 1 + BasisGuid128.SerializedSize + sizeof(int), sizeof(int)), length);
+            Buffer.BlockCopy(source, offset, destination, ImageChunkHeaderBytes, length);
         }
 
         private static byte[] EncodeTransform(Guid id, Vector3 position, Quaternion rotation, float scale)
@@ -4656,6 +4835,7 @@ namespace Basis.ImagePickup
             _visibilityCameraPositions.Clear();
             _visibilityCameraForwards.Clear();
             _visibilityCameraOrthographic.Clear();
+            _visibilityCameraCullingMasks.Clear();
             _registeredCameraScratch.Clear();
             _visibilityFrustums.Clear();
             _localVisibilityCameraIndex = -1;
@@ -5037,6 +5217,12 @@ namespace Basis.ImagePickup
                 EnforceResidentNativeBudget();
                 _pendingRemoval.Clear();
 
+                if (BasisNetworkModeration.GifsBlockedLocally)
+                {
+                    SuspendPlayersForGifLock();
+                    return;
+                }
+
                 bool useDepthBufferOcclusion =
                     BasisImagePickupSettings.UseDepthBufferAnimationVisibility;
                 CollectVisibilityCameras();
@@ -5154,7 +5340,7 @@ namespace Basis.ImagePickup
                 for (int i = playerCount - 1; i >= 0; i--)
                 {
                     BasisAnimatedImagePlayer player = _players[i];
-                    if (player == null || !player.CanReleaseDecodedData || (pass == 0 && player.HasAllocatedCompositor))
+                    if (player == null || !player.HasDecodedData || !player.CanReleaseDecodedData || (pass == 0 && player.HasAllocatedCompositor))
                     {
                         continue;
                     }
@@ -5162,6 +5348,17 @@ namespace Basis.ImagePickup
                     if (BasisAnimatedImageData.TotalResidentNativeBytes <= limit)
                         return;
                 }
+            }
+        }
+
+        private static void SuspendPlayersForGifLock()
+        {
+            int playerCount = _players.Count;
+            for (int i = 0; i < playerCount; i++)
+            {
+                BasisAnimatedImagePlayer player = _players[i];
+                if (player != null)
+                    player.SuspendForAdminLock();
             }
         }
 
@@ -5215,15 +5412,15 @@ namespace Basis.ImagePickup
                 return 0;
 
             Bounds bounds = pickup.FrontRendererBounds;
+            int rendererLayer = pickup.FrontRendererLayer;
             pickup.GetFrontFacePose(out Vector3 faceCenter, out Vector3 frontNormal);
             int cameraCount = Mathf.Min(_visibilityCameras.Count, MaximumCpuFacingCameraBits);
             ulong cameraMask = 0;
             for (int cameraIndex = 0; cameraIndex < cameraCount; cameraIndex++)
             {
-                Camera camera = _visibilityCameras[cameraIndex];
                 if (
                     !IsCpuFrontFacingCandidate(
-                        pickup.FrontRendererLayer,
+                        rendererLayer,
                         bounds,
                         _visibilityFrustums[cameraIndex],
                         frontNormal,
@@ -5231,7 +5428,7 @@ namespace Basis.ImagePickup
                         _visibilityCameraPositions[cameraIndex],
                         _visibilityCameraForwards[cameraIndex],
                         _visibilityCameraOrthographic[cameraIndex],
-                        camera.cullingMask
+                        _visibilityCameraCullingMasks[cameraIndex]
                     )
                 )
                 {
@@ -5434,7 +5631,7 @@ namespace Basis.ImagePickup
                 if (
                     !TryHasUnoccludedFaceSample(
                         pickup,
-                        camera,
+                        _visibilityCameraCullingMasks[i],
                         _visibilityCameraPositions[i],
                         _visibilityCameraForwards[i],
                         _visibilityCameraOrthographic[i],
@@ -5472,7 +5669,7 @@ namespace Basis.ImagePickup
 
         private static bool TryHasUnoccludedFaceSample(
             BasisImagePickupObject pickup,
-            Camera camera,
+            int cameraCullingMask,
             Vector3 cameraPosition,
             Vector3 cameraForward,
             bool cameraOrthographic,
@@ -5489,7 +5686,7 @@ namespace Basis.ImagePickup
                 raycastsRemaining--;
 
                 Vector3 sample = pickup.GetFrontFaceOcclusionSample(sampleIndex, frontNormal);
-                if (IsFaceSampleUnoccluded(pickup, camera, cameraPosition, cameraForward, cameraOrthographic, sample))
+                if (IsFaceSampleUnoccluded(pickup, cameraCullingMask, cameraPosition, cameraForward, cameraOrthographic, sample))
                 {
                     visible = true;
                     return true;
@@ -5500,7 +5697,7 @@ namespace Basis.ImagePickup
 
         private static bool IsFaceSampleUnoccluded(
             BasisImagePickupObject pickup,
-            Camera camera,
+            int cameraCullingMask,
             Vector3 cameraPosition,
             Vector3 cameraForward,
             bool cameraOrthographic,
@@ -5539,7 +5736,7 @@ namespace Basis.ImagePickup
                 return true;
 
             // Use the camera's own culling mask so geometry it cannot render does not occlude.
-            int layerMask = camera.cullingMask & Physics.DefaultRaycastLayers;
+            int layerMask = cameraCullingMask & Physics.DefaultRaycastLayers;
             int hitCount = Physics.RaycastNonAlloc(
                 origin,
                 direction,
@@ -5594,6 +5791,7 @@ namespace Basis.ImagePickup
             _visibilityCameraPositions.Clear();
             _visibilityCameraForwards.Clear();
             _visibilityCameraOrthographic.Clear();
+            _visibilityCameraCullingMasks.Clear();
             for (int i = 0; i < cameraCount; i++)
             {
                 Camera camera = _visibilityCameras[i];
@@ -5601,6 +5799,7 @@ namespace Basis.ImagePickup
                 _visibilityCameraPositions.Add(cameraPosition);
                 _visibilityCameraForwards.Add(cameraRotation * Vector3.forward);
                 _visibilityCameraOrthographic.Add(camera.orthographic);
+                _visibilityCameraCullingMasks.Add(camera.cullingMask);
                 GeometryUtility.CalculateFrustumPlanes(camera, _visibilityFrustums[i]);
             }
         }

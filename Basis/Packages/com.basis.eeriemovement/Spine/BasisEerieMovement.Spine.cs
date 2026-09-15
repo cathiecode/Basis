@@ -266,6 +266,8 @@ namespace Basis.IK
             float spineT = (lastJoint - firstJoint) / jointSpan;
             float chestTwistKeep = Mathf.Lerp(spineNeckTwistKeep, spineTwistKeep, spineT);
             float spineSwingScale = 1f - thoracicBendStiffen * (1f - Mathf.Abs(2f * spineT - 1f));
+            Quaternion lumbarBefore = poseStream.GetRotation(chainHeadToSpine[lastJoint]);
+            float headErrBefore = (headTargetPos - poseStream.GetPosition(chainHeadToSpine[0])).magnitude;
 
             for (int citer = 0; citer < chestIkIterations; citer++)
             {
@@ -288,12 +290,40 @@ namespace Basis.IK
                     GuardSpineJoint(lastJoint);
                 }
 
-                for (int sweep = 0; sweep < chestIkHeadRestoreSweeps; sweep++)
+                RestoreHeadAboveChest(headTargetPos, firstJoint, lastJoint, chestBoneIdx, jointSpan, ccdUp);
+            }
+
+            // The chest only gets the authority the head can afford: past the budget the lumbar is bisected back toward
+            // the head-only solve, which at full reach is what keeps a taut chain from paying the chest pull with the head.
+            float allowed = headErrBefore + Mathf.Max(0f, chestHeadBudget);
+            if ((headTargetPos - poseStream.GetPosition(chainHeadToSpine[0])).magnitude <= allowed)
+                return;
+
+            Quaternion lumbarAfter = poseStream.GetRotation(chainHeadToSpine[lastJoint]);
+            float lo = 0f, hi = 1f;
+            for (int probe = 0; probe < ChestBarrierProbes; probe++)
+            {
+                float mid = 0.5f * (lo + hi);
+                BlendLumbarAndRestoreHead(lumbarBefore, lumbarAfter, mid, headTargetPos, firstJoint, lastJoint, chestBoneIdx, jointSpan, ccdUp);
+                if ((headTargetPos - poseStream.GetPosition(chainHeadToSpine[0])).magnitude <= allowed) lo = mid;
+                else hi = mid;
+            }
+            BlendLumbarAndRestoreHead(lumbarBefore, lumbarAfter, lo, headTargetPos, firstJoint, lastJoint, chestBoneIdx, jointSpan, ccdUp);
+        }
+        const int ChestBarrierProbes = 5;
+        void BlendLumbarAndRestoreHead(Quaternion lumbarBefore, Quaternion lumbarAfter, float w, Vector3 headTargetPos, int firstJoint, int lastJoint, int chestBoneIdx, float jointSpan, Vector3 ccdUp)
+        {
+            poseStream.SetRotation(chainHeadToSpine[lastJoint], Quaternion.Slerp(lumbarBefore, lumbarAfter, w));
+            GuardSpineJoint(lastJoint);
+            RestoreHeadAboveChest(headTargetPos, firstJoint, lastJoint, chestBoneIdx, jointSpan, ccdUp);
+        }
+        void RestoreHeadAboveChest(Vector3 headTargetPos, int firstJoint, int lastJoint, int chestBoneIdx, float jointSpan, Vector3 ccdUp)
+        {
+            for (int sweep = 0; sweep < chestIkHeadRestoreSweeps; sweep++)
+            {
+                for (int i = lastJoint - 1; i >= firstJoint; i--)
                 {
-                    for (int i = lastJoint - 1; i >= firstJoint; i--)
-                    {
-                        ReachHeadJoint(i, headTargetPos, firstJoint, chestBoneIdx, jointSpan, ccdUp);
-                    }
+                    ReachHeadJoint(i, headTargetPos, firstJoint, chestBoneIdx, jointSpan, ccdUp);
                 }
             }
         }
@@ -465,7 +495,7 @@ namespace Basis.IK
                 poseStream.SetRotation(handleUpperChest, deltaWorld * poseStream.GetRotation(handleUpperChest));
             }
         }
-        Vector3 ApplyChestSpring(Vector3 headTargetPos)
+        public Vector3 ApplyChestSpring(Vector3 headTargetPos)
         {
             if (!plan.hasChestSpring)
             {
@@ -474,9 +504,12 @@ namespace Basis.IK
 
             ref BasisChestSpringState spring = ref Ref(chestSpring, 0);
             float hz = chestSpringHz;
+            Vector3 anchorPos = poseStream.AnchorPosition;
+            Quaternion anchorRot = poseStream.AnchorRotation;
+            Vector3 localTarget = Quaternion.Inverse(anchorRot) * (headTargetPos - anchorPos);
             if (hz <= 0f || !spring.Seeded)
             {
-                spring.Pos = headTargetPos;
+                spring.Pos = localTarget;
                 spring.Vel = Vector3.zero;
                 spring.Seeded = true;
                 return headTargetPos;
@@ -484,20 +517,20 @@ namespace Basis.IK
 
             float dt = poseStream.deltaTime;
             if (dt <= 0f)
-                return spring.Pos;
+                return anchorPos + anchorRot * spring.Pos;
 
-            BasisChestSpringCore.Step(spring.Pos, spring.Vel, headTargetPos, dt, hz, chestSpringDamping, out Vector3 newPos, out Vector3 newVel);
+            BasisChestSpringCore.Step(spring.Pos, spring.Vel, localTarget, dt, hz, chestSpringDamping, out Vector3 newPos, out Vector3 newVel);
 
             if (!IsFinite(newPos) || !IsFinite(newVel))
             {
-                spring.Pos = headTargetPos;
+                spring.Pos = localTarget;
                 spring.Vel = Vector3.zero;
                 return headTargetPos;
             }
 
             spring.Pos = newPos;
             spring.Vel = newVel;
-            return newPos;
+            return anchorPos + anchorRot * newPos;
         }
         static bool IsFinite(Vector3 v) => !float.IsNaN(v.x) && !float.IsInfinity(v.x) && !float.IsNaN(v.y) && !float.IsInfinity(v.y) && !float.IsNaN(v.z) && !float.IsInfinity(v.z);
         Vector3 ApplyCrouchBodyOffset(Vector3 headTargetPos, Vector3 hipsPos, Quaternion hipsRot, Vector3 playerUpDir, float fade)

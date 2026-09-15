@@ -22,6 +22,12 @@ public struct BasisFootSimulateJob : IJob
     public NativeArray<BasisFootSimOutput> output;
     public unsafe void Execute()
     {
+        // ArrayElementAsRef takes the raw buffer pointer, so an uncreated array hands back a ref to
+        // address 0 and every field write below faults; a short feet array walks past the end. The
+        // driver always allocates 1/1/1/2, but this is a public job struct and Length is 0 on an
+        // uncreated NativeArray, so one prologue test covers both shapes for the whole solve.
+        if (input.Length < 1 || simState.Length < 1 || output.Length < 1 || feet.Length < 2) return;
+
         ref BasisFootSimInput inp = ref UnsafeUtility.ArrayElementAsRef<BasisFootSimInput>(input.GetUnsafePtr(), 0);
         ref BasisFootSimState sim = ref UnsafeUtility.ArrayElementAsRef<BasisFootSimState>(simState.GetUnsafePtr(), 0);
         ref BasisFootNativeState left = ref UnsafeUtility.ArrayElementAsRef<BasisFootNativeState>(feet.GetUnsafePtr(), 0);
@@ -33,9 +39,10 @@ public struct BasisFootSimulateJob : IJob
         float3 up = inp.playerUp;
         if (math.lengthsq(up) < 0.001f) up = new float3(0, 1, 0);
 
-        float3 velSample = inp.hipsPos, rawVel = (velSample - sim.prevHeadPos) / dt;
+        float3 velSample = inp.hipsPos, hipsCarry = sim.hasPrevHeadPos ? velSample - sim.prevHeadPos : float3.zero, rawVel = (velSample - sim.prevHeadPos) / dt;
         rawVel -= up * math.dot(rawVel, up);
         sim.prevHeadPos = velSample;
+        sim.hasPrevHeadPos = true;
 
         bool decelerating = math.lengthsq(rawVel) < math.lengthsq(sim.smoothedVelocity);
         float vAlpha = 1f - math.exp(-(decelerating ? p.velocitySmoothDecel : p.velocitySmoothAccel) * dt);
@@ -213,6 +220,8 @@ public struct BasisFootSimulateJob : IJob
         float rightKneeUp = GetUpComponent(rightKneeTarget, up);
         EnforceSide(ref rightKneeTarget, ProjectOntoUpPlane(hp, up) + up * rightKneeUp, rawRight, +1, kneeMinSide);
 
+        left.kneeHint += hipsCarry;
+        right.kneeHint += hipsCarry;
         float kneeCarryDeg = bodyYawRate * dt;
         if (math.abs(kneeCarryDeg) > 1e-4f)
         {
