@@ -1,0 +1,15 @@
+{
+    "name": "com.superneko.basis.desktopcast",
+    "displayName": "SupeNekoya's Desktop sharing for Basis",
+    "version": "0.0.1",
+    "description": "Share window or desktop",
+    "author": {
+        "name": "cathiecode",
+        "url": "https://github.com/cathiecode"
+    },
+    "license": "MIT",
+    "dependencies": {},
+    "vpmDependencies": {
+        "com.basis.sdk": "0.0.1"
+    }
+}

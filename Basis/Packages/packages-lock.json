@@ -380,6 +380,12 @@
       "source": "embedded",
       "dependencies": {}
     },
+    "com.superneko.basis.desktopcast": {
+      "version": "file:com.superneko.desktopcast",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
     "com.superneko.basis.sleepkit": {
       "version": "file:com.superneko.basis.sleepkit",
       "depth": 0,
