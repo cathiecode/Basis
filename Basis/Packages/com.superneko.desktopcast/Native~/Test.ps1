@@ -1,1 +1,0 @@
-gst-launch-1.0 -v wasapi2src ! 
