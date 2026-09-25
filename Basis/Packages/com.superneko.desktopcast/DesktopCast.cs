@@ -138,8 +138,8 @@ namespace com.superneko.basis.desktopcast
 
             Debug.Log($"[DesktopCast] Cancelling stream {PublishUrl}");
             Cancelled = true;
-            Cancellable.Cancel();
             CancelEvent.Invoke();
+            Cancellable.Cancel();
         }
     }
 
