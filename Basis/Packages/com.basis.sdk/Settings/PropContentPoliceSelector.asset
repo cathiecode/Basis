@@ -341,3 +341,4 @@ MonoBehaviour:
   - Basis.Shims.BasisPermissionEventShim
   - BasisPlatformSwitch
   - Basis.Shims.BasisPlatformEventShim
+  - com.superneko.basis.desktopcast.DesktopCastDisplay
