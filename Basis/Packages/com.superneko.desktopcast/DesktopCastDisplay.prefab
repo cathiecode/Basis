@@ -1,0 +1,208 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &5712290824780113334
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5933353093787446289}
+  - component: {fileID: 2631204596126854096}
+  - component: {fileID: 6716127681013342169}
+  m_Layer: 0
+  m_Name: DesktopCastDisplay
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5933353093787446289
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5712290824780113334}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 2375614798789615067}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2631204596126854096
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5712290824780113334}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e19faad92ed5dd47bd3d4036e29f69f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: BasisSDK::BasisProp
+  BasisBundleDescription:
+    AssetBundleName: Desktop cast display
+    AssetBundleDescription: Desktop cast display
+    AssetBundleIcon: {fileID: 0}
+    Tags:
+    - MediaPlayer
+    ContentGroupId: 459a63d57f2f48039defed629b2f3e0120260924
+  SpawnMetaData:
+    Placement: 0
+    Hand: 0
+    HasCustomDistance: 0
+    Distance: 1.5
+    HasCustomScale: 0
+    UniformScale: 1
+    AlignToSurface: 1
+    FaceThePlayer: 0
+--- !u!114 &6716127681013342169
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5712290824780113334}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 18f2f3b93e85f6f47a5cdaaeaf8a47d6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: com.superneko.basis.desktopcast::com.superneko.basis.desktopcast.DesktopCastDisplay
+  MediaPlayerNetworking: {fileID: 5916633009694714088}
+  Prop: {fileID: 2631204596126854096}
+--- !u!1001 &2196522383403347069
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 5933353093787446289}
+    m_Modifications:
+    - target: {fileID: 136030129054553920, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: panLevelCustomCurve.m_Curve.Array.data[0].value
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3404733239259574964, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: maxScalePercent
+      value: 400
+      objectReference: {fileID: 0}
+    - target: {fileID: 3404733239259574964, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: minScalePercent
+      value: 25
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 0.15
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 0.15
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 0.15
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6120556251235419922, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: DisplayName
+      value: Screen cast display
+      objectReference: {fileID: 0}
+    - target: {fileID: 6131995112271174821, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_AnchorMax.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6131995112271174821, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_AnchorMin.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6131995112271174821, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_SizeDelta.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6131995112271174821, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_AnchoredPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6131995112271174821, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_AnchoredPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8238937759899344198, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_Name
+      value: MediaPlayerStreaming
+      objectReference: {fileID: 0}
+    - target: {fileID: 8680284816975555943, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_SizeDelta.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8680284816975555943, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+      propertyPath: m_SizeDelta.y
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents:
+    - {fileID: 4061480472500249022, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+--- !u!4 &2375614798789615067 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 4507114126077030822, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+  m_PrefabInstance: {fileID: 2196522383403347069}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &5916633009694714088 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 5505517674190816405, guid: b626617aca178e74b9150ea01e88eaa8, type: 3}
+  m_PrefabInstance: {fileID: 2196522383403347069}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9313d54e9f39acb40861404700a309d4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: BasisMediaPlayer::BasisMediaPlayerNetworking

@@ -1,5 +1,7 @@
-use desktopcast_engine::to_rtmp;
+use std::sync::{Arc, Mutex, atomic::AtomicBool};
+
+use desktopcast_engine::stream;
 
 fn main() {
-    to_rtmp(6754994, 76200, "rtmp://localhost/live/catherine", 60).unwrap();
+    stream(6754994, 3856, "http://stream.space.superneko.net/index/api/whip?app=desktopcast&stream=catherine", 60, Arc::new(Mutex::new(false))).unwrap();
 }

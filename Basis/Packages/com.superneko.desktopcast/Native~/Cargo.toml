@@ -3,5 +3,7 @@ resolver = "3"
 
 members = [
     "engine",
-    "cli"
+    "cli",
+    "bridge",
+    "bindgen"
 ]

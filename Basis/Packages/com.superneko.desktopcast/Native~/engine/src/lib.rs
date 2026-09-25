@@ -1,19 +1,24 @@
 use anyhow::anyhow;
 use gstreamer::{
-    self as gst, Buffer, Caps, Element, ElementFactory, FlowError, FlowSuccess, Pipeline, element_error, glib::{self, object::Cast}, prelude::{ElementExt, ElementExtManual, GstBinExtManual, GstObjectExt as _},
+    self as gst, Buffer, Caps, Element, ElementFactory, FlowError, FlowSuccess, Pipeline,
+    element_error,
+    glib::{self, object::Cast},
+    prelude::{ElementExt, ElementExtManual, GstBinExtManual, GstObjectExt as _},
 };
 use gstreamer_app::{AppSink, AppSinkCallbacks, AppSrc};
 use std::{
     result::Result,
+    str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-pub fn to_rtmp(
+pub fn stream(
     window_handle: u64,
     process_id: u32,
     url: &str,
     frame_rate: u64,
+    all_cancel: Arc<Mutex<bool>>,
 ) -> Result<(), anyhow::Error> {
     gst::init()?;
 
@@ -21,43 +26,88 @@ pub fn to_rtmp(
 
     // VIDEO
 
-    let vwindowcap = add_window_capture_block(&pipeline, window_handle, frame_rate)?;
-    let venc = ElementFactory::make("mfh264enc")
-        .property_from_str("bitrate", "2000")
-        .property_from_str("gop-size", "60")
-        .build()?;
-    let vparse = ElementFactory::make("h264parse").build()?;
-
-    pipeline.add_many([&venc, &vparse])?;
-
-    vwindowcap.link(&venc)?;
-    venc.link(&vparse)?;
+    let vwindowcap = add_window_capture_block(&pipeline, window_handle, frame_rate, all_cancel.clone())?;
 
     // AUDIO
 
     let aprocesscap = add_process_audio_capture_block(&pipeline, process_id)?;
-    let aenc = ElementFactory::make("mfaacenc")
-        .property("bitrate", 128000u32)
-        .build()?;
-    let aqueue = ElementFactory::make("queue").build()?;
-
-    pipeline.add_many([&aenc, &aqueue])?;
-
-    aprocesscap.link(&aenc)?;
-    aenc.link(&aqueue)?;
 
     // MUX + STREAM
 
-    let mux = ElementFactory::make("flvmux").build()?;
-    let rtmp = ElementFactory::make("rtmp2sink") // TODO: change to rtmp2sink
-        .property("location", url)
-        .build()?;
+    if url.starts_with("rtmp") {
+        // Video side
+        let venc = ElementFactory::make("mfh264enc")
+            .property_from_str("bitrate", "2000")
+            .property_from_str("gop-size", "60")
+            .build()?;
+        let vparse = ElementFactory::make("h264parse").build()?;
 
-    pipeline.add_many([&mux, &rtmp])?;
+        pipeline.add_many([&venc, &vparse])?;
 
-    vparse.link(&mux)?;
-    aqueue.link(&mux)?;
-    mux.link(&rtmp)?;
+        vwindowcap.link(&venc)?;
+        venc.link(&vparse)?;
+
+        // Audio side
+        let aenc = ElementFactory::make("mfaacenc")
+            .property("bitrate", 128000u32)
+            .build()?;
+        let aqueue = ElementFactory::make("queue").build()?;
+
+        pipeline.add_many([&aenc, &aqueue])?;
+
+        aprocesscap.link(&aenc)?;
+        aenc.link(&aqueue)?;
+
+        let mux = ElementFactory::make("flvmux").build()?;
+        let rtmp = ElementFactory::make("rtmp2sink") // TODO: change to rtmp2sink
+            .property("location", url)
+            .build()?;
+
+        pipeline.add_many([&mux, &rtmp])?;
+
+        vparse.link(&mux)?;
+        aqueue.link(&mux)?;
+        mux.link(&rtmp)?;
+    } else if url.starts_with("whip") || url.starts_with("http") {
+        // Video side
+        let venc = ElementFactory::make("mfh264enc")
+            .property_from_str("bitrate", "2000")
+            .property_from_str("gop-size", "60")
+            .build()?;
+        let vpay = ElementFactory::make("rtph264pay").build()?;
+
+        pipeline.add_many([&venc, &vpay])?;
+
+        vwindowcap.link(&venc)?;
+        venc.link(&vpay)?;
+
+        // Audio side
+        let aenc = ElementFactory::make("opusenc").build()?;
+        let apay = ElementFactory::make("rtpopuspay2").build()?;
+
+        pipeline.add_many([&aenc, &apay])?;
+
+        aprocesscap.link(&aenc)?;
+        aenc.link(&apay)?;
+
+        // Mux
+
+        let whip = ElementFactory::make("whipsink")
+            .property("whip-endpoint", url)
+            .build()?;
+
+        pipeline.add_many([&whip])?;
+
+        vpay.link_pads_filtered(
+            None,
+            &whip,
+            Some("sink_0"),
+            &Caps::from_str(
+                "application/x-rtp,media=video,encoding-name=H264,payload=97,clock-rate=90000",
+            )?,
+        )?;
+        apay.link_pads_filtered(None, &whip, Some("sink_1"), &Caps::from_str("application/x-rtp,media=audio,encoding-name=OPUS,payload=96,clock-rate=48000,encoding-params=(string)2")?)?;
+    }
 
     // GRAPH EXECUTION
 
@@ -67,31 +117,44 @@ pub fn to_rtmp(
         .bus()
         .expect("Pipeline without bus. Shouldn't happen!");
 
-    for msg in bus.iter_timed(gst::ClockTime::NONE) {
-        use gst::MessageView;
+    loop {
+        for msg in bus.iter_timed(gst::ClockTime::from_mseconds(100)) {
+            use gst::MessageView;
 
-        match msg.view() {
-            MessageView::Eos(..) => break,
-            MessageView::Error(err) => {
-                pipeline.set_state(gst::State::Null)?;
+            match msg.view() {
+                MessageView::Eos(..) => {
+                    *all_cancel.lock().unwrap() = true;
+                    break;
+                }
+                MessageView::Error(err) => {
+                    pipeline.set_state(gst::State::Null)?;
 
-                return Err(anyhow!(
-                    "Gstreamer error. {err} on {}",
-                    msg.src()
-                        .map(|s| s.path_string())
-                        .unwrap_or_else(|| glib::GString::from("UNKNOWN"))
-                ));
+                    return Err(anyhow!(
+                        "Gstreamer error. {err} on {}",
+                        msg.src()
+                            .map(|s| s.path_string())
+                            .unwrap_or_else(|| glib::GString::from("UNKNOWN"))
+                    ));
+                }
+                MessageView::StateChanged(s) => {
+                    println!(
+                        "State changed from {:?}: {:?} -> {:?} ({:?})",
+                        s.src().map(|s| s.path_string()),
+                        s.old(),
+                        s.current(),
+                        s.pending()
+                    );
+                }
+                _ => (),
             }
-            MessageView::StateChanged(s) => {
-                println!(
-                    "State changed from {:?}: {:?} -> {:?} ({:?})",
-                    s.src().map(|s| s.path_string()),
-                    s.old(),
-                    s.current(),
-                    s.pending()
-                );
+
+            if *all_cancel.lock().unwrap() {
+                break;
             }
-            _ => (),
+        }
+
+        if *all_cancel.lock().unwrap() {
+            break;
         }
     }
 
@@ -104,6 +167,7 @@ fn add_window_capture_block(
     pipeline: &Pipeline,
     window_handle: u64,
     frame_rate: u64,
+    all_cancel: Arc<Mutex<bool>>
 ) -> Result<AppSrc, anyhow::Error> {
     let vcap = ElementFactory::make("d3d11screencapturesrc")
         .property("window-handle", window_handle)
@@ -142,8 +206,11 @@ fn add_window_capture_block(
                         FlowError::Error
                     })?;
 
+                    let buffer = Some(buffer.to_owned());
+
                     {
-                        *(livesync2buffer_sink.lock().unwrap()) = Some(buffer.to_owned());
+                        // panics when sink panicked in clitical section
+                        *(livesync2buffer_sink.lock().unwrap()) = buffer;
                     }
 
                     Ok(FlowSuccess::Ok)
@@ -163,9 +230,13 @@ fn add_window_capture_block(
 
     std::thread::spawn(move || {
         loop {
+            if *all_cancel.lock().unwrap() {
+                break;
+            }
+
             if let Some(mut buffer) = livesync2buffer_source
                 .lock()
-                .unwrap()
+                .unwrap() // panics when source panicked in clitical section
                 .as_ref()
                 .map(|b| b.copy())
             {
@@ -201,7 +272,10 @@ fn add_window_capture_block(
     Ok(livesync2source)
 }
 
-fn add_process_audio_capture_block(pipeline: &Pipeline, process_id: u32) -> Result<Element, anyhow::Error>{
+fn add_process_audio_capture_block(
+    pipeline: &Pipeline,
+    process_id: u32
+) -> Result<Element, anyhow::Error> {
     let acap = ElementFactory::make("wasapi2src")
         // .property("loopback", true)
         .property_from_str("loopback-mode", "include-process-tree")
@@ -218,7 +292,7 @@ fn add_process_audio_capture_block(pipeline: &Pipeline, process_id: u32) -> Resu
     let aresample = ElementFactory::make("audioresample").build()?;
 
     pipeline.add_many([&acap, &aconv, &aresample, &acapf])?;
-    
+
     acap.link(&aconv)?;
     aconv.link(&aresample)?;
     aresample.link(&acapf)?;

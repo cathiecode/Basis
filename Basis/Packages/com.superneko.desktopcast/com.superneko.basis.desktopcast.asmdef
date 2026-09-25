@@ -1,7 +1,13 @@
 {
     "name": "com.superneko.basis.desktopcast",
     "rootNamespace": "",
-    "references": [],
+    "references": [
+        "GUID:b4ae365a73764ee478adc74cb89832fe",
+        "GUID:8c9aa0e006f5b5347af5c5470971dfae",
+        "GUID:b5a6d2b254726084eb29a4f74623fe4d",
+        "GUID:6055be8ebefd69e48b49212b09b47b2f",
+        "GUID:15bcb2c0f1267114298c09707f88bfdc"
+    ],
     "includePlatforms": [
         "Editor",
         "WindowsStandalone32",
