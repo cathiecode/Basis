@@ -1,0 +1,96 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -340790334, guid: 67cc4cb7839cd3741b63733d5adf0442, type: 3}
+  m_Name: E4_FEM_A02
+  m_EditorClassIdentifier: 
+  Parameters: {fileID: 11400000, guid: a5d4363eb2f43d6419d5c5b02f31cc6b, type: 2}
+  controls:
+  - name: ikisugi
+    icon: {fileID: 2800000, guid: a9f2c01bf4519ad49a032a6c9c2a465e, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 7
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: white
+    icon: {fileID: 2800000, guid: ac3054024e5fb9b4fb676d290d1658b1, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 8
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: hachu_maru
+    icon: {fileID: 2800000, guid: c5e2aba7320f8624286001657eda72e4, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 9
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: jito2
+    icon: {fileID: 2800000, guid: 14cc2878cac80aa4698385cf8bad3d8d, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 10
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: star
+    icon: {fileID: 2800000, guid: 062607350b4267944879394ac8904793, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 11
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: hachu
+    icon: {fileID: 2800000, guid: 2bf19219caa0f7140a25d0e0ada337a6, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 12
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: hachu_jito
+    icon: {fileID: 2800000, guid: 068346af44f2d2540aeb4df2dd01fc1d, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 13
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: melt
+    icon: {fileID: 2800000, guid: 62b733995e866ab47a654dacd64bc68e, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 14
+    style: 0
+    subMenu: {fileID: 11400000, guid: 131bd960ce4003048a166770789e9f4f, type: 2}
+    subParameters: []
+    labels: []

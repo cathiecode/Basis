@@ -1,0 +1,98 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -340790334, guid: 67cc4cb7839cd3741b63733d5adf0442, type: 3}
+  m_Name: E4_clothes1
+  m_EditorClassIdentifier: 
+  Parameters: {fileID: 11400000, guid: a5d4363eb2f43d6419d5c5b02f31cc6b, type: 2}
+  controls:
+  - name: reset
+    icon: {fileID: 2800000, guid: baf095e48aa6dea45bfa8d1a10bda2a7, type: 3}
+    type: 102
+    parameter:
+      name: E4_reset
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: armcover
+    icon: {fileID: 2800000, guid: d95361657c0a61c43b7954a6a0c5bd9b, type: 3}
+    type: 102
+    parameter:
+      name: E4_armcover
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: jacket
+    icon: {fileID: 2800000, guid: baf095e48aa6dea45bfa8d1a10bda2a7, type: 3}
+    type: 102
+    parameter:
+      name: E4_jacket
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: legcover
+    icon: {fileID: 2800000, guid: e6ea429fdf4c2db409bc21fb326e1bfa, type: 3}
+    type: 102
+    parameter:
+      name: E4_legcover
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: sandal
+    icon: {fileID: 2800000, guid: c397186f68c6ed94fbad5ee2dbe1f2d2, type: 3}
+    type: 102
+    parameter:
+      name: E4_sandal
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: body_size
+    icon: {fileID: 2800000, guid: e63957f7f4f31fe4a8d781e3f086dec0, type: 3}
+    type: 203
+    parameter:
+      name: 
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters:
+    - name: E4_body_size
+    labels: []
+  - name: breasts_size
+    icon: {fileID: 2800000, guid: 83119f5f8a8dc004294a5e0a3edbde92, type: 3}
+    type: 203
+    parameter:
+      name: 
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters:
+    - name: E4_breasts_size
+    labels: []
+  - name: next
+    icon: {fileID: 0}
+    type: 103
+    parameter:
+      name: 
+    value: 1
+    style: 0
+    subMenu: {fileID: 11400000, guid: 5abba48b8b1d14e418d865c0e6387eda, type: 2}
+    subParameters: []
+    labels: []

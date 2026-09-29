@@ -1,0 +1,96 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -340790334, guid: 67cc4cb7839cd3741b63733d5adf0442, type: 3}
+  m_Name: E4_FEM_A01
+  m_EditorClassIdentifier: 
+  Parameters: {fileID: 11400000, guid: a5d4363eb2f43d6419d5c5b02f31cc6b, type: 2}
+  controls:
+  - name: neutral
+    icon: {fileID: 2800000, guid: 8e26510ff46a0ec478871b3894f3a39b, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 0
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: jito
+    icon: {fileID: 2800000, guid: f6c077d57bd193441bccfd8b14b0adfa, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 1
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: smile
+    icon: {fileID: 2800000, guid: 0c84e889566a3644aa5988d43b2a3562, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 2
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: wink
+    icon: {fileID: 2800000, guid: b5663a914d99d7b49a0e523006f16edd, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 3
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: rot
+    icon: {fileID: 2800000, guid: 901474c222cb43a47822d212a14dcd3d, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 4
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: pien
+    icon: {fileID: 2800000, guid: 889057a3551a0e94094eaf19ee11fd85, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 5
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: sick
+    icon: {fileID: 2800000, guid: c12aae52d2e548947a3815b3e7a57ab6, type: 3}
+    type: 102
+    parameter:
+      name: faceEMO_manual
+    value: 6
+    style: 0
+    subMenu: {fileID: 0}
+    subParameters: []
+    labels: []
+  - name: next
+    icon: {fileID: 0}
+    type: 103
+    parameter:
+      name: 
+    value: 1
+    style: 0
+    subMenu: {fileID: 11400000, guid: c66bb11627290a343b2620b5530672f0, type: 2}
+    subParameters: []
+    labels: []
