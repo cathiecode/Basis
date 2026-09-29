@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace com.superneko.basis.masque.native
 {
@@ -7,6 +8,18 @@ namespace com.superneko.basis.masque.native
     {
         public int ReferenceId;
         public float[] blendshapeWeights; // Weight of blendShape. Layout is same as controllingBlendShapes
+        public string[] Tags;
+
+        HashSet<string> _tagsSet;
+        internal HashSet<string> TagsSet
+        {
+            get
+            {
+                _tagsSet ??= new HashSet<string>(Tags);
+
+                return _tagsSet;
+            }
+        }
     }
 
     [Serializable]

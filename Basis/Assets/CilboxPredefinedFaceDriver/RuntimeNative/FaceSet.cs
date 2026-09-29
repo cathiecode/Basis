@@ -9,6 +9,8 @@ namespace com.superneko.basis.masque.cilbox
     {
         [HideInInspector] public int ReferenceId;
         public AnimationClip AnimationClip;
+
+        public string[] Tags;
     }
 
     [Serializable]

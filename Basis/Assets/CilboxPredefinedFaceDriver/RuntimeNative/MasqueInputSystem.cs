@@ -13,7 +13,6 @@ namespace com.superneko.basis.masque.native
 
         public static void OnUpdate()
         {
-            
         }
     }
 }

@@ -62,7 +62,10 @@ namespace com.superneko.basis.masque.cilbox
 
             DeployExpression(expressionIndex);
 
-            _networkShim.SendCustomNetworkEvent(new byte[] { expressionIndex });
+            if (_networkShim.HasNetworkID)
+            {
+                _networkShim.SendCustomNetworkEvent(new byte[] { expressionIndex });
+            }
         }
 
         public void OnNetworkMessageReceived(ushort player, byte[] message, DeliveryMethod method)

@@ -1,41 +1,15 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
+using System.Linq;
 using Basis.Scripts.BasisSdk;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace com.superneko.basis.masque.native
 {
     public class MasqueOwnerRuntime : MonoBehaviour
     {
-        [Serializable]
-        public struct IdPair
-        {
-            public int ExpressionId;
-            public int SerializedIndex;
-        }
-
-        public List<IdPair> ExpressionIdToSerializedIndexPair;
-
-        Dictionary<int, int> _expressionIdToSerializedIndex;
-
-        Dictionary<int, int> ExpressionIdToSerializedIndex
-        {
-            get
-            {
-                if (_expressionIdToSerializedIndex is null)
-                {
-                    _expressionIdToSerializedIndex = new Dictionary<int, int>();
-
-                    foreach (var pair in ExpressionIdToSerializedIndexPair)
-                    {
-                        _expressionIdToSerializedIndex.Add(pair.ExpressionId, pair.SerializedIndex);
-                    }
-                }
-
-                return _expressionIdToSerializedIndex;
-            }
-        }
+        public SerializableFaceSet FaceSet;
 
         bool _initialized = false;
         MasqueCilboxMethod _setExpressionMethod;
@@ -45,6 +19,22 @@ namespace com.superneko.basis.masque.native
         {
             avatar = GetComponentInParent<BasisAvatar>(true);
             avatar.OnAvatarReady += OnAvatarReady;
+
+        }
+
+        void Update()
+        {
+            if (!_initialized) return;
+
+            for (int functionKey = 1; functionKey <= 12; functionKey++)
+            {
+                var keycode = Key.F1 + functionKey - 1;
+
+                if (Keyboard.current[keycode].isPressed)
+                {
+                    SetExpressionByTag($"key_f{functionKey}");
+                }
+            }
         }
 
         void OnAvatarReady(bool isOwner)
@@ -88,19 +78,35 @@ namespace com.superneko.basis.masque.native
             }
         }
 
-        public void SetExpressionByReferenceId(int expressionId, bool forced = false)
+        public void SetExpressionByTag(string tag, bool forced = false)
         {
             if (!_initialized && !forced) return;
 
-            if (!ExpressionIdToSerializedIndex.TryGetValue(expressionId, out var index))
+            var matchingExpression = FaceSet.expressions.FirstOrDefault((expression) => expression.TagsSet.TryGetValue(tag, out var _));
+
+            int matchingExpressionIndex = -1;
+
+            for (var i = 0; i < FaceSet.expressions.Length; i++)
             {
-                Debug.LogError($"Failed to find expression by id {expressionId}");
-                return;
+                var expression = FaceSet.expressions[i];
+
+                if (expression.TagsSet.TryGetValue(tag, out var _))
+                {
+                    matchingExpressionIndex = i;
+                    break;
+                }
             }
 
             try
             {
-                _setExpressionMethod.Call(new object[] { (byte)index });
+                if (matchingExpressionIndex < 0)
+                {
+                    _setExpressionMethod.Call(new object[] { (byte)0 });
+                }
+                else
+                {
+                    _setExpressionMethod.Call(new object[] { (byte)matchingExpressionIndex });
+                }
             }
             catch (Exception e)
             {

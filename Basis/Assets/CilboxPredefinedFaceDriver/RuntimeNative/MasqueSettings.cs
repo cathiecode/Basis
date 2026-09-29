@@ -10,7 +10,7 @@ namespace com.superneko.basis.masque.native
     {
         public SkinnedMeshRenderer FaceSkinnedMeshRenderer;
         public FaceSet FaceSet;
-        public float speed;
+        public float speed = 1;
 
         [NonSerialized] public string CompileError;
 
@@ -82,8 +82,8 @@ namespace com.superneko.basis.masque.native
                 var serializableSet = MasqueFaceSetCompiler.Compile(transform, FaceSkinnedMeshRenderer, FaceSet);
 
                 faceDriver.FaceMesh = FaceSkinnedMeshRenderer;
-
                 faceDriver.ControllingBlendShapeIndice = serializableSet.controllingBlendShapes;
+                faceDriver.minusSpeed = -speed;
 
                 var packedWeights = new float[faceDriver.ControllingBlendShapeIndice.Length * (serializableSet.expressions.Length + 1)];
 
@@ -106,17 +106,10 @@ namespace com.superneko.basis.masque.native
 
                 faceDriver.PackedExpressionsBlendShapeWeights = packedWeights;
 
-                faceDriver.minusSpeed = -speed;
-                
-                ownerRuntime.ExpressionIdToSerializedIndexPair = new List<MasqueOwnerRuntime.IdPair>();
-                
-                for(var i = 0; i < serializableSet.expressions.Length; i++)
-                {
-                    var expression = serializableSet.expressions[i];
-                    ownerRuntime.ExpressionIdToSerializedIndexPair.Add(new MasqueOwnerRuntime.IdPair { ExpressionId = expression.ReferenceId, SerializedIndex = i});
-                }
+                ownerRuntime.FaceSet = serializableSet;
 
                 EditorUtility.SetDirty(faceDriver);
+                EditorUtility.SetDirty(ownerRuntime);
 
                 CompileError = "No error.";
             }

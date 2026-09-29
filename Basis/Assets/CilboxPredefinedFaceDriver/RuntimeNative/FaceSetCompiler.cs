@@ -65,7 +65,7 @@ namespace com.superneko.basis.masque.native
                     }
                 }
 
-                defaultFaceExpression = new SerializableExpression() { ReferenceId = 999999, blendshapeWeights = serializedWeights };
+                defaultFaceExpression = new SerializableExpression() { Tags = new string[] { }, ReferenceId = 999999, blendshapeWeights = serializedWeights };
             }
             else
             {
@@ -79,22 +79,24 @@ namespace com.superneko.basis.masque.native
                     serializedWeights[i] = weight;
                 }
 
-                defaultFaceExpression = new SerializableExpression() { ReferenceId = 999999, blendshapeWeights = serializedWeights };
+                defaultFaceExpression = new SerializableExpression() { Tags = new string[] { }, ReferenceId = 999999, blendshapeWeights = serializedWeights };
             }
 
             // Actually serialize expressions
             foreach (var expression in faceSet.Expressions)
             {
+                var tags = expression.Tags ?? new string[] { };
+
                 if (expression.AnimationClip == null)
                 {
                     // Animation clip is null. add empty.
-                    serializedExpressions.Add(new SerializableExpression() { blendshapeWeights = new float[animatedBlendShapeIndice.Length] });
+                    serializedExpressions.Add(new SerializableExpression() { Tags = tags, blendshapeWeights = CopiedArray(defaultFaceExpression.blendshapeWeights) });
                     continue;
                 }
 
                 var weights = GetClipBlendshapeWeights(facePath, faceMesh, expression.AnimationClip);
 
-                var serializedWeights = new float[animatedBlendShapeIndice.Length];
+                var serializedWeights = CopiedArray(defaultFaceExpression.blendshapeWeights);
 
                 for (var i = 0; i < animatedBlendShapeIndice.Length; i++)
                 {
@@ -108,7 +110,7 @@ namespace com.superneko.basis.masque.native
                     }
                 }
 
-                serializedExpressions.Add(new SerializableExpression() { ReferenceId = expression.ReferenceId, blendshapeWeights = serializedWeights });
+                serializedExpressions.Add(new SerializableExpression() { Tags = tags, ReferenceId = expression.ReferenceId, blendshapeWeights = serializedWeights });
             }
 
             return new SerializableFaceSet()
@@ -144,6 +146,13 @@ namespace com.superneko.basis.masque.native
             // TODO: Warn empty
 
             return dic;
+        }
+
+        static T[] CopiedArray<T>(T[] src)
+        {
+            var newArray = new T[src.Length];
+
+            return newArray;
         }
     }
 }
