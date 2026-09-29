@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Basis;
 using UnityEngine;
@@ -39,6 +40,8 @@ namespace com.superneko.basis.desktopcast
             await MediaPlayerNetworking.SetUrl(session.WatchUrl);
 
             // FIXME: Needs appropriate api to do that
+            MediaPlayer.Volume = 0;
+            MediaPlayer.Mute = true;
             MediaPlayer.AudioComponent.VolumeGain = 0;
             MediaPlayer.AudioComponent.Mute = true;
         }
@@ -54,9 +57,21 @@ namespace com.superneko.basis.desktopcast
 
         void DestroySelfOnCancel()
         {
-            Debug.Log("[DesktopCast] Prop is destroyed. Cancelling session.");
+            Debug.Log("[DesktopCast] Session is cancelled. Destroying prop.");
             _session.CancelEvent -= DestroySelfOnCancel;
-            BasisNetworkSpawnItem.RequestGameObjectUnLoad(Prop.ContentInformation.LoadedNetID);
+
+            MainThreadDispatcher.RunSync(() =>
+            {
+                var (netId, self) = BasisRuntimeSpawnRegistry.SpawnedGameobjects.FirstOrDefault((kvp) => kvp.Value == gameObject);
+
+                if (string.IsNullOrEmpty(netId))
+                {
+                    Debug.LogError("[DesktopCast] Failed to get netid for this display.");
+                    return;
+                }
+
+                BasisNetworkSpawnItem.RequestGameObjectUnLoad(netId);
+            });
         }
     }
 }

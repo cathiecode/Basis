@@ -148,12 +148,12 @@ namespace com.superneko.basis.desktopcast
         public static DesktopCast Instance = new();
         public List<Session> Sessions = new();
 
-        public async Task<Window[]> GetWindowsToCapture()
+        public Window[] GetWindowsToCapture()
         {
-            return (await Platform.EnumerateWindowToCapture()).Select(w => (Window)w).ToArray();
+            return Platform.EnumerateWindowToCapture().Select(w => (Window)w).ToArray();
         }
 
-        public async Task<Session> StartCast(Window window)
+        public Session StartCast(Window window)
         {
             var platformWindow = (Platform.WindowRef)window;
 
@@ -182,8 +182,8 @@ namespace com.superneko.basis.desktopcast
             var url = session.WatchUrl;
 
             // Spawn player prop
-            var propUrl = "https://zipline.space.superneko.net/raw/eGpSou.BEE";
-            var propPassword = "97a9bc634009a42f2e876778114ae931eb5dee9ef92d9e6b0f8db6af62bcd865";
+            var propUrl = "https://zipline.space.superneko.net/raw/WZd8Xz.BEE";
+            var propPassword = "80ae0fbcd5012ceb0a2b55f86bc50264ffba7ee22a1d3cf10172867d995036f1";
             var playerItemKey = new BasisDataStoreItemKeys.ItemKey
             {
                 Mode = BundledContentHolder.Mode.Prop,
@@ -303,11 +303,13 @@ namespace com.superneko.basis.desktopcast
 
             var parent = await MainThreadDispatcher.RunSync(() => PanelTabPage.CreateVertical(root).Descriptor.ContentParent);
 
-            var windows = await DesktopCast.Instance.GetWindowsToCapture();
+            var windows = DesktopCast.Instance.GetWindowsToCapture();
             var sessions = DesktopCast.Instance.Sessions;
 
             await MainThreadDispatcher.RunSync(() =>
             {
+                if (_panel == null) return;
+
                 foreach (var session in sessions)
                 {
                     if (session.Cancelled) continue;
@@ -335,9 +337,9 @@ namespace com.superneko.basis.desktopcast
 
                     button.Descriptor.SetTitle($"Cast {windowTitle}");
 
-                    button.OnClicked += async () =>
+                    button.OnClicked += () =>
                     {
-                        var session = await DesktopCast.Instance.StartCast(window);
+                        var session = DesktopCast.Instance.StartCast(window);
 
                         MainThreadDispatcher.Post(RecreateUI);
                     };
@@ -368,7 +370,7 @@ namespace com.superneko.basis.desktopcast
         public static Task RunSync(Action action)
         {
             var tcs = new TaskCompletionSource<object>();
-            Post(async () =>
+            Post(() =>
             {
                 try
                 {
@@ -387,7 +389,7 @@ namespace com.superneko.basis.desktopcast
         public static Task<TResult> RunSync<TResult>(Func<TResult> func)
         {
             var tcs = new TaskCompletionSource<TResult>();
-            Post(async () =>
+            Post(() =>
             {
                 try
                 {
@@ -504,7 +506,7 @@ namespace com.superneko.basis.desktopcast
         [return: MarshalAs(UnmanagedType.Bool)]
         delegate bool EnumWindowsDelegate(IntPtr hWnd, IntPtr lParam);
 
-        public static async Task<WindowRef[]> EnumerateWindowToCapture()
+        public static WindowRef[] EnumerateWindowToCapture()
         {
             List<WindowRef> windowRefs = new();
 
@@ -517,10 +519,10 @@ namespace com.superneko.basis.desktopcast
 
                 if (!GetWindowInfo(hWnd, ref info)) return true;
 
-                const uint WS_VISIBLE = 0x10000000;
+                // const uint WS_VISIBLE = 0x10000000;
                 const uint WS_CHILD = 0x40000000;
                 const uint WS_POPUP = 0x80000000;
-                const uint WS_SYSMENU = 0x00080000;
+                // const uint WS_SYSMENU = 0x00080000;
                 const uint WS_EX_TOOLWINDOW = 0x00000080;
                 const uint WS_EX_APPWINDOW = 0x00040000;
 
