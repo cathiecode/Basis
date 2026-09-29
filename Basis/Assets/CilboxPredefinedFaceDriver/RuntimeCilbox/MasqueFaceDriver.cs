@@ -11,14 +11,18 @@ namespace com.superneko.basis.masque.cilbox
     public class MasqueFaceDriver : MonoBehaviour
     {
         public SkinnedMeshRenderer FaceMesh;
-        public float minusSpeed = -1;
+        public float MinusSpeed = -1;
+        public float ConvergenceTime = 10;
 
         public int[] ControllingBlendShapeIndice;
         public float[] PackedExpressionsBlendShapeWeights;
 
         bool initialized = false;
         BasisNetworkShim _networkShim;
+        byte _currentExpression;
         float[] _currentExpressionBlendShapeWeights;
+        bool _converged = false;
+        float _scheduledConvergeTime = 0f;
 
         public void Start()
         {
@@ -28,31 +32,66 @@ namespace com.superneko.basis.masque.cilbox
             _networkShim.NetworkMessageReceived += OnNetworkMessageReceived;
 
             _currentExpressionBlendShapeWeights = new float[ControllingBlendShapeIndice.Length];
-            DeployExpression(0);
+
+            DeployExpression(0, true);
+
+            Periodic();
 
             initialized = true;
+        }
+
+        void Periodic()
+        {
+            try
+            {
+                if (initialized && _networkShim.HasNetworkID)
+                {
+                    _networkShim.SendCustomNetworkEvent(new byte[] { _currentExpression }, DeliveryMethod.ReliableOrdered);
+                }
+            }
+            finally
+            {
+                _networkShim.SendCustomEventDelayedSeconds(Periodic, 3f);
+            }
         }
 
         public void Update()
         {
             // Always initialized i think
 
+            if (_converged) return;
+
             // Stack is always faster than field
             var controllingBlendShapeIndices = ControllingBlendShapeIndice;
             var controllingBlendShapeIndicesLength = controllingBlendShapeIndices.Length;
             var expressionBlendshapeWeights = _currentExpressionBlendShapeWeights;
             var faceMesh = FaceMesh;
-            
-            var t = 1 - Mathf.Exp(Time.deltaTime * minusSpeed);
 
-            for (var i = 0; i < controllingBlendShapeIndicesLength; i++)
+            if (Time.time < _scheduledConvergeTime)
             {
-                var blendShapeIndex = controllingBlendShapeIndices[i];
-                var weightPrev = faceMesh.GetBlendShapeWeight(blendShapeIndex);
-                var weightNext = expressionBlendshapeWeights[i];
+                var t = 1 - Mathf.Exp(Time.deltaTime * MinusSpeed);
 
-                // Exponential smoothing: https://lisyarus.github.io/blog/posts/exponential-smoothing.html
-                faceMesh.SetBlendShapeWeight(blendShapeIndex, weightPrev + (weightNext - weightPrev) * t);
+                for (var i = 0; i < controllingBlendShapeIndicesLength; i++)
+                {
+                    var blendShapeIndex = controllingBlendShapeIndices[i];
+                    var weightPrev = faceMesh.GetBlendShapeWeight(blendShapeIndex);
+                    var weightNext = expressionBlendshapeWeights[i];
+
+                    // Exponential smoothing: https://lisyarus.github.io/blog/posts/exponential-smoothing.html
+                    faceMesh.SetBlendShapeWeight(blendShapeIndex, weightPrev + (weightNext - weightPrev) * t);
+                }
+            }
+            else
+            {
+                for (var i = 0; i < controllingBlendShapeIndicesLength; i++)
+                {
+                    var blendShapeIndex = controllingBlendShapeIndices[i];
+                    var weight = expressionBlendshapeWeights[i];
+
+                    faceMesh.SetBlendShapeWeight(blendShapeIndex, weight);
+                }
+
+                _converged = true;
             }
         }
 
@@ -60,11 +99,11 @@ namespace com.superneko.basis.masque.cilbox
         {
             if (!initialized) return;
 
-            DeployExpression(expressionIndex);
+            DeployExpression(expressionIndex, false);
 
             if (_networkShim.HasNetworkID)
             {
-                _networkShim.SendCustomNetworkEvent(new byte[] { expressionIndex });
+                _networkShim.SendCustomNetworkEvent(new byte[] { expressionIndex }, DeliveryMethod.ReliableOrdered);
             }
         }
 
@@ -74,11 +113,20 @@ namespace com.superneko.basis.masque.cilbox
 
             if (message.Length == 0) return;
 
-            DeployExpression(message[0]);
+            DeployExpression(message[0], false);
         }
 
-        public void DeployExpression(byte expressionIndex)
+        public void DeployExpression(byte expressionIndex, bool forced)
         {
+            if (!forced && expressionIndex == _currentExpression)
+            {
+                return;
+            }
+
+            _currentExpression = expressionIndex;
+            _converged = false;
+            _scheduledConvergeTime = Time.time + ConvergenceTime;
+
             Array.Copy(
                 PackedExpressionsBlendShapeWeights, ControllingBlendShapeIndice.Length * expressionIndex,
                 _currentExpressionBlendShapeWeights, 0, ControllingBlendShapeIndice.Length

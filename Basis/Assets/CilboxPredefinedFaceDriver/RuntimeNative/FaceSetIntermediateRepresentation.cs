@@ -7,7 +7,7 @@ namespace com.superneko.basis.masque.native
     public struct SerializableExpression
     {
         public int ReferenceId;
-        public float[] blendshapeWeights; // Weight of blendShape. Layout is same as controllingBlendShapes
+        public float[] BlendshapeWeights; // Weight of blendShape. Layout is same as controllingBlendShapes
         public string[] Tags;
 
         HashSet<string> _tagsSet;
@@ -25,8 +25,8 @@ namespace com.superneko.basis.masque.native
     [Serializable]
     public struct SerializableFaceSet
     {
-        public int[] controllingBlendShapes; // List of blendShape index
-        public SerializableExpression defaultExpression;
-        public SerializableExpression[] expressions;
+        public int[] ControllingBlendShapes; // List of blendShape index
+        public SerializableExpression DefaultExpression;
+        public SerializableExpression[] Expressions;
     }
 }

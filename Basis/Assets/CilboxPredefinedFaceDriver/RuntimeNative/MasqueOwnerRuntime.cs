@@ -82,13 +82,13 @@ namespace com.superneko.basis.masque.native
         {
             if (!_initialized && !forced) return;
 
-            var matchingExpression = FaceSet.expressions.FirstOrDefault((expression) => expression.TagsSet.TryGetValue(tag, out var _));
+            var matchingExpression = FaceSet.Expressions.FirstOrDefault((expression) => expression.TagsSet.TryGetValue(tag, out var _));
 
             int matchingExpressionIndex = -1;
 
-            for (var i = 0; i < FaceSet.expressions.Length; i++)
+            for (var i = 0; i < FaceSet.Expressions.Length; i++)
             {
-                var expression = FaceSet.expressions[i];
+                var expression = FaceSet.Expressions[i];
 
                 if (expression.TagsSet.TryGetValue(tag, out var _))
                 {

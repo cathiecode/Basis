@@ -8,6 +8,8 @@ namespace com.superneko.basis.masque.native
 {
     public class MasqueSettings : MonoBehaviour
     {
+        const float BLENDSHAPE_EPSILON = 0.01f;
+
         public SkinnedMeshRenderer FaceSkinnedMeshRenderer;
         public FaceSet FaceSet;
         public float speed = 1;
@@ -82,24 +84,25 @@ namespace com.superneko.basis.masque.native
                 var serializableSet = MasqueFaceSetCompiler.Compile(transform, FaceSkinnedMeshRenderer, FaceSet);
 
                 faceDriver.FaceMesh = FaceSkinnedMeshRenderer;
-                faceDriver.ControllingBlendShapeIndice = serializableSet.controllingBlendShapes;
-                faceDriver.minusSpeed = -speed;
+                faceDriver.ControllingBlendShapeIndice = serializableSet.ControllingBlendShapes;
+                faceDriver.MinusSpeed = -speed;
+                faceDriver.ConvergenceTime = Mathf.Log(BLENDSHAPE_EPSILON) / -speed;
 
-                var packedWeights = new float[faceDriver.ControllingBlendShapeIndice.Length * (serializableSet.expressions.Length + 1)];
+                var packedWeights = new float[faceDriver.ControllingBlendShapeIndice.Length * (serializableSet.Expressions.Length + 1)];
 
-                var defaultExpression = serializableSet.defaultExpression;
+                var defaultExpression = serializableSet.DefaultExpression;
 
                 Array.Copy(
-                    defaultExpression.blendshapeWeights, 0,
+                    defaultExpression.BlendshapeWeights, 0,
                     packedWeights, 0, faceDriver.ControllingBlendShapeIndice.Length
                 );
 
-                for (var i = 0; i < serializableSet.expressions.Length; i++)
+                for (var i = 0; i < serializableSet.Expressions.Length; i++)
                 {
-                    var expression = serializableSet.expressions[i];
+                    var expression = serializableSet.Expressions[i];
 
                     Array.Copy(
-                        expression.blendshapeWeights, 0,
+                        expression.BlendshapeWeights, 0,
                         packedWeights, faceDriver.ControllingBlendShapeIndice.Length * (i + 1), faceDriver.ControllingBlendShapeIndice.Length
                     );
                 }
