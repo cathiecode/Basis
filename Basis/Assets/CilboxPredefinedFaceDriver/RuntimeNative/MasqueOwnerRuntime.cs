@@ -30,7 +30,7 @@ namespace com.superneko.basis.masque.native
             {
                 var keycode = Key.F1 + functionKey - 1;
 
-                if (Keyboard.current[keycode].isPressed)
+                if (Keyboard.current[keycode].wasPressedThisFrame)
                 {
                     SetExpressionByTag($"key_f{functionKey}");
                 }
@@ -105,7 +105,8 @@ namespace com.superneko.basis.masque.native
                 }
                 else
                 {
-                    _setExpressionMethod.Call(new object[] { (byte)matchingExpressionIndex });
+                    // NOTE: index of faceset is offset by 1. first index means default expresison.
+                    _setExpressionMethod.Call(new object[] { (byte)matchingExpressionIndex + 1});
                 }
             }
             catch (Exception e)
