@@ -110,7 +110,7 @@ namespace com.superneko.basis.masque.cilbox
         public void OnNetworkMessageReceived(ushort player, byte[] message, DeliveryMethod method)
         {
             if (!initialized) return;
-
+            if (message == null) return;
             if (message.Length == 0) return;
 
             DeployExpression(message[0], false);
