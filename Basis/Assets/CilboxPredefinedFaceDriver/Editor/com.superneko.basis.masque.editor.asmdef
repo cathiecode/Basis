@@ -1,0 +1,20 @@
+{
+    "name": "com.superneko.basis.masque.editor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:0acfcc5e81f46664799b13946e9dc289",
+        "GUID:8dfb85f019d6ae54f9d07c0bb40c6e0a",
+        "GUID:b4ae365a73764ee478adc74cb89832fe",
+        "GUID:8c9aa0e006f5b5347af5c5470971dfae",
+        "GUID:a2b22397d5e3094f49884a53aa9a6ab4"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

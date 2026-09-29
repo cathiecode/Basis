@@ -1,0 +1,20 @@
+{
+    "name": "com.superneko.basis.masque.cilbox",
+    "rootNamespace": "",
+    "references": [
+        "GUID:a2b22397d5e3094f49884a53aa9a6ab4",
+        "GUID:b4ae365a73764ee478adc74cb89832fe",
+        "GUID:8c9aa0e006f5b5347af5c5470971dfae",
+        "GUID:e25ad4147d0c7f04d95dff3a561c7fa0",
+        "GUID:4fbaa9af51b2f9c408a9dff4518adb81"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

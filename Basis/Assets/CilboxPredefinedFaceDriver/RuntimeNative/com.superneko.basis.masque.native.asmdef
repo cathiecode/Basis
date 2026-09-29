@@ -1,0 +1,20 @@
+{
+    "name": "com.superneko.basis.masque.native",
+    "rootNamespace": "",
+    "references": [
+        "GUID:0acfcc5e81f46664799b13946e9dc289",
+        "GUID:b4ae365a73764ee478adc74cb89832fe",
+        "GUID:8c9aa0e006f5b5347af5c5470971dfae",
+        "GUID:a2b22397d5e3094f49884a53aa9a6ab4",
+        "GUID:69e646a306c85484da9e2078b7ad4dab"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
