@@ -540,7 +540,7 @@
     },
     "com.unity.nuget.newtonsoft-json": {
       "version": "3.2.2",
-      "depth": 1,
+      "depth": 2,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"
@@ -796,14 +796,6 @@
       "depth": 0,
       "source": "embedded",
       "dependencies": {}
-    },
-    "com.yewnyx.ytdlp": {
-      "version": "file:../../dlp-native/unity_package",
-      "depth": 0,
-      "source": "local",
-      "dependencies": {
-        "com.unity.nuget.newtonsoft-json": "3.2.1"
-      }
     },
     "dev.hai-vr.basis.comms": {
       "version": "file:dev.hai-vr.basis.comms",
