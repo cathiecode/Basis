@@ -342,7 +342,7 @@ namespace Cilbox
 
 				proxyWasSetup = true;
 				runtimeFieldsObjects = null;
-				serializedObjectData = null;
+				// serializedObjectData = null;
 				if (verboseLogging)
 					Debug.Log( $"RuntimeProxyLoad complete for class {className}" );
 			}
