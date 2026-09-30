@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using Basis.Scripts.BasisSdk;
 using com.superneko.basis.masque.cilbox;
 using com.superneko.basis.masque.native;
+using HVR.Vixxy;
 using UnityEditor;
 using UnityEngine;
 
@@ -42,6 +44,16 @@ namespace com.superneko.basis.masque.editor
         {
             var changed = false;
 
+            if (component.AnimationRoot == null)
+            {
+                var basisAvatar = component.GetComponentInParent<BasisAvatar>();
+
+                if (basisAvatar != null)
+                {
+                    component.AnimationRoot = basisAvatar.transform;
+                }
+            }
+
             if (component.FaceSet == null)
             {
                 component.FaceSet = new FaceSet();
@@ -54,34 +66,6 @@ namespace com.superneko.basis.masque.editor
                 changed = true;
             }
 
-            // ID Duplication check
-            var idSet = new HashSet<int>();
-
-            foreach (var expression in component.FaceSet.Expressions)
-            {
-                if (idSet.TryGetValue(expression.ReferenceId, out var _))
-                {
-                    // duplication. reroll.
-
-                    // TODO: Better id generation
-                    int newId;
-                    while (true)
-                    {
-                        newId = UnityEngine.Random.Range(0, int.MaxValue);
-                        if (!idSet.TryGetValue(newId, out var _)) break;
-                    }
-
-                    expression.ReferenceId = newId;
-                    changed = true;
-
-                    idSet.Add(newId);
-                }
-                else
-                {
-                    idSet.Add(expression.ReferenceId);
-                }
-            }
-
             if (changed)
             {
                 EditorUtility.SetDirty(this);
@@ -92,17 +76,20 @@ namespace com.superneko.basis.masque.editor
         {
             var faceDriver = component.GetComponent<MasqueFaceDriver>();
             var ownerRuntime = component.GetComponent<MasqueOwnerRuntime>();
+            var donorMenuItem = component.GetComponent<HVRVixxyMenuItem>();
+            var donorControl = component.GetComponent<HVRVixxyControl>();
 
             CompileError = "No setup";
 
             try
             {
-                var serializableSet = MasqueFaceSetCompiler.Compile(component.transform, component.FaceSkinnedMeshRenderer, component.FaceSet);
+                var serializableSet = MasqueFaceSetCompiler.Compile(component.AnimationRoot, component.FaceSkinnedMeshRenderer, component.FaceSet);
 
                 faceDriver.FaceMesh = component.FaceSkinnedMeshRenderer;
                 faceDriver.ControllingBlendShapeIndice = serializableSet.ControllingBlendShapes;
                 faceDriver.MinusSpeed = -component.speed;
                 faceDriver.ConvergenceTime = Mathf.Log(BLENDSHAPE_EPSILON) / -component.speed;
+                faceDriver.DonorVixxyMenuItem = donorMenuItem;
 
                 var packedWeights = new float[faceDriver.ControllingBlendShapeIndice.Length * (serializableSet.Expressions.Length + 1)];
 
@@ -127,8 +114,31 @@ namespace com.superneko.basis.masque.editor
 
                 ownerRuntime.FaceSet = serializableSet;
 
+                faceDriver.DonorVixxyMenuItem = donorMenuItem;
+
+                var donorChoices = new HVRVixxyChoiceControl[serializableSet.Expressions.Length + 1];
+
+                donorChoices[0] = new HVRVixxyChoiceControl()
+                {
+                    title = "Default",
+                    value = 0
+                };
+
+                for (var i = 0; i < serializableSet.Expressions.Length; i++)
+                {
+                    donorChoices[i + 1] = new HVRVixxyChoiceControl()
+                    {
+                        title = serializableSet.Expressions[i].Title,
+                        value = i + 1
+                    };
+                }
+
+                donorControl.defaultValue = 0;
+                donorControl.choices = donorChoices;
+
                 EditorUtility.SetDirty(faceDriver);
                 EditorUtility.SetDirty(ownerRuntime);
+                EditorUtility.SetDirty(donorControl);
 
                 CompileError = "No error.";
             }

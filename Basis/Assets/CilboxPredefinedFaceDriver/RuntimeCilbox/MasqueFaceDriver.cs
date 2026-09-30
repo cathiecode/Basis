@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Basis;
 using Basis.Network.Core;
+using HVR.Vixxy;
 using UnityEngine;
 
 namespace com.superneko.basis.masque.cilbox
@@ -17,41 +18,53 @@ namespace com.superneko.basis.masque.cilbox
         public int[] ControllingBlendShapeIndice;
         public float[] PackedExpressionsBlendShapeWeights;
 
+        public HVRVixxyMenuItem DonorVixxyMenuItem;
+
         bool initialized = false;
         BasisNetworkShim _networkShim;
-        byte _currentExpression;
+        byte _currentExpression = 0;
         float[] _currentExpressionBlendShapeWeights;
         bool _converged = false;
         float _scheduledConvergeTime = 0f;
+        Action _periodicAction;
 
         public void Start()
         {
             Debug.Log($"[Masque] Face driver start for {gameObject.name}");
 
             _networkShim = SafeUtil.MakeNetworkable(this);
-            _networkShim.NetworkMessageReceived += OnNetworkMessageReceived;
+
+            // We cannot rely on Network message cuz netid of avatar desyncs.
+            // _networkShim.NetworkMessageReceived += OnNetworkMessageReceived;
 
             _currentExpressionBlendShapeWeights = new float[ControllingBlendShapeIndice.Length];
 
             DeployExpression(0, true);
 
-            Periodic();
+            _periodicAction = Periodic;
 
             initialized = true;
+
+            Periodic();
         }
 
         void Periodic()
         {
             try
             {
-                if (initialized && _networkShim.HasNetworkID)
+                if (initialized)
                 {
-                    _networkShim.SendCustomNetworkEvent(new byte[] { _currentExpression }, DeliveryMethod.ReliableOrdered);
+                    var vixxyValue = DonorVixxyMenuItem.GetValue();
+
+                    if (vixxyValue != _currentExpression)
+                    {
+                        DeployExpression((byte)vixxyValue, false);
+                    }
                 }
             }
             finally
             {
-                _networkShim.SendCustomEventDelayedSeconds(Periodic, 3f);
+                _networkShim.SendCustomEventDelayedSeconds(_periodicAction, 0.25f);
             }
         }
 
@@ -101,10 +114,7 @@ namespace com.superneko.basis.masque.cilbox
 
             DeployExpression(expressionIndex, false);
 
-            if (_networkShim.HasNetworkID)
-            {
-                _networkShim.SendCustomNetworkEvent(new byte[] { expressionIndex }, DeliveryMethod.ReliableOrdered);
-            }
+            DonorVixxyMenuItem.ApplyValue((byte)expressionIndex);
         }
 
         public void OnNetworkMessageReceived(ushort player, byte[] message, DeliveryMethod method)

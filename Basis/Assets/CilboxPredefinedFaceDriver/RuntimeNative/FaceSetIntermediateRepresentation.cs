@@ -6,7 +6,7 @@ namespace com.superneko.basis.masque.native
     [Serializable]
     public struct SerializableExpression
     {
-        public int ReferenceId;
+        public string Title;
         public float[] BlendshapeWeights; // Weight of blendShape. Layout is same as controllingBlendShapes
         public string[] Tags;
 

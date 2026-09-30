@@ -64,7 +64,7 @@ namespace com.superneko.basis.masque.native
                     }
                 }
 
-                defaultFaceExpression = new SerializableExpression() { Tags = new string[] { }, ReferenceId = 999999, BlendshapeWeights = serializedWeights };
+                defaultFaceExpression = new SerializableExpression() { Title = "Default", Tags = new string[] { }, BlendshapeWeights = serializedWeights };
             }
             else
             {
@@ -78,7 +78,7 @@ namespace com.superneko.basis.masque.native
                     serializedWeights[i] = weight;
                 }
 
-                defaultFaceExpression = new SerializableExpression() { Tags = new string[] { }, ReferenceId = 999999, BlendshapeWeights = serializedWeights };
+                defaultFaceExpression = new SerializableExpression() { Title = "Default", Tags = new string[] { }, BlendshapeWeights = serializedWeights };
             }
 
             // Actually serialize expressions
@@ -89,7 +89,7 @@ namespace com.superneko.basis.masque.native
                 if (expression.AnimationClip == null)
                 {
                     // Animation clip is null. add empty.
-                    serializedExpressions.Add(new SerializableExpression() { Tags = tags, BlendshapeWeights = CopiedArray(defaultFaceExpression.BlendshapeWeights) });
+                    serializedExpressions.Add(new SerializableExpression() { Title = "(Empty Clip)", Tags = tags, BlendshapeWeights = CopiedArray(defaultFaceExpression.BlendshapeWeights) });
                     continue;
                 }
 
@@ -109,7 +109,7 @@ namespace com.superneko.basis.masque.native
                     }
                 }
 
-                serializedExpressions.Add(new SerializableExpression() { Tags = tags, ReferenceId = expression.ReferenceId, BlendshapeWeights = serializedWeights });
+                serializedExpressions.Add(new SerializableExpression() { Title = expression.AnimationClip.name, Tags = tags, BlendshapeWeights = serializedWeights });
             }
 
             return new SerializableFaceSet()
