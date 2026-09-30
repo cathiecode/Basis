@@ -175,3 +175,4 @@ MonoBehaviour:
   - BasisPlatformSwitch
   - Basis.Shims.BasisPlatformEventShim
   - com.superneko.basis.masque.native.MasqueOwnerRuntime
+  - HVR.Vixxy.SNVixxyKeyboardInput
