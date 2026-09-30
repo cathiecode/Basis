@@ -5,7 +5,8 @@
         "BasisSDK",
         "HVR.Basis.Comms",
         "HVR.Basis.Comms.Networking",
-        "Basis Framework"
+        "Basis Framework",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [
         "Editor"
