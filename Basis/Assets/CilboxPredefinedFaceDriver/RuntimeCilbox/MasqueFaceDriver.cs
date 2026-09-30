@@ -80,8 +80,8 @@ namespace com.superneko.basis.masque.cilbox
             if (_converged) return;
 
             // Stack is always faster than field
-            var blendShapeIndiceToUpdate = _blendShapeIndiceToUpdate;
             var blendShapeIndiceCountToUpdate = _blendShapeIndiceCountToUpdate;
+            var blendShapeIndiceToUpdate = _blendShapeIndiceToUpdate;
             var blendShapeWeightsToUpdate = _blendShapeWeightsToUpdate;
             var faceMesh = FaceMesh;
             var minusSpeed = MinusSpeed;
@@ -150,12 +150,13 @@ namespace com.superneko.basis.masque.cilbox
             var blendShapeIndiceToUpdate = _blendShapeIndiceToUpdate;
             var blendShapeWeightsToUpdate = _blendShapeWeightsToUpdate;
             var ptr = 0;
+            var startIndex = controllingBlendShapeIndiceLength * expressionIndex;
 
             for (var i = 0; i < controllingBlendShapeIndiceLength; i++)
             {
                 var blendShapeIndex = controllingBlendShapeIndice[i];
                 var weightPrev = faceMesh.GetBlendShapeWeight(blendShapeIndex);
-                var weightNext = packedExpressionsBlendShapeWeights[controllingBlendShapeIndiceLength * expressionIndex + i];
+                var weightNext = packedExpressionsBlendShapeWeights[startIndex + i];
 
                 if (weightPrev != weightNext)
                 {
