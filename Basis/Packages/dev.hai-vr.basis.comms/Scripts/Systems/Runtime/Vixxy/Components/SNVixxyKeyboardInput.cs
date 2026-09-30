@@ -1,19 +1,30 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Basis.Scripts.BasisSdk.Players;
 using HVR.Basis.Comms;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace HVR.Vixxy
 {
     public class SNVixxyKeyboardInput : MonoBehaviour, IHVRInitializable
     {
+        [Serializable]
+        public class SNKeyboardInputRule
+        {
+            public Key key;
+            public float value;
+        }
+
         [SerializeField][Multiline] internal string title;
         [SerializeField] internal HVRVixxyControl control;
 
         [SerializeField] internal HVRVixxyRememberScope remember = HVRVixxyRememberScope.DoNotRemember;
         [SerializeField] internal string rememberTag = "";
+        [SerializeField] internal SNKeyboardInputRule[] rules = new SNKeyboardInputRule[] { };
 
+        private bool _isWearerAndReady = false;
         private float _value;
         private HVRAvatarComms _comms;
 
@@ -48,12 +59,27 @@ namespace HVR.Vixxy
 
             _value = control != null ? control.defaultValue : 0f;
 
+            _isWearerAndReady = true;
+
             if (control != null && isActiveAndEnabled) StartCoroutine(RestoreNextFrame());
         }
 
         public void OnHVRReadyBothAvatarAndNetwork(bool isWearer)
         {
             if (!isWearer) return;
+        }
+
+        public void Update()
+        {
+            if (!_isWearerAndReady) return;
+
+            foreach (var rule in rules)
+            {
+                if (Keyboard.current[rule.key].wasPressedThisFrame)
+                {
+                    ApplyValue(rule.value);
+                }
+            }
         }
 
         private IEnumerator RestoreNextFrame()

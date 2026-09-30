@@ -20,6 +20,7 @@ namespace HVR.Basis.Comms.Editor
                 typeof(AutomaticFaceTracking),
                 typeof(HVRVixxyControl),
                 typeof(HVRVixxyMenuItem),
+                typeof(SNVixxyKeyboardInput),
                 typeof(HVRVixxyAggregator),
                 typeof(HVRMeasure),
                 // Not created by user
