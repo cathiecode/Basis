@@ -23,10 +23,13 @@ namespace com.superneko.basis.masque.cilbox
         bool initialized = false;
         BasisNetworkShim _networkShim;
         byte _currentExpression = 0;
-        float[] _currentExpressionBlendShapeWeights;
         bool _converged = false;
         float _scheduledConvergeTime = 0f;
         Action _periodicAction;
+
+        int _blendShapeIndiceCountToUpdate = -1;
+        int[] _blendShapeIndiceToUpdate = { };
+        float[] _blendShapeWeightsToUpdate = { };
 
         public void Start()
         {
@@ -37,7 +40,9 @@ namespace com.superneko.basis.masque.cilbox
             // We cannot rely on Network message cuz netid of avatar desyncs.
             // _networkShim.NetworkMessageReceived += OnNetworkMessageReceived;
 
-            _currentExpressionBlendShapeWeights = new float[ControllingBlendShapeIndice.Length];
+            _blendShapeIndiceToUpdate = new int[ControllingBlendShapeIndice.Length + 1];
+            _blendShapeWeightsToUpdate = new float[ControllingBlendShapeIndice.Length + 1];
+            Array.Copy(PackedExpressionsBlendShapeWeights, _blendShapeWeightsToUpdate, ControllingBlendShapeIndice.Length);
 
             DeployExpression(0, true);
 
@@ -75,20 +80,21 @@ namespace com.superneko.basis.masque.cilbox
             if (_converged) return;
 
             // Stack is always faster than field
-            var controllingBlendShapeIndices = ControllingBlendShapeIndice;
-            var controllingBlendShapeIndicesLength = controllingBlendShapeIndices.Length;
-            var expressionBlendshapeWeights = _currentExpressionBlendShapeWeights;
+            var blendShapeIndiceToUpdate = _blendShapeIndiceToUpdate;
+            var blendShapeIndiceCountToUpdate = _blendShapeIndiceCountToUpdate;
+            var blendShapeWeightsToUpdate = _blendShapeWeightsToUpdate;
             var faceMesh = FaceMesh;
+            var minusSpeed = MinusSpeed;
 
             if (Time.time < _scheduledConvergeTime)
             {
-                var t = 1 - Mathf.Exp(Time.deltaTime * MinusSpeed);
+                var t = 1 - Mathf.Exp(Time.deltaTime * minusSpeed);
 
-                for (var i = 0; i < controllingBlendShapeIndicesLength; i++)
+                for (var i = 0; i < blendShapeIndiceCountToUpdate; i++)
                 {
-                    var blendShapeIndex = controllingBlendShapeIndices[i];
+                    var blendShapeIndex = blendShapeIndiceToUpdate[i];
                     var weightPrev = faceMesh.GetBlendShapeWeight(blendShapeIndex);
-                    var weightNext = expressionBlendshapeWeights[i];
+                    var weightNext = blendShapeWeightsToUpdate[i];
 
                     // Exponential smoothing: https://lisyarus.github.io/blog/posts/exponential-smoothing.html
                     faceMesh.SetBlendShapeWeight(blendShapeIndex, weightPrev + (weightNext - weightPrev) * t);
@@ -96,10 +102,10 @@ namespace com.superneko.basis.masque.cilbox
             }
             else
             {
-                for (var i = 0; i < controllingBlendShapeIndicesLength; i++)
+                for (var i = 0; i < blendShapeIndiceCountToUpdate; i++)
                 {
-                    var blendShapeIndex = controllingBlendShapeIndices[i];
-                    var weight = expressionBlendshapeWeights[i];
+                    var blendShapeIndex = blendShapeIndiceToUpdate[i];
+                    var weight = blendShapeWeightsToUpdate[i];
 
                     faceMesh.SetBlendShapeWeight(blendShapeIndex, weight);
                 }
@@ -137,10 +143,30 @@ namespace com.superneko.basis.masque.cilbox
             _converged = false;
             _scheduledConvergeTime = Time.time + ConvergenceTime;
 
-            Array.Copy(
-                PackedExpressionsBlendShapeWeights, ControllingBlendShapeIndice.Length * expressionIndex,
-                _currentExpressionBlendShapeWeights, 0, ControllingBlendShapeIndice.Length
-            );
+            var faceMesh = FaceMesh;
+            var controllingBlendShapeIndice = ControllingBlendShapeIndice;
+            var controllingBlendShapeIndiceLength = controllingBlendShapeIndice.Length;
+            var packedExpressionsBlendShapeWeights = PackedExpressionsBlendShapeWeights;
+            var blendShapeIndiceToUpdate = _blendShapeIndiceToUpdate;
+            var blendShapeWeightsToUpdate = _blendShapeWeightsToUpdate;
+            var ptr = 0;
+
+            for (var i = 0; i < controllingBlendShapeIndiceLength; i++)
+            {
+                var blendShapeIndex = controllingBlendShapeIndice[i];
+                var weightPrev = faceMesh.GetBlendShapeWeight(blendShapeIndex);
+                var weightNext = packedExpressionsBlendShapeWeights[controllingBlendShapeIndiceLength * expressionIndex + i];
+
+                if (weightPrev != weightNext)
+                {
+                    blendShapeIndiceToUpdate[ptr] = blendShapeIndex;
+                    blendShapeWeightsToUpdate[ptr] = weightNext;
+
+                    ptr++;
+                }
+            }
+
+            _blendShapeIndiceCountToUpdate = ptr;
         }
     }
 }
