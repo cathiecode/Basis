@@ -865,44 +865,56 @@ namespace Basis.BasisUI
             PanelDropdown dropdownLanguage = PanelDropdown.CreateNewEntry(container);
             dropdownLanguage.Descriptor.SetTitle(BasisLocalization.Get("settings.general.language.title"));
             dropdownLanguage.Descriptor.SetTooltip(BasisLocalization.Get("settings.general.language.title.tooltip"));
-
             var languages = BasisLocalization.Available;
-            var codes = new List<string>(languages.Count);
-            var displayNames = new List<string>(languages.Count);
+            int LanguageCount = languages.Count;
+            var codes = new List<string>(LanguageCount);
+            var displayNames = new List<string>(LanguageCount);
             int currentIndex = 0;
-            for (int i = 0; i < languages.Count; i++)
+            for (int i = 0; i < LanguageCount; i++)
             {
                 codes.Add(languages[i].Code);
                 displayNames.Add(languages[i].NativeName);
                 if (languages[i].Code == BasisLocalization.CurrentLanguage)
                 {
+
                     currentIndex = i;
                 }
             }
 
             dropdownLanguage.AssignEntries(codes, displayNames);
-            if (codes.Count > 0)
+            int CodesCount = codes.Count;
+            if (CodesCount > 0)
             {
                 dropdownLanguage.SetValueWithoutNotify(codes[currentIndex]);
             }
+            dropdownLanguage.AssignBinding(BasisSettingsDefaults.Language);
 
-            dropdownLanguage.OnValueChanged += (selected) =>
+            dropdownLanguage.OnValueChanged += OnLanguageChanged;
+
+            PanelSectionToggleHelpers.FinalizeBoxedSectionFromIndex(languageToggle, container, languageStart, false,_ => tabDescriptor?.ForceRebuild());
+        }
+        public static void OnLanguageChanged(string selected)
+        {
+            var languages = BasisLocalization.Available;
+            int LanguageCount = languages.Count;
+            var codes = new List<string>(LanguageCount);
+            for (int i = 0; i < LanguageCount; i++)
             {
-                for (int i = 0; i < codes.Count; i++)
+                codes.Add(languages[i].Code);
+            }
+            int CodesCount = codes.Count;
+            for (int Index = 0; Index < CodesCount; Index++)
+            {
+                if (codes[Index] == selected)
                 {
-                    if (codes[i] == selected)
-                    {
-                        BasisSettingsDefaults.Language.SetValue(codes[i]);
-                        BasisLocalization.SetLanguage(codes[i]);
-                        BasisMainMenu.Close();
-                        OpenToTab("settings.tab.general");
-                        return;
-                    }
+                   // BasisSettingsDefaults.Language.SetValue(codes[Index]);
+                    BasisLocalization.LoadLanguage(codes[Index]);
+                    BasisMainMenu.Close();
+                    OpenToTab("settings.tab.general");
+                    return;
                 }
-            };
-
-            PanelSectionToggleHelpers.FinalizeBoxedSectionFromIndex(languageToggle, container, languageStart, false,
-                _ => tabDescriptor?.ForceRebuild());
+            }
+            BasisDebug.LogError($"Unable To Set that langauge! Missing Code Index ID {selected}");
         }
 
         private static void BuildNetworkingSection(RectTransform container, PanelElementDescriptor tabDescriptor = null)
@@ -1806,7 +1818,7 @@ namespace Basis.BasisUI
                 SettingsProviderPerformanceBar.BuildPerformanceBarGroup(container, descriptor);
             }
 
-            // Renderer (+ its DX12-only PSO cache control) moved up here, right under the
+            // Renderer (+ its explicit-API PSO cache control) moved up here, right under the
             // performance breakdown, instead of sitting at the foot of the page.
             BuildRendererSection(container, descriptor);
 
@@ -2982,6 +2994,10 @@ namespace Basis.BasisUI
             PanelToggle toggleVrsVr = null;
             PanelSlider sliderVrsInner = null;
             PanelSlider sliderVrsOuter = null;
+            void RebuildVrsLayout() =>
+                PanelElementDescriptor.RebuildLayoutChain(
+                    toggleVrsVr != null ? toggleVrsVr.transform.parent as RectTransform : null,
+                    container);
             if (BasisVariableRateShadingFeature.IsSupported)
             {
                 PanelSectionToggleHelpers.CreateCollapsibleBoxedSection(container,
@@ -3014,7 +3030,7 @@ namespace Basis.BasisUI
                     {
                         sliderVrsInner.Descriptor.SetActive(val);
                         sliderVrsOuter.Descriptor.SetActive(val);
-                        descriptor.ForceRebuild();
+                        RebuildVrsLayout();
                     };
                 }, false, visible =>
                 {
@@ -3023,7 +3039,7 @@ namespace Basis.BasisUI
                         sliderVrsInner.Descriptor.SetActive(toggleVrsVr.Value);
                         sliderVrsOuter.Descriptor.SetActive(toggleVrsVr.Value);
                     }
-                    descriptor.ForceRebuild();
+                    RebuildVrsLayout();
                 });
             }
 
@@ -3489,8 +3505,8 @@ namespace Basis.BasisUI
             toggleDx12Warning.Descriptor.SetTitle(BasisLocalization.Get("settings.graphics.renderer.dx12Warning"));
             toggleDx12Warning.Descriptor.SetTooltip(BasisLocalization.Get("settings.graphics.renderer.dx12Warning.tooltip"));
 
-            // Nested inside the Renderer section, under the API dropdown: DX12-only, so it only
-            // ever appears alongside the API that actually needs it, not as its own page-level row.
+            // Nested inside the Renderer section, under the API dropdown: explicit APIs only, so it
+            // only appears alongside an API that actually needs it, not as its own page-level row.
             BuildPsoCacheSection(group.ContentParent);
 
             PanelSectionToggleHelpers.FinalizeCollapsibleGroup(rendererToggle, group, false,
@@ -3498,14 +3514,12 @@ namespace Basis.BasisUI
         }
 
         /// <summary>
-        /// On-disk PSO cache budget. DX12-only: D3D11 builds pipeline state lazily on its own
-        /// worker threads and never pays the synchronous first-draw cost this cache exists to
-        /// avoid, so the control would be dead weight on every other API this project ships.
+        /// On-disk PSO cache budget for the explicit APIs that pay first-draw PSO costs.
         /// See BasisGraphicsStatePrewarm.
         /// </summary>
         private static void BuildPsoCacheSection(RectTransform container)
         {
-            if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Direct3D12)
+            if (!BasisGraphicsStatePrewarm.BackendBenefits())
             {
                 return;
             }
@@ -3514,7 +3528,7 @@ namespace Basis.BasisUI
                 container,
                 PanelSlider.SliderSettings.Advanced(
                     BasisLocalization.Get("settings.graphics.psoCacheSize"),
-                    256, 51200, false, 0, ValueDisplayMode.MemorySize),
+                    64, 1024, false, 0, ValueDisplayMode.MemorySize),
                 BasisSettingsDefaults.PsoCacheSizeMb);
             sliderPsoCache.Descriptor.SetTooltip(BasisLocalization.Get("settings.graphics.psoCacheSize.tooltip"));
         }

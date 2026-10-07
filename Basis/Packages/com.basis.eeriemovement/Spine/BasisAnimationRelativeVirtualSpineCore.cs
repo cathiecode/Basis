@@ -1,4 +1,5 @@
 using Unity.Burst;
+using Unity.Collections;
 using UnityEngine;
 
 namespace Basis.IK
@@ -38,6 +39,10 @@ namespace Basis.IK
 
     public struct BasisAnimationRelativeVirtualSpineState
     {
+        // Placed animation reference, persisted because the scheduled job is a value copy.
+        // Retaining the full chain also freezes its shape while Virtual Spine is locked.
+        public FixedList512Bytes<Vector3> SpinePositions;
+        public FixedList512Bytes<Quaternion> SpineRotations;
         public Vector3 HipsPosition;
         public Quaternion HipsRotation;
         public Vector3 ChestPosition;

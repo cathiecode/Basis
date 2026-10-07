@@ -17,7 +17,6 @@ namespace Basis.Scripts.Drivers
         }
         public static void SetDefaultValues(ref BasisEerieMovement job)
         {
-            job.ikLockMode = BasisIKLockMode.LockHead;
 
             job.offsetRotationHead = job.offsetRotationLeftFoot = job.offsetRotationRightFoot = Quaternion.identity;
             job.offsetRotationLeftHand = job.offsetRotationRightHand = Quaternion.identity;
@@ -233,6 +232,10 @@ namespace Basis.Scripts.Drivers
             job.legState = new NativeArray<BasisLegSlotState>(2, Allocator.Persistent);
             job.legDiagnostics = new NativeArray<BasisLegDiagnostics>(2, Allocator.Persistent);
             job.virtualSpineState = new NativeArray<BasisAnimationRelativeVirtualSpineState>(1, Allocator.Persistent);
+            // Raliv initialization reads the bound pose just like SpineTest.Awake.
+            // The stream must be assigned before that cache is built.
+            job.poseStream = skeleton.Stream;
+            job.InitalizeRalivSpineIK();
             BasisEeriePlanner.Bind(ref job);
         }
         static void BuildSpineAnatomy(ref BasisEerieMovement job, Transform[] chain, BasisTransformMapping Mapping)

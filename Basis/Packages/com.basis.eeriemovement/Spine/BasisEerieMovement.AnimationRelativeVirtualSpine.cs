@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Collections;
 
 namespace Basis.IK
 {
@@ -21,6 +22,33 @@ namespace Basis.IK
             if (!poseStream.IsValid(handleHead) || !poseStream.IsValid(handleHips))
             {
                 return;
+            }
+
+            // Capture the fitted animation before any IK writes to the stream.
+            FixedList512Bytes<Vector3> animatedPositions = default;
+            FixedList512Bytes<Quaternion> animatedRotations = default;
+            int count = chainHeadToSpine.IsCreated ? chainHeadToSpine.Length : 0;
+            if (count < 2 || count > animatedRotations.Capacity)
+            {
+                return;
+            }
+            for (int index = 0; index < count; index++)
+            {
+                BasisBoneHandle handle = chainHeadToSpine[count - 1 - index];
+                if (!poseStream.IsValid(handle))
+                {
+                    return;
+                }
+                poseStream.GetPositionAndRotation(handle, out Vector3 position, out Quaternion rotation);
+                if (!float.IsFinite(position.x) || !float.IsFinite(position.y) || !float.IsFinite(position.z)
+                    || !float.IsFinite(rotation.x) || !float.IsFinite(rotation.y)
+                    || !float.IsFinite(rotation.z) || !float.IsFinite(rotation.w)
+                    || Quaternion.Dot(rotation, rotation) < sqrEpsilon)
+                {
+                    return;
+                }
+                animatedPositions.Add(position);
+                animatedRotations.Add(BasisQuaternionExt.NormalizeSafe(rotation));
             }
 
             poseStream.GetPositionAndRotation(handleHead, out Vector3 animatedHeadPosition, out Quaternion animatedHeadRotation);
@@ -55,11 +83,36 @@ namespace Basis.IK
             BasisAnimationRelativeVirtualSpineState state = virtualSpineState[0];
             BasisAnimationRelativeVirtualSpineCore.Solve(
                 ref state, in input, out BasisAnimationRelativeVirtualSpineResult result);
-            virtualSpineState[0] = state;
             if (!result.Valid)
             {
                 return;
             }
+
+            if (!result.Frozen || state.SpinePositions.Length != count || state.SpineRotations.Length != count)
+            {
+                Quaternion placementRotation = result.HipsRotation * Quaternion.Inverse(animatedHipsRotation);
+                state.SpinePositions.Length = count;
+                state.SpineRotations.Length = count;
+                for (int index = 0; index < count; index++)
+                {
+                    state.SpinePositions[index] = result.HipsPosition
+                        + placementRotation * (animatedPositions[index] - animatedHipsPosition);
+                    state.SpineRotations[index] = BasisQuaternionExt.NormalizeSafe(placementRotation * animatedRotations[index]);
+                }
+            }
+            else
+            {
+                // Preserve the locked shape, but allow runtime body-fit/scale changes.
+                Vector3 previous = state.SpinePositions[0];
+                for (int index = 1; index < count; index++)
+                {
+                    Vector3 next = state.SpinePositions[index];
+                    float length = (animatedPositions[index] - animatedPositions[index - 1]).magnitude;
+                    state.SpinePositions[index] = state.SpinePositions[index - 1] + (next - previous).normalized * length;
+                    previous = next;
+                }
+            }
+            virtualSpineState[0] = state;
 
             targetPositionHips = result.HipsPosition;
             // SolveSpine applies the calibrated target-to-bone offset. The core emits the final animated hips
@@ -75,6 +128,21 @@ namespace Basis.IK
                 targetRotationChest = result.ChestRotation * Quaternion.Inverse(offsetRotationChest);
             }
             virtualSpineApplied = true;
+            // Ground simulation assumes an upright body. Keep the authored legs in lying poses;
+            // real leg/foot trackers remain authoritative.
+            if (Mathf.Abs(Vector3.Dot(result.BodyUp, playerUp)) < 0.5f)
+            {
+                if (plan.leftLeg.target == BasisEerieSource.Sim)
+                {
+                    plan.leftLeg.solve = false;
+                    plan.leftToeSurface = false;
+                }
+                if (plan.rightLeg.target == BasisEerieSource.Sim)
+                {
+                    plan.rightLeg.solve = false;
+                    plan.rightToeSurface = false;
+                }
+            }
         }
 
         bool TryGetVirtualSpineBodyUp(out Vector3 bodyUp)

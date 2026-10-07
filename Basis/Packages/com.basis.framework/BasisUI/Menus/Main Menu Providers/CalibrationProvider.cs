@@ -210,17 +210,8 @@ namespace Basis.BasisUI
                     false, 2, ValueDisplayMode.percentageFromZero),
                 BasisSettingsDefaults.ArmToHeightBlend);
 
-            var spineLockModeDropdown = PanelDropdown.CreateNewEntry(container);
-            spineLockModeDropdown.Descriptor.SetTitle(BasisLocalization.Get("settings.bodyTracking.spineLockMode"));
-            spineLockModeDropdown.Descriptor.SetTooltip(BasisLocalization.Get("settings.bodyTracking.spineLockMode.tooltip"));
-            spineLockModeDropdown.AssignLocalizedEntries(
-                new List<string> { "Lock Hips", "Lock Head", "Lock Both" },
-                new List<string> { "settings.bodyTracking.spineLock.hips", "settings.bodyTracking.spineLock.head", "settings.bodyTracking.spineLock.both" });
-            spineLockModeDropdown.AssignBinding(BasisSettingsDefaults.IKLockMode);
-
             // Slim calibration panel: inset each dropdown control's left edge so its label isn't squished.
             NarrowDropdownForPanel(scalingModeDropdown);
-            NarrowDropdownForPanel(spineLockModeDropdown);
 
             // Avatar Scaling Mode is moot in seated mode (a fixed height is used) and while the
             // Arm To Height Ratio blend replaces it, so disable it there.
@@ -463,10 +454,10 @@ namespace Basis.BasisUI
             if (_leftHand != null && _rightHand != null)
             {
                 if (device == _leftHand)
-                    _leftPressed = (trigger >= 0.9f);
+                    _leftPressed = (trigger >= BasisTriggerPressure.Calibrationtrigger);
 
                 if (device == _rightHand)
-                    _rightPressed = (trigger >= 0.9f);
+                    _rightPressed = (trigger >= BasisTriggerPressure.Calibrationtrigger);
 
                 if (_leftPressed && _rightPressed)
                     OnTriggersConfirmed();
@@ -475,7 +466,7 @@ namespace Basis.BasisUI
             }
 
             // Fallback: any device trigger pressed
-            if (trigger >= 0.9f)
+            if (trigger >= BasisTriggerPressure.Calibrationtrigger)
             {
                 OnTriggersConfirmed();
             }
