@@ -8,13 +8,7 @@ namespace Basis.IK
         {
             BasisEerieMarkers.SpineHipsPlacement.Begin();
 
-            if (virtualSpineApplied)
-            {
-                // ARVS already supplies the placed animated body; do not apply upright corrections.
-                poseStream.SetPosition(handleHips, targetPositionHips);
-                poseStream.SetRotation(handleHips, targetRotationHips * offsetRotationHips);
-            }
-            else if (plan.prone)
+            if (plan.prone)
             {
                 if (plan.hasHips && plan.hasHead)
                 {
@@ -42,9 +36,12 @@ namespace Basis.IK
                 {
                     return;
                 }
-                for (int Index = chainHeadToSpine.Length - 1; Index >= 0; Index--)
+                if (!virtualSpineApplied)
                 {
-                    poseStream.ResetToRest(chainHeadToSpine[Index]);
+                    for (int Index = chainHeadToSpine.Length - 1; Index >= 0; Index--)
+                    {
+                        poseStream.ResetToRest(chainHeadToSpine[Index]);
+                    }
                 }
                 Vector3 headTargetPos = targetPositionHead, hipsTargetPos = targetPositionHips;
                 Quaternion hipsTargetRot = targetRotationHips;
@@ -85,20 +82,9 @@ namespace Basis.IK
             {
                 return;
             }
-            SpineData.animationRelative = virtualSpineApplied;
-            SpineData.neckIndex = -1;
-            for (int index = 0; index < count; index++)
-            {
-                if (chainHeadToSpine[count - 1 - index].Index == handleNeck.Index && plan.hasNeck)
-                {
-                    SpineData.neckIndex = index;
-                }
-            }
-            if (virtualSpineApplied)
-            {
-                SpineData.referencePositions = virtualSpineState[0].SpinePositions;
-                SpineData.referenceRotations = virtualSpineState[0].SpineRotations;
-            }
+            // Solve on a temporary animated reference; never feed solved poses back into the saved posture.
+            SpineData calibratedSpine = SpineData;
+            if (virtualSpineApplied) PrepareAnimationRelativeSpine(ref SpineData);
             SpineData.hipTargetPosition = plan.hasHips ? poseStream.GetPosition(handleHips) : SpineData.positions[0];
             SpineData.hipTargetRotation = plan.hasHips ? poseStream.GetRotation(handleHips) : SpineData.rotations[0];
             SpineData.headTargetPosition = headTargetPosition;
@@ -126,11 +112,12 @@ namespace Basis.IK
             {
                 poseStream.SetPosition(rootHandle, poseStream.GetPosition(rootHandle) + headCorrection);
             }
+            if (virtualSpineApplied) SpineData = calibratedSpine;
         }
         public void InitalizeRalivSpineIK()
         {
             int count = chainHeadToSpine.Length;
-            if (count < 2 || count > SpineData.rotations.Capacity || !poseStream.LocalPosition.IsCreated)
+            if (count < 2 || !poseStream.LocalPosition.IsCreated)
             {
                 return;
             }

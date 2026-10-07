@@ -128,6 +128,9 @@ namespace Basis.IK
                 targetRotationChest = result.ChestRotation * Quaternion.Inverse(offsetRotationChest);
             }
             virtualSpineApplied = true;
+            // Use the ordinary spine path with the placed animation targets.
+            plan.prone = false;
+            plan.crouchOffset = false;
             // Ground simulation assumes an upright body. Keep the authored legs in lying poses;
             // real leg/foot trackers remain authoritative.
             if (Mathf.Abs(Vector3.Dot(result.BodyUp, playerUp)) < 0.5f)
@@ -145,22 +148,29 @@ namespace Basis.IK
             }
         }
 
-        bool TryGetVirtualSpineBodyUp(out Vector3 bodyUp)
+        void PrepareAnimationRelativeSpine(ref RalivIKSpine.SpineData data)
         {
-            bodyUp = playerUp;
-            if (!virtualSpineApplied || !virtualSpineState.IsCreated || virtualSpineState.Length == 0)
+            // Adapt the saved posture to upstream's existing input contract.
+            // The caller retains the calibrated data for the normal tracking path.
+            BasisAnimationRelativeVirtualSpineState state = virtualSpineState[0];
+            data.restPositions = state.SpinePositions;
+            data.restRotations = state.SpineRotations;
+            data.positions = state.SpinePositions;
+            data.rotations = state.SpineRotations;
+            float length = 0f;
+            for (int index = 0; index < data.positions.Length; index++)
             {
-                return false;
+                if (index > 1)
+                {
+                    length += (data.restPositions[index] - data.restPositions[index - 1]).magnitude;
+                }
+                data.t[index] = length;
             }
-
-            Vector3 candidate = virtualSpineState[0].BodyUp;
-            if (candidate.sqrMagnitude < sqrEpsilon)
+            data.length = length;
+            for (int index = 0; index < data.t.Length; index++)
             {
-                return false;
+                data.t[index] = length > epsilon ? data.t[index] / length * 0.8f : 0f;
             }
-
-            bodyUp = candidate.normalized;
-            return true;
         }
     }
 }
