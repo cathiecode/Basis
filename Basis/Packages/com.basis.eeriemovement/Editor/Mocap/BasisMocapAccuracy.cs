@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -47,6 +48,7 @@ namespace Basis.IK.Mocap
             if (SmoothTime >= 0f) i.SmoothTime = SmoothTime;
         }
     }
+    [NoAutoStaticsCleanup]
     public static class BasisMocapAccuracy
     {
         // A pole flip: the joint jumps hard while the end effector is essentially still. Real human motion is
@@ -238,9 +240,11 @@ namespace Basis.IK.Mocap
         }
         static void SolveArm(BasisMotionClip clip, int f, bool isLeft, ref Limb limb, Quaternion chestRot, BasisMocapHintSource hint, float dt, ref BasisArmState state, out Vector3 truthElbow, out Vector3 solvedElbow, out float handErr, out float reach, out float armLen, out float rigidity, out byte axis, out bool inReach)
         {
+            BasisMocapJoint jC = BasisMocapJoint.Chest;
             BasisMocapJoint jS = isLeft ? BasisMocapJoint.LeftUpperArm : BasisMocapJoint.RightUpperArm;
             BasisMocapJoint jE = isLeft ? BasisMocapJoint.LeftLowerArm : BasisMocapJoint.RightLowerArm;
             BasisMocapJoint jH = isLeft ? BasisMocapJoint.LeftHand : BasisMocapJoint.RightHand;
+            Vector3 chest = clip.Get(f, jC).Position;
             Vector3 shoulder = clip.Get(f, jS).Position;
             truthElbow = clip.Get(f, jE).Position;
             Vector3 truthHand = clip.Get(f, jH).Position;
@@ -252,6 +256,7 @@ namespace Basis.IK.Mocap
             Vector3 hipsP = clip.Get(f, BasisMocapJoint.Hips).Position, neckP = clip.Get(f, BasisMocapJoint.Neck).Position;
             BasisSwivelFrame frame = BasisSwivelHintCore.BuildFrame(lSh, rSh, hipsP, neckP);
             BasisArmSolveInput i = BasisArmSolveInput.Defaults(isLeft);
+            i.Chest = chest;
             i.Shoulder = shoulder;
             i.RestElbow = elbow;
             i.RestHand = hand;
@@ -275,7 +280,7 @@ namespace Basis.IK.Mocap
             i.Dt = dt;
             if (hint == BasisMocapHintSource.TruthJoint)
             {
-                i.HasHint = true;
+                i.HasTrackerHint = true;
                 i.HintPosition = truthElbow;
                 i.HasHintRotation = true;
                 i.HintRotation = clip.Get(f, jE).Rotation;

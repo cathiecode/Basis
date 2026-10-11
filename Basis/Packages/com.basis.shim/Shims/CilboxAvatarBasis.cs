@@ -1,11 +1,13 @@
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using System.Collections.Generic;
 using System;
 
 namespace Cilbox
 {
+	[AutoStaticsCleanup]
 	[CilboxTarget]
-	public class CilboxAvatarBasis : CilboxBasisCommon
+	public partial class CilboxAvatarBasis : CilboxBasisCommon
 	{
 
 		static readonly HashSet<string> extraWhiteListType = new HashSet<string>(){
@@ -29,6 +31,10 @@ namespace Cilbox
 			// SkinnedMeshRenderer it holds — only the per-call reflection overhead changes.
 			"Basis.Shims.BasisTransformSyncShim",
 			"Basis.Shims.BasisBlendShapeSyncShim",
+			"Basis.Shims.BasisTransformBatchShim",
+			"Basis.Shims.BasisVectorArrayShim",
+			"Basis.Shims.BasisSphereCastShim",
+			"Basis.Shims.BasisBinaryShim",
 
 			// HVR Vixxy
 			"HVR.Vixxy.HVRVixxyMenuItem", // Restrictive, see method whitelist.
@@ -124,7 +130,7 @@ namespace Cilbox
 		protected override HashSet<string> ExtraWhiteListFields => extraWhiteListFields;
 		protected override Dictionary<Type, HashSet<string>> ExtraMethodWhitelist => extraMethodWhitelist;
 
-		static readonly HashSet<string> mergedWhiteListType = MergeTypes(extraWhiteListType);
+		[NoAutoStaticsCleanup] static readonly HashSet<string> mergedWhiteListType = MergeTypes(extraWhiteListType);
 		public static HashSet<string> GetWhiteListTypes() => mergedWhiteListType;
 
 		protected override bool ExtraGetTypeOverride(string sType, out Type t)

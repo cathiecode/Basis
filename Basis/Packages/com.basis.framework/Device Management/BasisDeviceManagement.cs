@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using Basis.BasisUI;
 using Basis.Scripts.Avatar;
 using Basis.Scripts.BasisSdk.Helpers;
@@ -34,8 +35,9 @@ namespace Basis.Scripts.Device_Management
     /// This MonoBehaviour is intended to exist exactly once in a scene. Use <see cref="Instance"/> for access.
     /// It initializes players, loads settings/bindings, restores previously connected devices, and manages XR lifecycle.
     /// </remarks>
+    [AutoStaticsCleanup]
     [DefaultExecutionOrder(-1000)]
-    public class BasisDeviceManagement : MonoBehaviour
+    public partial class BasisDeviceManagement : MonoBehaviour
     {
         /// <summary>
         /// Guard flag to prevent duplicate event subscriptions.
@@ -247,6 +249,7 @@ namespace Basis.Scripts.Device_Management
             {
                 Instance = this;
             }
+            await Basis.Scripts.Platform.BasisWebAddressables.WhenReady();
 
             // Detect Wine/Proton once up front so any subsystem can branch on it.
             BasisProtonDetection.Initialize();
@@ -1034,6 +1037,10 @@ namespace Basis.Scripts.Device_Management
 #if UNITY_SERVER
             return BasisConstants.Headless;
 #else
+            if (Application.platform == RuntimePlatform.WebGLPlayer)
+            {
+                return BasisConstants.Desktop;
+            }
             if (Application.isMobilePlatform) // try to boot vr first on standalone devices.
             {
                 // iOS devices (iPhones/iPads) should use Desktop mode for touch controls

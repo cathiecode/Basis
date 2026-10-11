@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -7,7 +8,8 @@ using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
 
-public static class BasisOpenLipSyncDriver
+[AutoStaticsCleanup]
+public static partial class BasisOpenLipSyncDriver
 {
     /// <summary>
     /// When true, <see cref="MaxSlots"/> is enforced as a hard cap.
@@ -25,7 +27,7 @@ public static class BasisOpenLipSyncDriver
     public const string ModelAddress = "Packages/com.basisvr.openlipsync/OpenLipSync/model.onnx.bytes";
     public const string ConfigAddress = "Packages/com.basisvr.openlipsync/OpenLipSync/config.json";
 
-    private static OpenLipSyncBackend _backend;
+    [NoAutoStaticsCleanup] private static OpenLipSyncBackend _backend;
     private static readonly Dictionary<EntityId, uint> _playerToContext = new Dictionary<EntityId, uint>();
     private static readonly Dictionary<EntityId, Action> _slotRevokedCallbacks = new Dictionary<EntityId, Action>();
     private static readonly Stack<uint> _contextPool = new Stack<uint>();
@@ -38,7 +40,7 @@ public static class BasisOpenLipSyncDriver
     public static AsyncOperationHandle<TextAsset> configAsset;
     public static void BeginInitialize()
     {
-        if (_initialized || modelAsset.IsValid()) return;
+        if (_initialized || modelAsset.IsValid() || Application.platform == RuntimePlatform.WebGLPlayer) return;
 
         modelAsset = Addressables.LoadAssetAsync<TextAsset>(ModelAddress);
         configAsset = Addressables.LoadAssetAsync<TextAsset>(ConfigAddress);
@@ -46,7 +48,7 @@ public static class BasisOpenLipSyncDriver
 
     public static void EndInitialize()
     {
-        if (_initialized) return;
+        if (_initialized || Application.platform == RuntimePlatform.WebGLPlayer) return;
 
         try
         {

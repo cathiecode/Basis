@@ -473,7 +473,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "اسأل في كل بناء" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "دائمًا IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "دائمًا Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "يتذكّر إجابة IL2CPP/Mono لبنيات Windows وmacOS حتى لا تُسأل في كل مرة. المنصّات المفروضة غير متأثرة: Android وiOS يستخدمان دائمًا IL2CPP، وLinux يستخدم دائمًا Mono. اختيار خلفية في مطالبة البناء يحدّث هذا الإعداد أيضًا." },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "دائمًا CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "يتذكّر إجابة IL2CPP/Mono/CoreCLR لبنيات Windows وmacOS حتى لا تُسأل في كل مرة. المنصّات المفروضة غير متأثرة: Android وiOS يستخدمان دائمًا IL2CPP، وLinux يستخدم دائمًا CoreCLR (ARM64: IL2CPP). اختيار خلفية في مطالبة البناء يحدّث هذا الإعداد أيضًا." },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "النظام الأساسي والجودة" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +877,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "يرث الصنف مكوّن شبكة. الوسيط الذي يحلّ محلّه ليس منه، فلن تُطلَق تلك التجاوزات — أرفق وسيط الشبكة بدلاً من ذلك." },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "يعرّف رسائل Unity لا يمرّرها الوسيط، فلن تعمل أبدًا: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "يُعيد IEnumerator، لكن بيئة العزل بلا كوروتينات: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "يعرّف OnEnable. أول واحد يضيع، لذا ضع التهيئة لمرة واحدة في Start." }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "يعرّف OnEnable. أول واحد يضيع، لذا ضع التهيئة لمرة واحدة في Start." },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "فتح صفحة ويب" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "يطلب من اللاعب فتح صفحة في متصفحه. يرى اللاعب العنوان دائمًا ويقرر بنفسه؛ لا يعمل إلا مباشرة بعد أن يستخدم اللاعب هذا العالم أو المجسم، ولا يعمل أبدًا من أفاتار، ويخبرك رد النداء ما إذا فُتحت الصفحة. يمر Application.OpenURL بالسؤال نفسه." }
   ]
 }

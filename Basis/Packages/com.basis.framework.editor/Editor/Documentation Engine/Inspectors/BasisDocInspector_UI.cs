@@ -6,6 +6,7 @@
 // in-place; navigation is tracked via a breadcrumb stack so snippets and live
 // values follow the chain (e.g. BasisLocalPlayer.Instance.LocalAvatarDriver.X).
 
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -18,6 +19,7 @@ using UnityEngine.UIElements;
 
 [CanEditMultipleObjects]
 [CustomEditor(typeof(MonoBehaviour), true, isFallback = true)]
+[NoAutoStaticsCleanup]
 public class BasisDocInspector_UI : Editor
 {
     private const string DbAssetPath = "Packages/com.basis.framework.editor/Editor/Documentation Engine/BasisDocDB.asset";
@@ -1484,7 +1486,7 @@ public class BasisDocInspector_UI : Editor
     {
         var a = t.Assembly;
         yield return a;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        foreach (var asm in UnityEngine.Assemblies.CurrentAssemblies.GetLoadedAssemblies())
         {
             if (asm == a) continue;
             var n = asm.GetName().Name ?? "";

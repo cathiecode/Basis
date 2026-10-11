@@ -148,6 +148,49 @@ public partial class BasisHandHeldCameraUI
         UpdateResolutionSprites();
         SetCapture360State(HHC != null && HHC.capture360Enabled);
         RefreshAllToggleIndicators();
+        BindLocalizedLabels(HHC.transform);
+    }
+
+    private readonly List<(TMP_Text label, string key, bool upper, string prefix)> localizedLabels = new List<(TMP_Text, string, bool, string)>();
+
+    private void BindLocalizedLabels(Transform root)
+    {
+        localizedLabels.Clear();
+        foreach (TMP_Text label in root.GetComponentsInChildren<TMP_Text>(true))
+        {
+            string text = label.text ?? string.Empty;
+            string trimmed = text.Trim();
+            string key = trimmed switch
+            {
+                "Capture Photo" => "camera.ui.capturePhoto",
+                "Camera Settings" => "menu.provider.cameraSettings",
+                "FOCUS DISTANCE" => "camera.focusDistance",
+                "APERTURE" => "camera.aperture",
+                "FOV" => "camera.ui.fov",
+                _ => null
+            };
+            if (key == null) continue;
+            localizedLabels.Add((label, key, trimmed == trimmed.ToUpperInvariant(), text.Substring(0, text.Length - text.TrimStart().Length)));
+        }
+        ApplyLocalizedLabels();
+        BasisLocalization.OnLanguageChanged -= ApplyLocalizedLabels;
+        BasisLocalization.OnLanguageChanged += ApplyLocalizedLabels;
+    }
+
+    private void ApplyLocalizedLabels()
+    {
+        foreach ((TMP_Text label, string key, bool upper, string prefix) in localizedLabels)
+        {
+            if (label == null) continue;
+            string value = BasisLocalization.Get(key);
+            label.text = prefix + (upper ? value.ToUpperInvariant() : value);
+        }
+    }
+
+    public void ReleaseLocalizedLabels()
+    {
+        BasisLocalization.OnLanguageChanged -= ApplyLocalizedLabels;
+        localizedLabels.Clear();
     }
 
     private void CachePostProcessingReferences()
@@ -646,7 +689,7 @@ public partial class BasisHandHeldCameraUI
         {
             string json = JsonUtility.ToJson(settingsToSave, true);
             string path = Path.Combine(Application.persistentDataPath, CameraSettingsJson);
-            await File.WriteAllTextAsync(path, json);
+            await BasisFiles.WriteAllTextAsync(path, json);
         }
         catch (Exception ex)
         {
@@ -895,7 +938,7 @@ public partial class BasisHandHeldCameraUI
         }
 #endif
 
-#if BASIS_HAS_GI && !UNITY_ANDROID
+#if BASIS_HAS_GI && !UNITY_ANDROID && !UNITY_WEBGL
         if (HHC != null)
         {
             settings.overrideGlobalIllumination = HHC.OverrideGlobalIllumination;
@@ -927,7 +970,7 @@ public partial class BasisHandHeldCameraUI
         }
 #endif
 
-#if BASIS_HAS_RTAO && !UNITY_ANDROID
+#if BASIS_HAS_RTAO && !UNITY_ANDROID && !UNITY_WEBGL
         if (HHC != null)
         {
             settings.overrideRTAO = HHC.OverrideRTAO;
@@ -960,7 +1003,7 @@ public partial class BasisHandHeldCameraUI
             var defaultSettings = new CameraSettings();
             string json = JsonUtility.ToJson(defaultSettings, true);
             string path = Path.Combine(Application.persistentDataPath, CameraSettingsJson);
-            await File.WriteAllTextAsync(path, json);
+            await BasisFiles.WriteAllTextAsync(path, json);
             BasisDebug.Log("Default camera settings saved.");
         }
         catch (Exception ex)
@@ -995,7 +1038,7 @@ public partial class BasisHandHeldCameraUI
 
         try
         {
-            string json = await File.ReadAllTextAsync(path);
+            string json = await BasisFiles.ReadAllTextAsync(path);
             var loaded = JsonUtility.FromJson<CameraSettings>(json);
             UpgradeLegacyFollow(loaded, json);
             MigrateSettings(loaded);
@@ -1435,7 +1478,7 @@ public partial class BasisHandHeldCameraUI
         }
 #endif
 
-#if BASIS_HAS_GI && !UNITY_ANDROID
+#if BASIS_HAS_GI && !UNITY_ANDROID && !UNITY_WEBGL
         HHC.SetGlobalIlluminationOverrideMode(settings.giMode);
         HHC.SetGlobalIlluminationOverrideSkinnedMeshes(settings.giSkinnedMeshes);
         HHC.SetGlobalIlluminationOverrideLayers(settings.giLayers);
@@ -1466,7 +1509,7 @@ public partial class BasisHandHeldCameraUI
         HHC.SetOverrideGlobalIllumination(settings.overrideGlobalIllumination);
 #endif
 
-#if BASIS_HAS_RTAO && !UNITY_ANDROID
+#if BASIS_HAS_RTAO && !UNITY_ANDROID && !UNITY_WEBGL
         HHC.SetRTAOOverrideMode(settings.rtaoMode);
         HHC.SetRTAOOverrideIntensity(settings.rtaoIntensity);
         HHC.SetRTAOOverrideRadius(settings.rtaoRadius);

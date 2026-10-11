@@ -1,4 +1,5 @@
-﻿using Basis.BasisUI;
+﻿using Unity.Scripting.LifecycleManagement;
+using Basis.BasisUI;
 using Basis.Network.Core;
 using Basis.Scripts.Avatar;
 using Basis.Scripts.BasisCharacterController;
@@ -21,7 +22,8 @@ namespace Basis.Scripts.Networking
     /// <summary>
     /// Connection/session management, server runner, time utilities, and send helpers.
     /// </summary>
-    public static class BasisNetworkConnection
+    [AutoStaticsCleanup]
+    public static partial class BasisNetworkConnection
     {
         public static NetPeer LocalPlayerPeer { get; set; }
         public static NetworkClient NetworkClient { get; set; } = new NetworkClient();
@@ -54,7 +56,13 @@ namespace Basis.Scripts.Networking
             string uuid = identity?.Uuid ?? string.Empty;
             string companyName = Application.companyName, productName = Application.productName;
 
-            BasisTransportConfigStore.Get<LNLTransportConfig>(BasisNetworkStackRegistry.LiteNetLibId).UseNativeSockets = false;
+            bool runsInBrowser = Application.platform == RuntimePlatform.WebGLPlayer;
+            if (isHostMode && runsInBrowser)
+            {
+                BasisDebug.LogError("A web build cannot host a server; connect to one instead.", BasisDebug.LogTag.Networking);
+                HandleDisconnection(null, new DisconnectInfo { Reason = DisconnectReason.ConnectionFailed });
+                return;
+            }
 
             if (isHostMode)
             {
@@ -124,7 +132,7 @@ namespace Basis.Scripts.Networking
 
             BasisDebug.Log("Network Starting Client");
 
-            _ = Task.Run(() =>
+            void StartClient()
             {
                 try
                 {
@@ -144,7 +152,7 @@ namespace Basis.Scripts.Networking
                         UseAuth = true,
                         Password = primitivePassword,
                         EnableStatistics = BasisSettingsDefaults.EnableStatistics.RawValue,
-                        NetworkStackId = networkStackId ?? string.Empty,
+                        NetworkStackId = BasisNetworkStackRegistry.ParseStackList(networkStackId)[0],
                     };
                     // Pass the token into anything that supports cancellation
                     LocalPlayerPeer = NetworkClient.StartClient(
@@ -180,7 +188,16 @@ namespace Basis.Scripts.Networking
                         Reason = DisconnectReason.UnknownHost
                     });
                 }
-            });
+            }
+
+            if (runsInBrowser)
+            {
+                StartClient();
+            }
+            else
+            {
+                _ = Task.Run(StartClient);
+            }
         }
         public static void OnDestroy()
         {

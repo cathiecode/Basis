@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -15,6 +16,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+[NoAutoStaticsCleanup]
 public static class BasisBundleBuild
 {
     public static event Func<BasisContentBase, List<BuildTarget>, Task> PreBuildBundleEvents;
@@ -170,8 +172,7 @@ public static class BasisBundleBuild
     }
     public static bool CheckTarget(BuildTarget target)
     {
-        bool isSupported = BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Standalone, target) ||
-                           BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, target);
+        bool isSupported = BuildPipeline.IsBuildTargetSupported(BuildPipeline.GetBuildTargetGroup(target), target);
 
         Debug.Log($"{target.ToString()} Build Target Installed: {isSupported}");
         return isSupported;
@@ -524,6 +525,10 @@ public static class BasisBundleBuild
             if (!ErrorChecking(basisContentBase, out string error))
             {
                 return (false, error);
+            }
+            if (useProvidedPassword && string.IsNullOrEmpty(OverriddenPassword))
+            {
+                return (false, "Custom password is enabled but empty! Please enter a password or turn the custom password off.");
             }
 
             AdjustBuildTargetOrder(targets);
@@ -939,7 +944,7 @@ public static class BasisBundleBuild
     {
         Debug.Log($"Generating {length} random bytes...");
         byte[] randomBytes = new byte[length];
-        using (var rng = new RNGCryptoServiceProvider())
+        using (var rng = RandomNumberGenerator.Create())
         {
             rng.GetBytes(randomBytes);
         }

@@ -473,7 +473,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "ہر بلڈ پر پوچھیں" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "ہمیشہ IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "ہمیشہ Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Windows اور macOS بلڈز کے لیے IL2CPP/Mono جواب یاد رکھتا ہے تاکہ آپ سے ہر بار نہ پوچھا جائے۔ جبری پلیٹ فارمز متاثر نہیں ہوتے: Android اور iOS ہمیشہ IL2CPP استعمال کرتے ہیں، Linux ہمیشہ Mono استعمال کرتا ہے۔ بلڈ پرامپٹ میں کوئی بیک اینڈ منتخب کرنا بھی اس ترتیب کو اپ ڈیٹ کرتا ہے۔" },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "ہمیشہ CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Windows اور macOS بلڈز کے لیے IL2CPP/Mono/CoreCLR جواب یاد رکھتا ہے تاکہ آپ سے ہر بار نہ پوچھا جائے۔ جبری پلیٹ فارمز متاثر نہیں ہوتے: Android اور iOS ہمیشہ IL2CPP استعمال کرتے ہیں، Linux ہمیشہ CoreCLR (ARM64: IL2CPP) استعمال کرتا ہے۔ بلڈ پرامپٹ میں کوئی بیک اینڈ منتخب کرنا بھی اس ترتیب کو اپ ڈیٹ کرتا ہے۔" },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "پلیٹ فارم اور کوالٹی" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +877,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "کلاس نیٹ ورک behaviour سے وراثت لیتی ہے۔ اس کی جگہ لینے والی پراکسی وہ نہیں، اس لیے وہ اوور رائیڈ کبھی نہیں چلتے — نیٹ ورک shim لگائیں۔" },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "ایسے Unity پیغامات بیان کیے گئے ہیں جو پراکسی کبھی آگے نہیں بھیجتی، اس لیے وہ کبھی نہیں چلیں گے: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "IEnumerator واپس کرتا ہے، مگر سینڈباکس میں کوروٹین نہیں: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "OnEnable بیان کیا گیا ہے۔ پہلا ضائع ہو جاتا ہے، اس لیے ایک بار کی تیاری Start میں رکھیں۔" }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "OnEnable بیان کیا گیا ہے۔ پہلا ضائع ہو جاتا ہے، اس لیے ایک بار کی تیاری Start میں رکھیں۔" },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "ویب صفحہ کھولنا" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "کھلاڑی سے اس کے براؤزر میں ایک صفحہ کھولنے کو کہتا ہے۔ کھلاڑی کو ہمیشہ پتہ نظر آتا ہے اور وہی فیصلہ کرتا ہے؛ یہ صرف اسی وقت کام کرتا ہے جب اس نے ابھی یہ دنیا یا پراپ استعمال کیا ہو، اوتار سے کبھی نہیں، اور کال بیک بتاتا ہے کہ صفحہ کھلا یا نہیں۔ Application.OpenURL بھی اسی سوال سے گزرتا ہے۔" }
   ]
 }

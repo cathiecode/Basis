@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using Basis.BasisUI;
 using Basis.Network.Core;
 using Basis.Scripts.BasisSdk.Players;
@@ -11,9 +12,9 @@ using K4os.Compression.LZ4;
 using System;
 using System.Buffers;
 using static SerializableBasis;
-public static class BasisNetworkEvents
+public static partial class BasisNetworkEvents
 {
-    private static bool _coreHandlersRegistered;
+    [NoAutoStaticsCleanup] private static bool _coreHandlersRegistered;
 
     static BasisNetworkEvents()
     {
@@ -785,7 +786,7 @@ public static class BasisNetworkEvents
             }
         });
     }
-    public static Action<BasisNetworkStatistics.Snapshot> Snapshotdata;
+    [AutoStaticsCleanup] public static Action<BasisNetworkStatistics.Snapshot> Snapshotdata;
     public static void IncomingData(NetPacketReader Reader)
     {
         BasisNetworkStatistics.Snapshot Snapshot = BasisNetworkStatistics.Snapshot.Decode(Reader.GetRemainingBytesSegment(), true);
@@ -796,7 +797,7 @@ public static class BasisNetworkEvents
     }
     // Reused across both stat-frame calls: RequestStatFrames fires on a 0.1s timer while the
     // stats view is open, so a fresh writer per call was garbage every tick for one bool.
-    private static readonly NetDataWriter StatFrameWriter = new NetDataWriter();
+    [NoAutoStaticsCleanup] private static readonly NetDataWriter StatFrameWriter = new NetDataWriter();
 
     public static void RequestStatFrames()
     {
@@ -851,7 +852,7 @@ public static class BasisNetworkEvents
     // decodes on it) — keeps the per-join NetDataReader allocation out of GC.
     // Library messages arrive sequentially on that one thread, so a single
     // instance is enough.
-    private static NetDataReader _libraryPayloadReader;
+    [AutoStaticsCleanup] private static NetDataReader _libraryPayloadReader;
 
     private static bool TryDecodeServerLibrary(NetPacketReader reader, out ServerLibraryMessage libraryMessage)
     {

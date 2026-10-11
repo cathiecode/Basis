@@ -6,5 +6,8 @@ public enum BasisShareableKind
     Avatar,
     Image,
     DollyTrack,
+    Link,
+    Text,
+    Folder,
     Other
 }

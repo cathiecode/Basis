@@ -473,7 +473,8 @@
     { "key": "projectSetup.buildModules.scriptingBackendAsk", "value": "Preguntar en cada compilación" },
     { "key": "projectSetup.buildModules.scriptingBackendIl2cpp", "value": "Siempre IL2CPP" },
     { "key": "projectSetup.buildModules.scriptingBackendMono", "value": "Siempre Mono" },
-    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Recuerda la respuesta IL2CPP/Mono para las compilaciones de Windows y macOS para que no se te pregunte cada vez. Las plataformas forzadas no se ven afectadas: Android e iOS siempre usan IL2CPP, Linux siempre usa Mono. Elegir un backend en el aviso de compilación también actualiza este ajuste." },
+    { "key": "projectSetup.buildModules.scriptingBackendCoreClr", "value": "Siempre CoreCLR" },
+    { "key": "projectSetup.buildModules.scriptingBackendHelp", "value": "Recuerda la respuesta IL2CPP/Mono/CoreCLR para las compilaciones de Windows y macOS para que no se te pregunte cada vez. Las plataformas forzadas no se ven afectadas: Android e iOS siempre usan IL2CPP, Linux siempre usa CoreCLR (ARM64: IL2CPP). Elegir un backend en el aviso de compilación también actualiza este ajuste." },
 
     { "key": "projectSetup.platformQuality.foldout", "value": "Plataforma y calidad" },
     { "key": "projectSetup.platformQuality.windows", "value": "Windows" },
@@ -876,6 +877,8 @@
     { "key": "sdk.cilbox.scan.issue.networkBehaviour", "value": "La clase hereda de un behaviour de red. El proxy que la sustituye no lo es, así que esos overrides nunca se disparan: adjunta el shim de red." },
     { "key": "sdk.cilbox.scan.issue.unforwarded", "value": "Define mensajes de Unity que el proxy nunca reenvía, así que no se ejecutarán: {0}" },
     { "key": "sdk.cilbox.scan.issue.coroutine", "value": "Devuelve IEnumerator, pero el entorno no tiene corrutinas: {0}" },
-    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Define OnEnable. El primero se pierde, así que la inicialización única va en Start." }
+    { "key": "sdk.cilbox.scan.issue.onEnable", "value": "Define OnEnable. El primero se pierde, así que la inicialización única va en Start." },
+    { "key": "sdk.cilbox.api.externalLink.title", "value": "Abrir una página web" },
+    { "key": "sdk.cilbox.api.externalLink.summary", "value": "Pide al jugador que abra una página en su navegador. El jugador siempre ve la dirección y decide; solo funciona justo después de que haya usado este mundo o prop, nunca desde un avatar, y el callback indica si se abrió. Application.OpenURL pasa por la misma pregunta." }
   ]
 }

@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -149,7 +150,7 @@ public static class BasisContentPolicePreflight
 
     static ContentPoliceSelector ResolveSelector(BundledContentHolder.Selector selector)
     {
-        BundledContentHolder holder = UnityEngine.Object.FindFirstObjectByType<BundledContentHolder>(
+        BundledContentHolder holder = UnityEngine.Object.FindAnyObjectByType<BundledContentHolder>(
             FindObjectsInactive.Include);
         if (holder == null || !holder.GetSelector(selector, out ContentPoliceSelector police))
         {
@@ -179,6 +180,7 @@ public static class BasisContentPolicePreflight
 /// The type names the load-time pass rewrites rather than removes. Kept as strings here so the
 /// editor check needs no reference to the Animation Rigging package to know what it is looking at.
 /// </summary>
+[NoAutoStaticsCleanup]
 public static class BasisConstraintConversionNames
 {
     static readonly HashSet<string> Converted = new HashSet<string>
@@ -216,6 +218,7 @@ public static class BasisConstraintConversionNames
 /// load-time pass and must not be reported against it. Resolved by name for the same reason the
 /// constraint list is: this assembly does not reference the cilbox package, which is optional.
 /// </summary>
+[NoAutoStaticsCleanup]
 public static class BasisCilboxTypeCheck
 {
     static readonly Dictionary<Type, bool> Cache = new Dictionary<Type, bool>();
@@ -264,8 +267,8 @@ public static class BasisCilboxTypeCheck
         AttributeType = Type.GetType("CilboxableAttribute, Cilbox");
         if (AttributeType == null)
         {
-            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            for (int Index = 0; Index < assemblies.Length; Index++)
+            IReadOnlyList<Assembly> assemblies = UnityEngine.Assemblies.CurrentAssemblies.GetLoadedAssemblies();
+            for (int Index = 0; Index < assemblies.Count; Index++)
             {
                 AttributeType = assemblies[Index].GetType("CilboxableAttribute", false);
                 if (AttributeType != null)

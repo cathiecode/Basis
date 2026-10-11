@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using Basis.BasisUI;
 using Basis.Scripts.BasisSdk.Players;
 using Basis.Scripts.Common;
@@ -6,7 +7,6 @@ using Basis.Scripts.Drivers;
 using Basis.Network.Core;
 using System;
 using System.Net;
-using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -20,7 +20,8 @@ namespace Basis.Scripts.Networking
     /// custom-UI application can connect without the Servers panel package present.
     /// The Servers panel (com.basis.provider.servers) is a thin UI on top of this.
     /// </summary>
-    public static class BasisConnectionService
+    [AutoStaticsCleanup]
+    public static partial class BasisConnectionService
     {
         public const string UsernameFileName = "CachedUserName.BAS";
         public const string LastConnectedServerIdFile = "LastConnectedServerId.BAS";
@@ -143,7 +144,7 @@ namespace Basis.Scripts.Networking
                 string address = entry.Target?.Get(ConnectionTarget.Keys.Address) ?? string.Empty;
                 string portString = entry.Target?.Get(ConnectionTarget.Keys.Port) ?? string.Empty;
                 ushort port;
-                if (!ushort.TryParse(portString, out port)) port = LNLConnectionTargetParser.DefaultPort;
+                if (!ushort.TryParse(portString, out port)) port = HostPortConnectionTargetParser.DefaultPort;
                 string stackId = entry.Target?.StackId ?? BasisNetworkStackRegistry.DefaultId;
 
                 BasisNetworkManagement.Port = port;
@@ -157,7 +158,10 @@ namespace Basis.Scripts.Networking
                 // Probe the server while the bundle loads to discover which address family
                 // is actually reachable. Skipped in host-mode: the local server may not be
                 // listening yet. Non-fatal: if the probe fails we fall back to the hostname.
-                Task<string> resolveTask = isHostMode
+                bool skipResolve = isHostMode
+                    || Application.platform == RuntimePlatform.WebGLPlayer
+                    || !string.Equals(stackId, BasisNetworkStackRegistry.LiteNetLibId, StringComparison.OrdinalIgnoreCase);
+                Task<string> resolveTask = skipResolve
                     ? Task.FromResult(address)
                     : ResolveConnectionAddressAsync(entry.Target, address);
                 await LoadDefaultAssetBundleAsync();
@@ -263,9 +267,10 @@ namespace Basis.Scripts.Networking
                 if (BasisNetworkConnection.LocalPlayerIsConnected) return;
 
                 string userName = BasisDataStore.LoadString(UsernameFileName, string.Empty);
+                if (string.IsNullOrWhiteSpace(userName) && TryGetPageParameter(PageNameParameter, out string pageName)) userName = pageName;
                 if (string.IsNullOrWhiteSpace(userName))
                 {
-                    ReportConnectionError("Set a username before joining a server.");
+                    ReportConnectionError(BasisLocalization.Get("menu.servers.deepLink.usernameRequired.body"));
                     return;
                 }
 
@@ -281,6 +286,7 @@ namespace Basis.Scripts.Networking
             bool hostReconnect = BasisAppRelaunch.ConsumeHostReconnectRequested();
             isHostMode = false;
 
+            if (TryGetPageConnection(out entry)) return true;
             if (TryGetCommandLineConnection(out entry))
             {
                 isHostMode = hostReconnect;
@@ -326,16 +332,12 @@ namespace Basis.Scripts.Networking
         private static bool BuildEntryFromConnectionString(string value, out ServerDirectoryEntry entry)
         {
             entry = null;
-            if (!LNLConnectionTargetParser.TryParseConnectionString(value, out string addr, out ushort port, out _, out string password))
-                return false;
-
-            bool isIPv6 = IPAddress.TryParse(addr, out IPAddress parsedAddr)
-                && parsedAddr.AddressFamily == AddressFamily.InterNetworkV6;
-            string raw = isIPv6 ? $"[{addr}]:{port}" : $"{addr}:{port}";
-            ConnectionTarget target = new ConnectionTarget(BasisNetworkStackRegistry.DefaultId, raw);
-            target.Set(ConnectionTarget.Keys.Address, addr);
-            target.Set(ConnectionTarget.Keys.Port, port.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            target.Set(ConnectionTarget.Keys.Password, password ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            ConnectionTarget target = BasisNetworkStackRegistry.ParseAddress(value);
+            if (string.IsNullOrWhiteSpace(target.Get(ConnectionTarget.Keys.Address))) return false;
+            int hash = value.IndexOf('#');
+            target.Raw = hash >= 0 ? value.Substring(0, hash) : value;
+            string password = target.Get(ConnectionTarget.Keys.Password, string.Empty);
 
             entry = new ServerDirectoryEntry
             {
@@ -344,11 +346,46 @@ namespace Basis.Scripts.Networking
                 DisplayName = string.Empty,
                 Target = target,
                 HasPassword = !string.IsNullOrEmpty(password),
-                Password = password ?? string.Empty,
+                Password = password,
                 CanEdit = false,
                 CanRemove = false,
             };
             return true;
+        }
+
+        private const string PageConnectionParameter = "connection";
+        private const string PagePasswordParameter = "password";
+        private const string PageNameParameter = "name";
+
+        private static bool TryGetPageConnection(out ServerDirectoryEntry entry)
+        {
+            entry = null;
+            if (!TryGetPageParameter(PageConnectionParameter, out string value)) return false;
+            if (value.IndexOf('#') < 0 && TryGetPageParameter(PagePasswordParameter, out string pagePassword)) value += "#" + pagePassword;
+            if (BuildEntryFromConnectionString(value, out entry)) return true;
+            BasisDebug.LogWarning($"connection page parameter could not be parsed: {value}");
+            return false;
+        }
+
+        private static bool TryGetPageParameter(string name, out string value)
+        {
+            value = null;
+            if (Application.platform != RuntimePlatform.WebGLPlayer) return false;
+            string url = Application.absoluteURL;
+            int start = string.IsNullOrEmpty(url) ? -1 : url.IndexOf('?');
+            if (start < 0) return false;
+            int end = url.IndexOf('#', start);
+            string query = end < 0 ? url.Substring(start + 1) : url.Substring(start + 1, end - start - 1);
+            foreach (string pair in query.Split('&'))
+            {
+                int equals = pair.IndexOf('=');
+                if (equals <= 0 || !string.Equals(pair.Substring(0, equals), name, StringComparison.OrdinalIgnoreCase)) continue;
+                string raw = pair.Substring(equals + 1).Replace('+', ' ');
+                try { value = Uri.UnescapeDataString(raw); }
+                catch (UriFormatException) { value = raw; }
+                return !string.IsNullOrWhiteSpace(value);
+            }
+            return false;
         }
     }
 }

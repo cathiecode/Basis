@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Unity.Scripting.LifecycleManagement;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Basis.Scripts.BasisCharacterController;
@@ -18,6 +19,7 @@ using P2PState = Basis.Scripts.Networking.BasisP2PManager.P2PSessionState;
 
 namespace Basis.BasisUI
 {
+    [AutoStaticsCleanup]
     public partial class IndividualPlayerProvider : BasisMenuActionProvider<BasisMainMenu>
     {
         [RuntimeInitializeOnLoadMethod]
@@ -232,6 +234,7 @@ namespace Basis.BasisUI
             s_beaconElapsed = 0f;
 
             s_beaconGO = new GameObject("PlayerHighlightBeacon");
+            s_beaconGO.layer = LayerMask.NameToLayer("UI");
             if (BasisDeviceManagement.Instance != null)
             {
                 s_beaconGO.transform.SetParent(BasisDeviceManagement.Instance.transform, true);
@@ -275,7 +278,7 @@ namespace Basis.BasisUI
         // ========= Addressables Sprite (cached) =========
         private const string MeterSpriteAddress = "Packages/com.basis.sdk/Sprites/HalfCircle 512 Right.png";
         private static Sprite s_meterSprite;
-        private static Task<Sprite> s_meterSpriteTask;
+        [NoAutoStaticsCleanup] private static Task<Sprite> s_meterSpriteTask;
 
         private static Task<Sprite> GetMeterSpriteAsync()
         {
@@ -904,6 +907,12 @@ namespace Basis.BasisUI
             };
 
             AddPage(audioTabKey, audioPage);
+
+            const string chatTabKey = "settings.tab.chat";
+            PanelTabPage chatPage = NewPage(chatTabKey, AddressableAssets.Sprites.Clock);
+            ChatHistoryView chatHistoryView = BuildChatHistory(chatPage.Descriptor.ContentParent);
+            PaintChatHistory(remotePlayer, chatHistoryView);
+            AddPage(chatTabKey, chatPage);
 
             // ================= Network =================
             const string networkTabKey = "menu.individualPlayer.network";
@@ -1908,6 +1917,7 @@ namespace Basis.BasisUI
             updater.DirectConnRebuildStopAt = networkPage.Descriptor.ContentParent;
             updater.AvatarStatusField = avatarStatusField;
             updater.AvatarStatusTint = avatarStatusTint;
+            updater.ChatHistoryView = chatHistoryView;
 
             // Wire audio debug fields
             updater.AudioSourceField = audioSourceField;

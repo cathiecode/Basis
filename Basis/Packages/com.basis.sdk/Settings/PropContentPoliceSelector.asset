@@ -342,3 +342,4 @@ MonoBehaviour:
   - BasisPlatformSwitch
   - Basis.Shims.BasisPlatformEventShim
   - com.superneko.basis.desktopcast.DesktopCastDisplay
+  - Basis.Scripts.BasisSdk.Interactions.BasisExternalLinkInteractable

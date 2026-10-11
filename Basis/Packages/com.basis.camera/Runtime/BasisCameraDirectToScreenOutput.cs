@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -22,8 +23,9 @@ using UnityEngine.Rendering.Universal;
 /// an output taking it over stops whichever had it.
 /// </para>
 /// </summary>
+[AutoStaticsCleanup]
 [DisallowMultipleComponent]
-public sealed class BasisCameraDirectToScreenOutput : MonoBehaviour
+public sealed partial class BasisCameraDirectToScreenOutput : MonoBehaviour
 {
     /// <summary>
     /// After every camera that can draw to the window. URP renders the VR camera's mirror at the
@@ -92,7 +94,9 @@ public sealed class BasisCameraDirectToScreenOutput : MonoBehaviour
         screenCamera.targetDisplay = 0;
         screenCamera.targetTexture = null;
         screenCamera.allowDynamicResolution = false;
+#pragma warning disable 618
         screenCamera.useOcclusionCulling = false;
+#pragma warning restore 618
         screenCamera.orthographic = true;
         screenCamera.orthographicSize = 1f;
         screenCamera.nearClipPlane = 0.01f;

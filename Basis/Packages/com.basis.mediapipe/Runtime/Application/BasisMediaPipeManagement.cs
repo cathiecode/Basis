@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -12,12 +13,13 @@ using UnityEngine;
 
 namespace Basis.MediaPipe
 {
-    public class BasisMediaPipeManagement : BasisBaseTypeManagement
+    [AutoStaticsCleanup]
+    public partial class BasisMediaPipeManagement : BasisBaseTypeManagement
     {
         public const string SubSystem = "BasisMediaPipe";
         public const int LowLightFps = 15;
         public string CameraDeviceName = string.Empty;
-        public BasisMediaPipeConfig Config = BasisMediaPipeConfig.Default;
+        [NonSerialized] public BasisMediaPipeConfig Config = BasisMediaPipeConfig.Default;
         public static BasisMediaPipeManagement Instance;
         public event Action OnResult;
 
@@ -458,6 +460,14 @@ namespace Basis.MediaPipe
             else if (_backend == null && BasisMediaPipeSettings.Enable.RawValue)
             {
                 StartSDK();
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_backend != null)
+            {
+                StopSDK();
             }
         }
 
@@ -948,7 +958,7 @@ namespace Basis.MediaPipe
         {
             if (_backend == null)
             {
-                return "Not running.";
+                return Basis.BasisUI.BasisLocalization.Get("settings.mediapipe.diagnostics.notRunning");
             }
 
             string status = $"Backend: {_backend.BackendName}\nModels: {(_backend.IsReady ? "ready" : "loading")} (body model {Config.PoseModel})\nCamera: {_camera.State} at {_cameraFps} fps, {_camera.Restarts} restart(s)";

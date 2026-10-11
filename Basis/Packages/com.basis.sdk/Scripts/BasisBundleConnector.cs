@@ -1,10 +1,12 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
+[AutoStaticsCleanup]
 [System.Serializable]
-public class BasisBundleConnector
+public partial class BasisBundleConnector
 {
     public string UniqueVersion;
     [SerializeField]
@@ -178,7 +180,8 @@ public class BasisBundleConnector
         { Enum.GetName(typeof(BuildTarget), BuildTarget.StandaloneOSX), new HashSet<RuntimePlatform> { RuntimePlatform.OSXPlayer, RuntimePlatform.OSXEditor } },
         { Enum.GetName(typeof(BuildTarget), BuildTarget.Android), new HashSet<RuntimePlatform> { RuntimePlatform.Android } },
         { Enum.GetName(typeof(BuildTarget), BuildTarget.StandaloneLinux64), new HashSet<RuntimePlatform> { RuntimePlatform.LinuxEditor, RuntimePlatform.LinuxPlayer, RuntimePlatform.LinuxServer } },
-        { Enum.GetName(typeof(BuildTarget), BuildTarget.iOS), new HashSet<RuntimePlatform> { RuntimePlatform.IPhonePlayer } }
+        { Enum.GetName(typeof(BuildTarget), BuildTarget.iOS), new HashSet<RuntimePlatform> { RuntimePlatform.IPhonePlayer } },
+        { Enum.GetName(typeof(BuildTarget), BuildTarget.WebGL), new HashSet<RuntimePlatform> { RuntimePlatform.WebGLPlayer } }
     };
     public static string DebugOfPlatforms(BasisBundleConnector connector = null)
     {

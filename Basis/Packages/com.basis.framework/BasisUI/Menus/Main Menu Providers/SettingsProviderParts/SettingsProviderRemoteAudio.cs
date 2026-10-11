@@ -1,6 +1,9 @@
-﻿using Basis.Scripts.Networking;
+﻿using Unity.Scripting.LifecycleManagement;
+using Basis.Scripts.Networking;
 using Basis.Scripts.Networking.Receivers;
+#if STEAMAUDIO_ENABLED && !UNITY_WEBGL
 using SteamAudio;
+#endif
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -13,16 +16,21 @@ namespace Basis.BasisUI
     /// Settings tab for remote player audio configuration.
     /// Exposes AudioSource and Steam Audio settings that apply to all remote players.
     /// </summary>
-    public static class SettingsProviderRemoteAudio
+    [AutoStaticsCleanup]
+    public static partial class SettingsProviderRemoteAudio
     {
         [RuntimeInitializeOnLoadMethod]
         static void Init()
         {
             ApplyJitterBufferDepth();
             ApplyClipBufferScalar();
+            BasisSettingsSystem.OnSettingsFinishedChanges -= ApplyRemoteAudioToAll;
             BasisSettingsSystem.OnSettingsFinishedChanges += ApplyRemoteAudioToAll;
+            BasisSettingsSystem.OnSettingsFinishedChanges -= ApplyJitterBufferDepth;
             BasisSettingsSystem.OnSettingsFinishedChanges += ApplyJitterBufferDepth;
+            BasisSettingsSystem.OnSettingsFinishedChanges -= ApplyClipBufferScalar;
             BasisSettingsSystem.OnSettingsFinishedChanges += ApplyClipBufferScalar;
+            BasisSettingsSystem.OnSettingsFinishedChanges -= ApplyHrtfProfile;
             BasisSettingsSystem.OnSettingsFinishedChanges += ApplyHrtfProfile;
         }
 
@@ -364,7 +372,11 @@ namespace Basis.BasisUI
                 dropdownHrtfProfile = PanelDropdown.CreateNewEntry(container);
                 dropdownHrtfProfile.Descriptor.SetTitle(BasisLocalization.Get("settings.remoteAudio.hrtfProfile"));
                 dropdownHrtfProfile.Descriptor.SetTooltip(BasisLocalization.Get("settings.remoteAudio.hrtfProfile.tooltip"));
-                dropdownHrtfProfile.AssignEntries(GetHrtfProfileEntries());
+                List<string> hrtfProfiles = GetHrtfProfileEntries();
+                List<string> hrtfLabels = new List<string>(hrtfProfiles.Count);
+                foreach (string profile in hrtfProfiles)
+                    hrtfLabels.Add(profile == "Default" ? BasisLocalization.Get("settings.remoteAudio.hrtfProfile.default") : profile);
+                dropdownHrtfProfile.AssignEntries(hrtfProfiles, hrtfLabels);
                 dropdownHrtfProfile.AssignBinding(BasisSettingsDefaults.RAHrtfProfile);
 
                 // HRTF sub-settings only visible when Direct Binaural is enabled
@@ -859,7 +871,7 @@ namespace Basis.BasisUI
             source.spatialize = true;
             source.spatializePostEffects = true;
 
-#if STEAMAUDIO_ENABLED
+#if STEAMAUDIO_ENABLED && !UNITY_WEBGL
             // Steam Audio settings
             if (source.TryGetComponent<SteamAudioSource>(out var sa))
             {
@@ -933,7 +945,7 @@ namespace Basis.BasisUI
         /// manager singleton exists — <c>SetActiveHRTF</c> returns false — is retried rather
         /// than swallowed. Null until the first successful apply.
         /// </summary>
-#if STEAMAUDIO_ENABLED
+#if STEAMAUDIO_ENABLED && !UNITY_WEBGL
         private static string _appliedHrtfProfile;
 #endif
 
@@ -944,7 +956,7 @@ namespace Basis.BasisUI
         /// </summary>
         public static void ApplyHrtfProfile()
         {
-#if STEAMAUDIO_ENABLED
+#if STEAMAUDIO_ENABLED && !UNITY_WEBGL
             string requested = BasisSettingsDefaults.RAHrtfProfile.RawValue;
             if (_appliedHrtfProfile != null && string.Equals(_appliedHrtfProfile, requested, StringComparison.Ordinal))
             {
@@ -967,7 +979,7 @@ namespace Basis.BasisUI
 
         private static List<string> GetHrtfProfileEntries()
         {
-#if STEAMAUDIO_ENABLED
+#if STEAMAUDIO_ENABLED && !UNITY_WEBGL
             string[] names = (SteamAudioManager.Singleton != null) ? SteamAudioManager.Singleton.hrtfNames : null;
             if (names != null && names.Length > 0)
             {
@@ -997,6 +1009,7 @@ namespace Basis.BasisUI
             return AudioRolloffMode.Custom;
         }
 
+#if STEAMAUDIO_ENABLED && !UNITY_WEBGL
         private static HRTFInterpolation ParseInterpolation(string value)
         {
             if (string.Equals(value, "bilinear", StringComparison.OrdinalIgnoreCase))
@@ -1031,6 +1044,7 @@ namespace Basis.BasisUI
                 return TransmissionType.FrequencyDependent;
             return TransmissionType.FrequencyIndependent;
         }
+#endif
 
         /// <summary>
         /// Returns a custom rolloff AnimationCurve for the given preset name.

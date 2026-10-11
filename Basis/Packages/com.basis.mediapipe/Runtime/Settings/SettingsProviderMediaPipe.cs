@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System.Collections.Generic;
 using System.Linq;
 using Basis.BasisUI;
@@ -10,7 +11,8 @@ namespace Basis.MediaPipe
     /// as a section inside the framework's Tracker Settings tab via
     /// SettingsProvider.TrackerSettingsExtraBuilder.
     /// </summary>
-    public static class SettingsProviderMediaPipe
+    [AutoStaticsCleanup]
+    public static partial class SettingsProviderMediaPipe
     {
         private static readonly List<string> PoseModelIds = new List<string> { BasisMediaPipeConfig.PoseModelLite, BasisMediaPipeConfig.PoseModelFull, BasisMediaPipeConfig.PoseModelHeavy };
 
@@ -148,20 +150,20 @@ namespace Basis.MediaPipe
                 };
             }
 
-            AddToggle("Face & Eyes", "Track facial expressions, blink and gaze.", BasisMediaPipeSettings.EnableFace);
-            AddToggle("Hands & Fingers", "Track finger curl and splay.", BasisMediaPipeSettings.EnableHands);
-            AddToggle("Head Rotation", "Your avatar's head turns, nods and tilts to follow your real head. The camera stays on the mouse.", BasisMediaPipeSettings.EnableHeadRotation);
-            AddToggle("Head Position", "Your avatar's head shifts to follow your real head movement.", BasisMediaPipeSettings.EnableHeadPosition);
-            AddToggle("Arm Tracking (experimental)", "Move your avatar's arms to match your real arms, retargeted from the pose skeleton (turns on the pose model; extra CPU).", BasisMediaPipeSettings.EnableHandTracking);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.faceEyes"), BasisLocalization.Get("settings.mediapipe.faceEyes.description"), BasisMediaPipeSettings.EnableFace);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.handsFingers"), BasisLocalization.Get("settings.mediapipe.handsFingers.description"), BasisMediaPipeSettings.EnableHands);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.headRotation"), BasisLocalization.Get("settings.mediapipe.headRotation.description"), BasisMediaPipeSettings.EnableHeadRotation);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.headPosition"), BasisLocalization.Get("settings.mediapipe.headPosition.description"), BasisMediaPipeSettings.EnableHeadPosition);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.armTrackingExperimental"), BasisLocalization.Get("settings.mediapipe.armTrackingExperimental.description"), BasisMediaPipeSettings.EnableHandTracking);
             AddToggle(BasisLocalization.Get("settings.mediapipe.armElbowPoleExperimental"), BasisLocalization.Get("settings.mediapipe.armElbowPoleExperimental.description"), BasisMediaPipeSettings.EnableArmElbowPole);
             AddToggle(BasisLocalization.Get("settings.mediapipe.handRotation"), BasisLocalization.Get("settings.mediapipe.handRotation.description"), BasisMediaPipeSettings.HandRotation);
             AddToggle(BasisLocalization.Get("settings.mediapipe.rejectGlitches"), BasisLocalization.Get("settings.mediapipe.rejectGlitches.description"), BasisMediaPipeSettings.RejectGlitches);
-            AddToggle("Body Lean/Twist", "Your avatar's chest leans, twists, sways and shifts with your torso. Uses the pose model (extra CPU). Set the amount with Chest Motion below.", BasisMediaPipeSettings.EnableBody);
-            AddToggle("Mirror Camera", "Flip the camera horizontally (selfie view).", BasisMediaPipeSettings.Mirror);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.bodyLeanTwist"), BasisLocalization.Get("settings.mediapipe.bodyLeanTwist.description"), BasisMediaPipeSettings.EnableBody);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.mirrorCamera"), BasisLocalization.Get("settings.mediapipe.mirrorCamera.description"), BasisMediaPipeSettings.Mirror);
             AddToggle(BasisLocalization.Get("settings.mediapipe.lowLightBoost"), BasisLocalization.Get("settings.mediapipe.lowLightBoost.description"), BasisMediaPipeSettings.LowLightBoost);
             AddToggle(BasisLocalization.Get("settings.mediapipe.cameraFpsAuto"), BasisLocalization.Get("settings.mediapipe.cameraFpsAuto.description"), BasisMediaPipeSettings.CameraFpsAuto);
 
-            AddToggle("Swap Hands", "Fix left/right hands if they are reversed.", BasisMediaPipeSettings.SwapHands);
+            AddToggle(BasisLocalization.Get("settings.mediapipe.swapHands"), BasisLocalization.Get("settings.mediapipe.swapHands.description"), BasisMediaPipeSettings.SwapHands);
             AddToggle(BasisLocalization.Get("settings.mediapipe.invertBlink"), BasisLocalization.Get("settings.mediapipe.invertBlink.description"), BasisMediaPipeSettings.InvertBlink);
             AddToggle(BasisLocalization.Get("settings.mediapipe.invertHeadYaw"), BasisLocalization.Get("settings.mediapipe.invertHeadYaw.description"), BasisMediaPipeSettings.InvertHeadYaw);
             AddToggle(BasisLocalization.Get("settings.mediapipe.invertHeadPitch"), BasisLocalization.Get("settings.mediapipe.invertHeadPitch.description"), BasisMediaPipeSettings.InvertHeadPitch);
@@ -221,7 +223,7 @@ namespace Basis.MediaPipe
             void RefreshStatus()
             {
                 BasisMediaPipeManagement manager = BasisMediaPipeManagement.Instance;
-                statusField.SetDescription(manager != null ? manager.DiagnosticsText() : "Not started.");
+                statusField.SetDescription(manager != null ? manager.DiagnosticsText() : BasisLocalization.Get("settings.mediapipe.diagnostics.notStarted"));
             }
 
             refresh.OnClicked += RefreshStatus;

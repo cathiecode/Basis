@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using System.Collections.Generic;
 using System;
@@ -5,8 +6,9 @@ using System.Reflection;
 
 namespace Cilbox
 {
+	[AutoStaticsCleanup]
 	[CilboxTarget]
-	public class CilboxPropBasis : CilboxBasisCommon
+	public partial class CilboxPropBasis : CilboxBasisCommon
 	{
 		static readonly HashSet<string> extraWhiteListType = new HashSet<string>(){
 			// Prop-specific Basis types
@@ -176,6 +178,7 @@ namespace Cilbox
 			// block every method to keep prop scripts out of the local player's locomotion.
 			{ typeof(Basis.Shims.BasisPlayspaceInputShim), new HashSet<string>() },
 			{ typeof(Basis.Shims.BasisVixxyShim), new HashSet<string>() },
+			{ typeof(Basis.Shims.BasisDesktopInputShim), new HashSet<string>() },
 			// Jiggle grab/touch events, so a prop with jiggle can answer being handled the same way
 			// an avatar or a world object can.
 			{ typeof(Basis.Shims.BasisJiggleEventShim), new HashSet<string>{
@@ -198,6 +201,10 @@ namespace Cilbox
 				} },
 			{ typeof(Basis.Shims.BasisPlatformEventShim), new HashSet<string>{
 				nameof(Basis.Shims.BasisPlatformEventShim.Rebind),
+				} },
+			{ typeof(Basis.Shims.BasisExternalLinkShim), new HashSet<string>{
+				nameof(Basis.Shims.BasisExternalLinkShim.Open),
+				nameof(Basis.Shims.BasisExternalLinkShim.IsValidUrl),
 				} },
 			{ typeof(UnityEngine.Rendering.AsyncGPUReadback), new HashSet<string>{ "Request" } },
 			{ typeof(BitConverter), new HashSet<string>{
@@ -361,11 +368,12 @@ namespace Cilbox
 				// the viewer's own files, which a prop has no business opening even with
 				// consent. CaptureScreenshot writes to the viewer's disk. Play, pause,
 				// seek, stop, track selection, status and events stay available.
-				if (name == nameof(global::BasisMediaPlayer.OpenResolved) ||
+				if ((name == nameof(global::BasisMediaPlayer.OpenResolved) ||
 					name == nameof(global::BasisMediaPlayer.SetSubtitleTracks) ||
 					name == nameof(global::BasisMediaPlayer.LoadLocalPath) ||
 					name == nameof(global::BasisMediaPlayer.LoadSource) ||
-					name == nameof(global::BasisMediaPlayer.CaptureScreenshot))
+					name == nameof(global::BasisMediaPlayer.CaptureScreenshot)) &&
+					!Beyond(MethodItem(declaringType, name), false))
 				{
 					mi = null;
 					return false;
@@ -375,7 +383,7 @@ namespace Cilbox
 			return base.CheckMethodAllowed(out mi, declaringType, name, parametersIn, genericArgumentsIn, fullSignature);
 		}
 
-		static readonly HashSet<string> mergedWhiteListType = MergeTypes(extraWhiteListType);
+		[NoAutoStaticsCleanup] static readonly HashSet<string> mergedWhiteListType = MergeTypes(extraWhiteListType);
 		public static HashSet<string> GetWhiteListTypes() => mergedWhiteListType;
 	}
 }

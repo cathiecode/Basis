@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using Basis.BTween;
@@ -8,7 +9,8 @@ using UnityEngine.UI;
 
 namespace Basis.BasisUI
 {
-    public class BasisMenuDialoguePanel : BasisMenuPanel
+    [AutoStaticsCleanup]
+    public partial class BasisMenuDialoguePanel : BasisMenuPanel
     {
 
         public static class DialogueStyles
@@ -154,11 +156,13 @@ namespace Basis.BasisUI
         {
             public readonly string Title;
             public readonly string Value;
+            public readonly bool PlainValue;
 
-            public DetailRow(string title, string value)
+            public DetailRow(string title, string value, bool plainValue = false)
             {
                 Title = title;
                 Value = value;
+                PlainValue = plainValue;
             }
         }
 
@@ -228,6 +232,11 @@ namespace Basis.BasisUI
             {
                 PanelElementDescriptor row = PanelElementDescriptor.CreateNew(PanelElementDescriptor.ElementStyles.Entry, content);
                 row.SetTitle(rows[Index].Title);
+                if (rows[Index].PlainValue && row.HasDescription)
+                {
+                    row.DescriptionLabel.richText = false;
+                    row.DescriptionLabel.parseCtrlCharacters = false;
+                }
                 row.SetDescription(rows[Index].Value);
                 ReleaseControlSlot(row);
             }

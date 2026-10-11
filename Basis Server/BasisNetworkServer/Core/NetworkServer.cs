@@ -113,6 +113,7 @@ public static class NetworkServer
 
         BasisNetworkUdpDropMonitor.Start();
         BasisServerMemoryReclaim.Start();
+        BasisNetworkContentShare.StartExpiry();
 
         BNL.Log("Server Worker Threads Booted");
         return true;
@@ -131,6 +132,7 @@ public static class NetworkServer
         }
         BasisNetworkUdpDropMonitor.Stop();
         BasisServerMemoryReclaim.Stop();
+        BasisNetworkContentShare.StopExpiry();
         // StartServer builds a fresh AuthIdentity; without this the old one stays subscribed to
         // the static OnAuthReceived event — pinned forever, and handling every auth packet twice.
         // Left non-null so a straggling disconnect event can still resolve UUIDs while stopping.
@@ -140,19 +142,30 @@ public static class NetworkServer
         Listener = null;
         AuthenticatedPeers.Clear();
         _peerSnapshot = Array.Empty<NetPeer>();
+        BasisNetworkCore.BasisNetworkIDDatabase.Reset();
+        BasisNetworkResourceManagement.Reset();
+        BasisNetworkPreloadResourceManagement.Reset();
+        BasisNetworkContentShare.Reset();
+        BasisNetworkPIPCamera.Reset();
+        Basis.Network.Server.Generic.BasisNetworkImageCache.Reset();
+        Basis.Network.Server.Generic.BasisImageBandwidthGovernor.Reset();
+        BasisNetworkServer.BasisServerP2PBroker.Reset();
+    }
+
+    private static void ApplySendSocketCeiling(IBasisTransportScaling scaling)
+    {
+        if (scaling == null) return;
+        // 0 = auto, derived from the core count. See BasisCpuBudget.AutoMaxSendSockets.
+        BasisServerReductionSystemEvents.MaxSendSockets = scaling.MaxSendSockets > 0
+            ? scaling.MaxSendSockets
+            : Basis.Network.Core.BasisCpuBudget.AutoMaxSendSockets;
     }
 
     public static void InitializePulseSettings()
     {
         BasisServerReductionSystemEvents.SetMaxDegreeOfParallelism(Configuration.BSRMaxDegreeOfParallelism);
         BasisServerReductionSystemEvents.SetSendPhaseBudgetPercent(Configuration.BSRSendPhaseBudgetPercent);
-        int configuredMaxSockets = Basis.Network.Core.BasisTransportConfigStore
-            .Get<Basis.Network.Core.LNLTransportConfig>(
-                Basis.Network.Core.BasisNetworkStackRegistry.LiteNetLibId).MaxSendSockets;
-        // 0 = auto, derived from the core count. See BasisCpuBudget.AutoMaxSendSockets.
-        BasisServerReductionSystemEvents.MaxSendSockets = configuredMaxSockets > 0
-            ? configuredMaxSockets
-            : Basis.Network.Core.BasisCpuBudget.AutoMaxSendSockets;
+        ApplySendSocketCeiling(Server?.FindCapability<IBasisTransportScaling>());
         BasisServerReductionSystemEvents.BSRBaseMultiplier = Configuration.BSRBaseMultiplier;
         BasisServerReductionSystemEvents.BSRSMillisecondDefaultInterval = Configuration.BSRSMillisecondDefaultInterval;
         BasisServerReductionSystemEvents.BSRSIncreaseRate = Configuration.BSRSIncreaseRate;
@@ -272,9 +285,6 @@ public static class NetworkServer
             BasisPlayerModeration.LoadBannedPlayers,
             BasisPlayerMuteManager.LoadMutedPlayers,
             () => BasisNetworkChat.LoadWordFilter(Configuration));
-        BasisNetworkStackRegistry.RegisterIntroducerFactory(
-            BasisNetworkStackRegistry.LiteNetLibId,
-            _ => new BasisNetworkServer.LNLPeerIntroducer());
         BasisNetworkServer.BasisServerP2PBroker.Initialize();
     }
 
@@ -313,26 +323,44 @@ public static class NetworkServer
             ipv6 = IPAddress.IPv6Any;
         }
 
-        // Read straight from the config rather than from the mirror in the reduction system, so
-        // this does not depend on InitializePulseSettings having run first. 0 is auto, which always
-        // derives more than one, so only an explicit 1 means "never add a socket".
-        if (Server is LNLNetManager lnlServer && lnlServer.manager != null)
+        // 0 is auto, which always derives more than one, so only an explicit 1 means "never add a socket".
+        IBasisTransportScaling scaling = Server.FindCapability<IBasisTransportScaling>();
+        if (scaling != null)
         {
-            lnlServer.manager.AllowSendSocketGrowth = Basis.Network.Core.BasisTransportConfigStore
-                .Get<Basis.Network.Core.LNLTransportConfig>(
-                    Basis.Network.Core.BasisNetworkStackRegistry.LiteNetLibId).MaxSendSockets != 1;
+            scaling.AllowSendSocketGrowth = scaling.MaxSendSockets != 1;
+            ApplySendSocketCeiling(scaling);
         }
 
         Server.Start(ipv4, ipv6, configuration.SetPort);
-        if (Server is LNLNetManager started && started.manager != null && !started.manager.IsRunning)
+        bool allRunning = true;
+        foreach (NetManager transport in Server.Transports())
         {
-            BNL.LogError($"Not listening: UDP port {configuration.SetPort} could not be bound. Another process may already be using it.");
+            if (transport.IsRunning)
+            {
+                BNL.Log($"Listening on {transport.ListenDescription ?? transport.StackId}");
+                continue;
+            }
+            allRunning = false;
+            BNL.LogError($"Not listening: the '{transport.StackId}' transport could not start on port {configuration.SetPort}. Another process may already be using it; see the errors above.");
+        }
+        if (!allRunning)
+        {
+            try { Server.Stop(); } catch (Exception ex) { BNL.LogWarning($"Stopping transports after a failed start threw: {ex.Message}"); }
             return false;
         }
-        BNL.Log($"Listening on UDP port {configuration.SetPort}");
         BNL.Log($"  IPv4 bind: {ipv4}");
         BNL.Log($"  IPv6 bind: [{ipv6}]");
         return true;
+    }
+
+    public static IReadOnlyList<NetPeer> PeersOnTransport(string stackId)
+    {
+        List<NetPeer> peers = new List<NetPeer>();
+        foreach (NetPeer peer in PeerSnapshot)
+        {
+            if (string.Equals(peer.StackId, stackId, StringComparison.OrdinalIgnoreCase)) peers.Add(peer);
+        }
+        return peers;
     }
     #endregion
     public static void BroadcastMessageToClients(NetDataWriter writer, byte channel, NetPeer sender, ReadOnlySpan<NetPeer> clients, DeliveryMethod deliveryMethod = DeliveryMethod.Sequenced, int maxMessages = 70)

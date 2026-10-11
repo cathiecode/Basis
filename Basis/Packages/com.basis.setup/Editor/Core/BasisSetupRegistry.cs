@@ -1,9 +1,11 @@
+using Unity.Scripting.LifecycleManagement;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Basis.Setup
 {
+    [NoAutoStaticsCleanup]
     public static class BasisSetupRegistry
     {
         private static List<IBasisSetupModule> _modules;
@@ -24,7 +26,7 @@ namespace Basis.Setup
         public static void Rebuild()
         {
             var found = new List<IBasisSetupModule>();
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var assembly in UnityEngine.Assemblies.CurrentAssemblies.GetLoadedAssemblies())
             {
                 Type[] types;
                 try
