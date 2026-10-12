@@ -451,7 +451,7 @@ namespace com.superneko.basis.desktopcast
 
             public uint dwStyle;
             public uint dwExStyle;
-            public ulong processId;
+            public uint processId;
 
             public override readonly string ToString()
             {
@@ -498,19 +498,30 @@ namespace com.superneko.basis.desktopcast
         static extern bool IsWindowVisible(IntPtr hWnd);
 
         [DllImport("user32.dll")]
-        static extern ulong GetWindowThreadProcessId(IntPtr hwnd, ref ulong pid);
+        static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
         static extern int GetWindowTextW(IntPtr hWnd, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder lpString, int nMaxCount);
 
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)]
         [return: MarshalAs(UnmanagedType.Bool)]
         delegate bool EnumWindowsDelegate(IntPtr hWnd, IntPtr lParam);
 
-        public static WindowRef[] EnumerateWindowToCapture()
-        {
-            List<WindowRef> windowRefs = new();
+        // Keep the delegate alive and use lParam for per-enumeration state.
+        // A capturing lambda is an instance method and cannot be marshaled by IL2CPP.
+        static readonly EnumWindowsDelegate enumWindowsCallback = EnumerateWindowCallback;
 
-            EnumWindowsDelegate callback = (hWnd, lParam) =>
+        sealed class WindowEnumerationState
+        {
+            public readonly List<WindowRef> Windows = new();
+            public Exception Error;
+        }
+
+        [AOT.MonoPInvokeCallback(typeof(EnumWindowsDelegate))]
+        static bool EnumerateWindowCallback(IntPtr hWnd, IntPtr lParam)
+        {
+            var state = (WindowEnumerationState)GCHandle.FromIntPtr(lParam).Target;
+            try
             {
                 var info = new WINDOWINFO
                 {
@@ -535,26 +546,45 @@ namespace com.superneko.basis.desktopcast
 
                 if (isVisible && (!isChildWindowLike || isForcedInTaskBar))
                 {
-                    ulong pid = 0;
-                    var threadId = GetWindowThreadProcessId(hWnd, ref pid);
+                    var threadId = GetWindowThreadProcessId(hWnd, out var pid);
 
                     if (threadId != 0)
                     {
-                        windowRefs.Add(new WindowRef { Handle = hWnd, Title = GetWindowTitle(hWnd), dwStyle = info.dwStyle, dwExStyle = info.dwExStyle, processId = pid });
+                        state.Windows.Add(new WindowRef { Handle = hWnd, Title = GetWindowTitle(hWnd), dwStyle = info.dwStyle, dwExStyle = info.dwExStyle, processId = pid });
                     }
                 }
 
                 return true;
-            };
-
-            var result = EnumWindows(callback, IntPtr.Zero);
-
-            if (result == 0)
-            {
-                throw new Exception("Failed to enumerate windows");
             }
+            catch (Exception error)
+            {
+                // Managed exceptions must not unwind through the native EnumWindows call.
+                state.Error = error;
+                return false;
+            }
+        }
 
-            return windowRefs.ToArray();
+        public static WindowRef[] EnumerateWindowToCapture()
+        {
+            var state = new WindowEnumerationState();
+            var stateHandle = GCHandle.Alloc(state);
+            try
+            {
+                var result = EnumWindows(enumWindowsCallback, GCHandle.ToIntPtr(stateHandle));
+                if (state.Error != null)
+                {
+                    throw new Exception("Failed to enumerate windows", state.Error);
+                }
+                if (result == 0)
+                {
+                    throw new Exception("Failed to enumerate windows");
+                }
+                return state.Windows.ToArray();
+            }
+            finally
+            {
+                stateHandle.Free();
+            }
         }
 
         static string GetWindowTitle(IntPtr hWnd)
